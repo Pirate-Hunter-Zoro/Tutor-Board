@@ -19,7 +19,8 @@ The assistant runs these. The student never does.
     board archive                      file the current lesson away
     board export [--build]             turn the lesson into a .tex (and compile it)
     board net                          every URL the board answers on
-    board vpn up|status|serve|down     the Tailscale link, for devices off this network
+    board vpn up [--hostname N]        the Tailscale link (name defaults to 'board')
+    board vpn status|serve|down, for devices off this network
     board init [name] [--code|--math]  write tutorboard.json for this repository
     board doctor                       check the machine has what this needs
     board eyes [--answer]              can the assistant driving this actually see?
@@ -886,7 +887,11 @@ def cmd_vpn(live, args):
         # Always "board", never the compute node's own name. The state file is
         # shared, so this is one machine that moves -- exactly like a laptop
         # changing networks -- and its address never changes.
-        code, out = ts("up", "--hostname=board", "--accept-dns=false", timeout=20)
+        for n, a in enumerate(args):
+            if a == "--hostname" and n + 1 < len(args):
+                boardlib.set_tailnet_hostname(args[n + 1])
+        name = boardlib.tailnet_hostname()
+        code, out = ts("up", "--hostname=" + name, "--accept-dns=false", timeout=20)
         _, status = ts("status")
         if "Log in at:" in status:
             url = status.split("Log in at:", 1)[1].strip().split()[0]
@@ -1118,7 +1123,8 @@ def cmd_doctor(live, args):
     print("port:     %d (default for this repo)" % default_port(live.root))
     owner = ts_owner()
     v4, tsname = ts_info()
-    print("tailnet:  %s" % (tsname or "not linked"))
+    print("tailnet:  %s  (this machine calls itself '%s')"
+          % (tsname or "not linked", boardlib.tailnet_hostname()))
     if owner:
         print("vpn host: %s%s" % (owner.get("node"),
                                   "" if owner.get("node") == this_node() else "  (not this one)"))

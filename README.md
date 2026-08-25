@@ -58,6 +58,61 @@ because it still covers the cases the slate cannot:
 For ordinary "here is my answer", use the slate. The `＋` in the title bar is the same upload path
 and is the practical one on iOS, where dragging a file onto a web page is awkward.
 
+## Setting up a second machine
+
+The natural arrangement is an always-on host for the daemon and whatever other machines you
+happen to work on. One script does the whole setup:
+
+```
+git clone https://github.com/<you>/Tutor-Board ~/Tutor-Board
+cd ~/Tutor-Board && bash bootstrap.sh --name mac-mini
+```
+
+It installs `tutor` and `board`, clones the course repositories, turns on the commit-attribution
+hook in each clone, names this machine on the tailnet, and prints what is left to do. No `sudo`,
+nothing system-wide.
+
+The list of repositories is **not** in this repository, which is public. It lives at
+`~/.config/tutor-board/courses.txt`, one entry per line:
+
+```
+https://github.com/you/Galois-Theory.git
+https://github.com/you/odd-remote-name.git   Nice-Directory-Name
+```
+
+The second field is only needed when the directory you want differs from the repository name. To
+produce the list on a machine that already has everything:
+
+```
+for d in ~/*/; do git -C "$d" remote get-url origin 2>/dev/null; done
+```
+
+### Two machines at once
+
+The tailnet identity is one machine that moves, which is what keeps the address stable across
+compute nodes on a shared home. Two hosts cannot both answer to `board`, so give the second its
+own name — `bootstrap.sh --name`, or `board vpn up --hostname mac-mini` later. Each gets its own
+`*.ts.net` address; install the board on the iPad from each, and you have two icons with no
+ambiguity about which machine you are talking to.
+
+### Surviving a reboot
+
+An always-on machine is always on until it isn't.
+
+```
+bash scripts/install-autostart.sh Galois-Theory opencode
+bash scripts/install-autostart.sh --uninstall
+```
+
+On macOS that writes a LaunchAgent with `RunAtLoad` and `KeepAlive`, so the daemon starts at login
+and is restarted if it dies; logs go to `~/Library/Logs/tutor-headless.log`. On Linux with
+systemd it writes a `--user` unit with `Restart=always` (add `loginctl enable-linger $USER` to
+survive logout). Both run as you, which is necessary — the daemon needs your tailnet, your git
+credentials, and your agent's own auth.
+
+Neither survives a machine that is off. Nothing does. `tutor where` and the dot on the board are
+how you find out, and the board keeps working from any other machine in the meantime.
+
 ## Starting a session
 
 ```

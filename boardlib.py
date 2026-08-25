@@ -103,6 +103,36 @@ SYSTEM_TS = [
 ]
 
 
+TS_NAME_FILE = os.path.join(TS_DIR, "hostname")
+
+
+def tailnet_hostname():
+    """What this machine calls itself on the tailnet.
+
+    Defaults to `board`, which is what makes the address survive moving between
+    compute nodes on a shared home. A second machine -- an always-on Mac beside
+    an occasional cluster node -- needs its own name, or the two fight over one
+    identity. Set once with `board vpn up --hostname <name>`.
+    """
+    env = os.environ.get("BOARD_TAILNET_NAME")
+    if env:
+        return env
+    try:
+        with open(TS_NAME_FILE, "r", encoding="utf-8") as fh:
+            name = fh.read().strip()
+            if name:
+                return name
+    except OSError:
+        pass
+    return "board"
+
+
+def set_tailnet_hostname(name):
+    os.makedirs(TS_DIR, exist_ok=True)
+    with open(TS_NAME_FILE, "w", encoding="utf-8") as fh:
+        fh.write(name.strip() + "\n")
+
+
 def tailscale_cli():
     """(argv_prefix, kind) for talking to whichever tailscale this machine has.
 
