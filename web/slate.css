@@ -33,7 +33,7 @@ body {
   display: flex; flex-direction: column;
   background: var(--chrome);
   color: var(--on-chrome);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--ui);
   overscroll-behavior: none;
   -webkit-user-select: none; user-select: none;
   -webkit-touch-callout: none;

@@ -1,0 +1,61 @@
+/* ==========================================================================
+   typeface.css -- the reading face, shared by every page.
+
+   Default is OpenDyslexic: heavier at the bottom of each letter, with shapes
+   pulled apart so b/d/p/q stop trading places. It is not to everyone's taste,
+   and Atkinson Hyperlegible is the calmer alternative -- designed by the Braille
+   Institute for low vision, with the same goal of making similar letters
+   unmistakable. The third option is an ordinary book serif.
+
+   MATHEMATICS IS NOT AFFECTED, deliberately. KaTeX sets font-family on its own
+   elements and must keep doing so: its glyphs, spacing and metrics are all one
+   system, and substituting a text face into it does not produce a dyslexia-
+   friendly formula, it produces a broken one. Code stays monospace for the same
+   reason -- alignment is the point.
+   ========================================================================== */
+
+@font-face {
+  font-family: "OpenDyslexic";
+  src: url("/static/fonts/opendyslexic-latin-400-normal.woff2") format("woff2");
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "OpenDyslexic";
+  src: url("/static/fonts/opendyslexic-latin-700-normal.woff2") format("woff2");
+  font-weight: 700; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Atkinson Hyperlegible";
+  src: url("/static/fonts/atkinson-hyperlegible-latin-400-normal.woff2") format("woff2");
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Atkinson Hyperlegible";
+  src: url("/static/fonts/atkinson-hyperlegible-latin-700-normal.woff2") format("woff2");
+  font-weight: 700; font-style: normal; font-display: swap;
+}
+
+:root {
+  --prose: "OpenDyslexic", "Atkinson Hyperlegible", Verdana, sans-serif;
+  --ui:    "OpenDyslexic", "Atkinson Hyperlegible", ui-sans-serif, system-ui, sans-serif;
+  --mono:  ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* OpenDyslexic's weighted baseline needs more room between lines than a book
+     face does, or the rows start to crowd. */
+  --prose-leading: 1.75;
+  --prose-tracking: .01em;
+}
+
+body[data-face="hyperlegible"] {
+  --prose: "Atkinson Hyperlegible", Verdana, sans-serif;
+  --ui:    "Atkinson Hyperlegible", ui-sans-serif, system-ui, sans-serif;
+  --prose-leading: 1.68;
+  --prose-tracking: 0;
+}
+
+body[data-face="serif"] {
+  --prose: "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --ui:    ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --prose-leading: 1.62;
+  --prose-tracking: 0;
+}

@@ -10,7 +10,7 @@
    network -- a cached lesson is a stale lesson, which is worse than none.
    ========================================================================== */
 
-var VERSION = "board-shell-v9";
+var VERSION = "board-shell-v10";
 
 var SHELL = [
   "/",
@@ -18,6 +18,8 @@ var SHELL = [
   "/slate",
   "/static/home.css",
   "/static/home.js",
+  "/static/typeface.css",
+  "/static/typeface.js",
   "/static/board.css",
   "/static/board.js",
   "/static/macros.js",
@@ -34,7 +36,7 @@ var SHELL = [
 
 /* KaTeX pulls its fonts lazily; they are cached on first use rather than
    listed here, because which faces a lesson needs depends on the mathematics. */
-var RUNTIME = /\/static\/katex\/fonts\//;
+var RUNTIME = /\/static\/(katex\/fonts|fonts)\//;
 
 /* Never intercepted. Live data, or a stream that must not be buffered. */
 var LIVE = /^\/(events|board\.json|courses\.json|switch|say|upload|slate\/(save|state)|figure\/|uploads\/|slate\/page-)/;

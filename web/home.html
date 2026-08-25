@@ -13,8 +13,11 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="icon" href="/icon-192.png">
+<link rel="stylesheet" href="/static/typeface.css">
 <link rel="stylesheet" href="/static/home.css">
+<script src="/static/typeface.js" defer></script>
 </head>
+<!-- face is applied before anything paints -->
 <body>
 
 <header id="bar">
@@ -23,6 +26,7 @@
     <span class="wordmark">Board</span>
   </div>
   <div class="bar-right">
+    <button id="btn-face" title="typeface">Aa</button>
     <button id="btn-theme" title="light / dark / auto">◐</button>
     <button id="btn-reload" title="reload the app">↻</button>
   </div>

@@ -13,9 +13,12 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="icon" href="/icon-192.png">
+<link rel="stylesheet" href="/static/typeface.css">
 <link rel="stylesheet" href="/static/katex/katex.min.css">
 <link rel="stylesheet" href="/static/board.css">
+<script src="/static/typeface.js" defer></script>
 </head>
+<!-- face is applied before anything paints -->
 <body data-mode="auto">
 
 <header id="bar">
@@ -32,6 +35,7 @@
     <label id="btn-clip" for="file" title="attach a photo or a PDF">＋</label>
     <button id="btn-smaller" title="smaller type">A&minus;</button>
     <button id="btn-bigger" title="larger type">A+</button>
+    <button id="btn-face" title="typeface">Aa</button>
     <button id="btn-theme" title="light / dark / auto">◐</button>
     <button id="btn-reload" title="reload the app">↻</button>
     <button id="btn-scratch" title="scratch work">▤</button>

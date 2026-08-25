@@ -34,6 +34,12 @@ sys.path.insert(0, HERE)
 import boardlib
 WEB = os.path.join(HERE, "web")
 
+# Python's table predates these; without them fonts go out as octet-stream and
+# a strict browser can refuse to load them.
+mimetypes.add_type("font/woff2", ".woff2")
+mimetypes.add_type("font/woff", ".woff")
+mimetypes.add_type("application/manifest+json", ".webmanifest")
+
 POLL_SECONDS = 0.25
 CARD_RE = re.compile(r"^(\d{4})[-_.](.*)\.(md|markdown|tex)$")
 
@@ -751,7 +757,8 @@ class Handler(BaseHTTPRequestHandler):
             target = os.path.normpath(os.path.join(WEB, rel))
             if not target.startswith(WEB):
                 return self.send_bytes(b"nope", "text/plain", status=403)
-            return self.send_file(target, cache=rel.startswith("katex/"))
+            return self.send_file(
+                target, cache=rel.startswith("katex/") or rel.startswith("fonts/"))
         if path.startswith("/figure/"):
             digest = safe_filename(path[len("/figure/"):]).replace(".svg", "")
             return self.send_file(os.path.join(repo.tikz, digest + ".svg"), cache=True)

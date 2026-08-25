@@ -39,8 +39,9 @@ html, body {
   margin: 0; padding: 0;
   background: var(--paper);
   color: var(--ink);
-  font-family: "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Times New Roman", serif;
-  line-height: 1.6;
+  font-family: var(--prose);
+  line-height: var(--prose-leading);
+  letter-spacing: var(--prose-tracking);
   -webkit-text-size-adjust: 100%;
 }
 
@@ -50,7 +51,7 @@ html, body {
   padding: calc(.5rem + env(safe-area-inset-top)) max(.75rem, env(safe-area-inset-right))
            .5rem max(.75rem, env(safe-area-inset-left));
   border-bottom: 1px solid var(--rule);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--ui);
   font-size: .82rem;
 }
 .bar-left { display: flex; align-items: center; gap: .55rem; }
@@ -75,7 +76,7 @@ main {
 }
 
 .eyebrow {
-  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--ui);
   font-size: .66rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
   color: var(--ink-3); margin: 0 0 .35rem;
 }
@@ -95,7 +96,7 @@ main {
 }
 .waiting-tag {
   display: block;
-  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--ui);
   font-size: .62rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
   color: var(--ask); margin-bottom: .15rem;
 }
@@ -119,14 +120,14 @@ main {
 body[data-mode="dark"] .action.primary,
 body[data-mode="auto"].sys-dark .action.primary { color: #16171a; }
 .action-name {
-  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--ui);
   font-weight: 620; font-size: 1rem;
 }
 .action-sub { font-size: .8rem; opacity: .72; margin-top: .2rem; }
 
 /* ---------- lists ---------- */
 h2 {
-  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--ui);
   font-size: .78rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
   color: var(--ink-3);
   margin: 2.6rem 0 .2rem;
@@ -145,12 +146,12 @@ h2 {
 .courses button:hover, .courses a:hover { background: var(--paper-2); }
 .courses .name { font-weight: 600; }
 .courses .meta { margin-left: auto; font-size: .76rem; color: var(--ink-3); white-space: nowrap;
-                 font-family: ui-sans-serif, system-ui, sans-serif; }
+                 font-family: var(--ui); }
 .courses .live { color: #35a35f; }
 
 .where {
   margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule);
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-family: var(--mono);
   font-size: .7rem; color: var(--ink-3); word-break: break-all;
 }
 
@@ -160,7 +161,7 @@ h2 {
   display: grid; place-items: center;
   background: color-mix(in srgb, var(--paper) 86%, transparent);
   backdrop-filter: blur(3px);
-  font-family: ui-sans-serif, system-ui, sans-serif; font-size: .9rem; color: var(--ink-2);
+  font-family: var(--ui); font-size: .9rem; color: var(--ink-2);
 }
 .busy span::after {
   content: "moving the board…";
@@ -169,7 +170,7 @@ h2 {
 /* last push, so the state of the repository is visible without a terminal */
 .pushline {
   margin: 1rem 0 0; font-size: .78rem;
-  font-family: ui-sans-serif, system-ui, sans-serif; color: var(--ink-3);
+  font-family: var(--ui); color: var(--ink-3);
 }
 .pushline.ok  { color: #2f7d4f; }
 .pushline.bad { color: var(--accent); overflow-wrap: anywhere; }

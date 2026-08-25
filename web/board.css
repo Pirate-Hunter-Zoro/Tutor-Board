@@ -52,8 +52,9 @@ html, body {
   background: var(--paper);
   color: var(--ink);
   font-size: var(--fs);
-  font-family: "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Times New Roman", serif;
-  line-height: 1.62;
+  font-family: var(--prose);
+  line-height: var(--prose-leading);
+  letter-spacing: var(--prose-tracking);
   -webkit-text-size-adjust: 100%;
 }
 
@@ -69,7 +70,7 @@ html, body {
   background: color-mix(in srgb, var(--paper) 88%, transparent);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--rule);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--ui);
   font-size: .82rem;
 }
 .bar-left { display: flex; align-items: center; gap: .5rem; min-width: 0; }
@@ -145,7 +146,7 @@ html, body {
 .card-head {
   display: flex; align-items: baseline; gap: .6rem;
   margin-bottom: .5rem;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--ui);
 }
 .kind {
   font-size: .66rem; font-weight: 700;
@@ -175,7 +176,7 @@ html, body {
 .body > :first-child { margin-top: 0; }
 .body > :last-child { margin-bottom: 0; }
 .body h1, .body h2, .body h3 {
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--ui);
   line-height: 1.3; margin: 1.6rem 0 .5rem;
 }
 .body h1 { font-size: 1.3rem; }
@@ -193,7 +194,7 @@ html, body {
 .body a { color: var(--note); }
 .body strong { font-weight: 700; }
 .body code {
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-family: var(--mono);
   font-size: .88em;
   background: var(--paper-2); border-radius: .25rem; padding: .08em .3em;
 }
@@ -217,7 +218,7 @@ html, body {
 /* ---------- mathematics ---------- */
 .katex { font-size: 1.06em; }
 .katex-display { margin: 1.05rem 0; overflow-x: auto; overflow-y: hidden; padding: .15rem 0; }
-.katex-error { color: var(--bad); font-family: ui-monospace, monospace; font-size: .85em; }
+.katex-error { color: var(--bad); font-family: var(--mono); font-size: .85em; }
 
 /* ---------- figures compiled from TikZ ---------- */
 .figure { margin: 1.3rem 0; text-align: center; }
@@ -225,7 +226,7 @@ html, body {
 body[data-mode="dark"] .figure img,
 body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180deg); }
 .figure.pending, .figure.error {
-  font-family: ui-monospace, monospace; font-size: .78rem;
+  font-family: var(--mono); font-size: .78rem;
   color: var(--ink-3); border: 1px dashed var(--rule); border-radius: .45rem;
   padding: 1.4rem; text-align: center;
 }
@@ -243,7 +244,7 @@ body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180de
 }
 .mine .when {
   display: block; font-size: .68rem; color: var(--ink-3);
-  font-family: ui-sans-serif, system-ui, sans-serif; margin-bottom: .15rem;
+  font-family: var(--ui); margin-bottom: .15rem;
 }
 .mine .files { margin-top: .4rem; display: flex; gap: .4rem; flex-wrap: wrap; }
 .mine .files img { max-height: 8rem; border-radius: .35rem; border: 1px solid var(--rule); }
@@ -258,7 +259,7 @@ body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180de
   position: sticky; top: 0; z-index: 39;
   display: flex; align-items: center; gap: .8rem;
   padding: .7rem max(1rem, env(safe-area-inset-left)) .7rem max(1rem, env(safe-area-inset-right));
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--ui);
   font-size: .88rem;
   border-bottom: 1px solid var(--rule);
   animation: rise .25s ease-out both;
@@ -282,7 +283,7 @@ body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180de
 .pushed.bad .pushed-icon { color: var(--bad); }
 #pushed-text { min-width: 0; overflow-wrap: anywhere; }
 .pushed.bad #pushed-text {
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .76rem;
+  font-family: var(--mono); font-size: .76rem;
 }
 #pushed-close {
   margin-left: auto; flex: none; cursor: pointer;
@@ -300,7 +301,7 @@ body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180de
   padding: .7rem 1.2rem;
   border-radius: .8rem;
   background: var(--ask); color: #fff;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--ui);
   text-decoration: none;
   box-shadow: 0 4px 20px rgba(0,0,0,.22);
   transition: transform .12s ease;
@@ -318,7 +319,7 @@ body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180de
   background: color-mix(in srgb, var(--paper) 92%, transparent);
   backdrop-filter: blur(10px);
   border-top: 1px solid var(--rule);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--ui);
 }
 #composer-slate {
   flex: none; width: 2.4rem; height: 2.4rem; border-radius: .5rem;
@@ -359,7 +360,7 @@ body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180de
   background: var(--paper); border-left: 1px solid var(--rule);
   display: flex; flex-direction: column;
   box-shadow: -8px 0 26px rgba(0,0,0,.16);
-  font-family: ui-sans-serif, system-ui, sans-serif; font-size: .85rem;
+  font-family: var(--ui); font-size: .85rem;
 }
 .scratch-head, .scratch-foot {
   display: flex; align-items: center; justify-content: space-between;
@@ -381,7 +382,7 @@ body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180de
   display: grid; place-items: center;
   background: color-mix(in srgb, var(--paper) 82%, transparent);
   backdrop-filter: blur(3px);
-  font: 600 1rem ui-sans-serif, system-ui, sans-serif; color: var(--accent);
+  font: 600 1rem var(--ui); color: var(--accent);
 }
 .drop span {
   border: 2px dashed var(--accent); border-radius: 1rem; padding: 2.5rem 3rem;

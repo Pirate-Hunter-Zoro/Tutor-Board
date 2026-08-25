@@ -316,6 +316,29 @@ what was actually in it, so an invented answer is obvious.
 
 If it cannot read them, that repository belongs in `code` mode, where nothing needs to be seen.
 
+## The reading face
+
+The default is **OpenDyslexic** — heavier at the bottom of each letter, with the shapes pulled
+apart so `b`/`d` and `p`/`q` stop trading places. The **Aa** button cycles it:
+
+1. **OpenDyslexic** — the default
+2. **Atkinson Hyperlegible** — the Braille Institute's face, same goal of making similar letters
+   unmistakable, calmer to look at
+3. **Serif** — an ordinary book face
+
+The choice is remembered and follows you from the hub to the lesson to the slate. Both faces are
+vendored under `web/fonts/` with their OFL licences, so nothing is fetched from a CDN and the
+installed app caches them like everything else.
+
+**Mathematics is deliberately excluded**, and this is not an oversight. KaTeX's glyphs, metrics
+and spacing are one system; substituting a text face into it does not produce a dyslexia-friendly
+formula, it produces a broken one. Code is excluded for the same reason — alignment is the point.
+`test/typeface.js` fails if a selector ever gets broad enough to swallow either, which is a
+one-character mistake away at all times.
+
+Leading and tracking move with the face, because OpenDyslexic's weighted baseline needs more room
+between rows than a book serif does.
+
 ## Sessions, and finishing one
 
 A session is opened with a kind, and in a mathematics course the kind matters:
@@ -842,6 +865,7 @@ node test/macros.js      every KaTeX macro, plus real formulas from both courses
 node test/hidden.js      that `hidden` elements are actually hidden
 node test/pages.js       every page's script runs against its own markup
 node test/modes.js       that math mode has no text box and code mode does
+node test/typeface.js    that the reading face reaches prose and never the maths
 python3 tools/sync-macros.py --check   that TeX and KaTeX know the same commands
 ./install.sh             re-runs the environment check
 board doctor
