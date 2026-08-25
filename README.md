@@ -58,6 +58,59 @@ because it still covers the cases the slate cannot:
 For ordinary "here is my answer", use the slate. The `＋` in the title bar is the same upload path
 and is the practical one on iOS, where dragging a file onto a web page is awkward.
 
+## Starting a session
+
+```
+tutor
+```
+
+That is the whole entry point. It lists the courses it finds, you pick one, and it brings that
+course's board up, opens a session, and launches your assistant already pointed at the repository's
+contract — with the board running before the assistant exists.
+
+```
+tutor galois                 match a course by name
+tutor galois --homework      and open a homework sitting
+tutor trd --agent opencode   with a particular assistant
+tutor galois --no-agent      just bring the board up
+tutor --list                 what courses exist
+tutor --agents               what assistants are configured
+```
+
+It replaces: remember which directory, `cd` there, start an agent, then tell the agent to start the
+board. That last step is ceremony nobody should have to perform, and forgetting it produces a
+session where the assistant talks into a terminal no one is reading.
+
+### Which assistant runs is configuration
+
+`~/.config/tutor-board/config.json`, written on first run:
+
+```json
+{
+  "courses_dir": "~",
+  "default_agent": "claude",
+  "agents": {
+    "claude":   { "cmd": ["claude"],   "prompt": "argv" },
+    "opencode": { "cmd": ["opencode"], "prompt": "argv" },
+    "aider":    { "cmd": ["aider"],    "prompt": "none" }
+  }
+}
+```
+
+`cmd` is whatever launches it. `prompt: "argv"` appends the opening brief as a final argument;
+`prompt: "none"` launches it bare and prints the one line to paste. Add an entry for anything that
+runs in a terminal — nothing in the launcher knows which assistant it is starting.
+
+The brief itself is written to `live/BRIEF.md` every time, so an assistant that takes no argument
+can still be told to read it. It names the course, the mode, the session kind, and the board's
+addresses, and says plainly that the board is already running.
+
+### Why there is no registry
+
+Courses are whatever directories are sitting beside the tool. Adding one means making a directory;
+there is no list to update and nothing that can go stale. `courses_dir` moves the search if your
+repositories live somewhere else.
+
 ## Courses, and the two modes
 
 Nothing is registered and nothing is configured centrally. **Any directory beside this one is a
@@ -405,8 +458,11 @@ the tailnet name. What it is checking for:
 
 ```
 git clone https://github.com/<you>/Tutor-Board ~/Tutor-Board
-cd ~/Tutor-Board && ./install.sh
+cd ~/Tutor-Board && bash install.sh
 ```
+
+That puts two commands on your path: `tutor`, which starts a session, and `board`, which the
+assistant drives.
 
 `install.sh` symlinks `bin/board` into `~/.local/bin`, then reports what is missing and prints the
 command that would fix it. It never uses `sudo`, never writes outside `~/.local`, and never

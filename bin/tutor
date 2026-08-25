@@ -1,0 +1,265 @@
+#!/usr/bin/env python3
+"""
+tutor -- start a tutoring session.
+
+    tutor                       pick a course from what is on disk
+    tutor galois                match a course by name
+    tutor galois --homework     and open a homework sitting
+    tutor trd --agent opencode  with a particular assistant
+    tutor galois --no-agent     just bring the board up
+
+One command, from anywhere. It finds the course, brings its board up, opens a
+session, and launches whichever assistant you use -- already pointed at the
+repository's own contract, with the board already running.
+
+The alternative it replaces is: remember which directory, cd there, start an
+agent, and then tell the agent to start the board. That last step in particular
+is ceremony the person should never have to perform, and forgetting it produces
+a session where the assistant is talking into a terminal nobody is reading.
+
+Which assistant runs is configuration, not code. Nothing here knows or cares
+which one it is; see `tutor --agents`.
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+
+TOOL = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, TOOL)
+
+BOARD = os.path.join(TOOL, "bin", "board")
+CONFIG_DIR = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config")),
+    "tutor-board")
+CONFIG = os.path.join(CONFIG_DIR, "config.json")
+
+DEFAULT_CONFIG = {
+    "courses_dir": os.path.dirname(TOOL),
+    "default_agent": "claude",
+    "agents": {
+        # `prompt: argv`  -- the brief is passed as a final argument
+        # `prompt: none`  -- the agent is launched bare and told where to read
+        "claude":   {"cmd": ["claude"],   "prompt": "argv"},
+        "opencode": {"cmd": ["opencode"], "prompt": "argv"},
+        "codex":    {"cmd": ["codex"],    "prompt": "argv"},
+        "aider":    {"cmd": ["aider"],    "prompt": "none"},
+        "cursor":   {"cmd": ["cursor-agent"], "prompt": "none"},
+    },
+}
+
+
+def load_config():
+    cfg = json.loads(json.dumps(DEFAULT_CONFIG))
+    try:
+        with open(CONFIG, "r", encoding="utf-8") as fh:
+            user = json.load(fh) or {}
+        for k, v in user.items():
+            if k == "agents" and isinstance(v, dict):
+                cfg["agents"].update(v)
+            else:
+                cfg[k] = v
+    except (OSError, ValueError):
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        if not os.path.exists(CONFIG):
+            with open(CONFIG, "w", encoding="utf-8") as fh:
+                json.dump(DEFAULT_CONFIG, fh, indent=2)
+                fh.write("\n")
+    return cfg
+
+
+# ---------------------------------------------------------------------------
+def read_course(root):
+    cfg = {"name": os.path.basename(root).replace("-", " "), "mode": None}
+    try:
+        with open(os.path.join(root, "tutorboard.json"), "r", encoding="utf-8") as fh:
+            cfg.update(json.load(fh) or {})
+    except (OSError, ValueError):
+        pass
+    return cfg
+
+
+def courses(cfg):
+    """Whatever is on disk. No registry, so nothing to keep in step."""
+    base = os.path.expanduser(cfg["courses_dir"])
+    out = []
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        return out
+    for name in names:
+        root = os.path.join(base, name)
+        if not os.path.isdir(root) or os.path.abspath(root) == TOOL:
+            continue
+        if not (os.path.isfile(os.path.join(root, "tutorboard.json")) or
+                os.path.isfile(os.path.join(root, "AI_INSTRUCTIONS.md")) or
+                os.path.isdir(os.path.join(root, "live"))):
+            continue
+        info = read_course(root)
+        info["root"] = root
+        info["dir"] = name
+        out.append(info)
+    return out
+
+
+def pick(cands, query):
+    """Match on the directory name or the declared course name, loosely."""
+    if not query:
+        return None
+    q = re.sub(r"[^a-z0-9]", "", query.lower())
+    exact = [c for c in cands if re.sub(r"[^a-z0-9]", "", c["dir"].lower()) == q]
+    if exact:
+        return exact[0]
+    hits = [c for c in cands
+            if q in re.sub(r"[^a-z0-9]", "", c["dir"].lower())
+            or q in re.sub(r"[^a-z0-9]", "", (c.get("name") or "").lower())]
+    if len(hits) == 1:
+        return hits[0]
+    if len(hits) > 1:
+        print("'%s' matches more than one course:" % query, file=sys.stderr)
+        for c in hits:
+            print("  %s" % c["dir"], file=sys.stderr)
+        sys.exit(1)
+    print("no course matching '%s'. Try: tutor --list" % query, file=sys.stderr)
+    sys.exit(1)
+
+
+def choose(cands):
+    print("Courses:\n")
+    for i, c in enumerate(cands, 1):
+        print("  %2d  %-26s %s" % (i, c.get("name") or c["dir"], c.get("mode") or ""))
+    print()
+    try:
+        raw = input("which? ").strip()
+    except (EOFError, KeyboardInterrupt):
+        sys.exit(0)
+    if raw.isdigit() and 1 <= int(raw) <= len(cands):
+        return cands[int(raw) - 1]
+    return pick(cands, raw)
+
+
+def board(root, *args):
+    p = subprocess.run([sys.executable, BOARD] + list(args), cwd=root,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    return p.returncode, p.stdout.decode("utf-8", "replace")
+
+
+BRIEF = """# Session brief
+
+You are tutoring in this repository. Read `AI_INSTRUCTIONS.md` in full before
+anything else; it is the contract and it overrides your own defaults.
+
+- Course: **%(name)s**
+- Mode: **%(mode)s**  (math = the user answers by writing on the slate; code = there is a text box)
+- Session: **%(session)s**
+
+**The board is already running.** Do not start another one. It is at:
+
+%(urls)s
+
+The user is reading that page, probably on an iPad, not this terminal. Write each
+teaching turn as a card in `live/cards/` and keep the terminal to a line or two.
+Check `board inbox` at the start of every turn. When the session ends, run
+`board finish` so the board can offer to save and push.
+"""
+
+
+def main(argv):
+    cfg = load_config()
+    args, flags = [], {"session": None, "agent": None, "no_agent": False}
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a in ("-h", "--help"):
+            print(__doc__.strip())
+            return 0
+        elif a in ("--list", "-l"):
+            for c in courses(cfg):
+                print("  %-26s %-6s %s" % (c.get("name") or c["dir"],
+                                           c.get("mode") or "", c["dir"]))
+            return 0
+        elif a == "--agents":
+            print("config: %s\n" % CONFIG)
+            for n, spec in sorted(cfg["agents"].items()):
+                mark = "*" if n == cfg["default_agent"] else " "
+                print(" %s %-10s %s" % (mark, n, " ".join(spec.get("cmd", []))))
+            print("\n* is the default. Edit the config to add your own.")
+            return 0
+        elif a == "--homework":
+            flags["session"] = "homework"
+        elif a == "--lecture":
+            flags["session"] = "lecture"
+        elif a == "--no-agent":
+            flags["no_agent"] = True
+        elif a == "--agent":
+            i += 1
+            flags["agent"] = argv[i]
+        else:
+            args.append(a)
+        i += 1
+
+    found = courses(cfg)
+    if not found:
+        print("no courses under %s" % cfg["courses_dir"], file=sys.stderr)
+        return 1
+    course = pick(found, args[0]) if args else choose(found)
+
+    # --- the board ---------------------------------------------------------
+    code, out = board(course["root"], "start")
+    if code != 0:
+        print(out.strip(), file=sys.stderr)
+        return 1
+    if flags["session"]:
+        title = " ".join(args[1:]) or "session"
+        board(course["root"], "open", course.get("name") or course["dir"], title,
+              "--" + flags["session"])
+    _, net = board(course["root"], "net")
+    urls = "\n".join("  " + l.strip() for l in net.splitlines()
+                     if l.strip().startswith("http"))
+
+    print("\n%s — %s" % (course.get("name") or course["dir"], course.get("mode") or "?"))
+    print(net.rstrip())
+
+    live = os.path.join(course["root"], "live")
+    os.makedirs(live, exist_ok=True)
+    brief = BRIEF % {
+        "name": course.get("name") or course["dir"],
+        "mode": course.get("mode") or "unknown",
+        "session": flags["session"] or "lecture",
+        "urls": urls or "  (run: board net)",
+    }
+    with open(os.path.join(live, "BRIEF.md"), "w", encoding="utf-8") as fh:
+        fh.write(brief)
+
+    if flags["no_agent"]:
+        return 0
+
+    # --- the assistant -----------------------------------------------------
+    name = flags["agent"] or cfg["default_agent"]
+    spec = cfg["agents"].get(name)
+    if not spec:
+        print("\nno agent called '%s'. Try: tutor --agents" % name, file=sys.stderr)
+        return 1
+
+    cmd = list(spec.get("cmd", []))
+    opener = ("Read AI_INSTRUCTIONS.md and live/BRIEF.md, then begin. "
+              "The board is already running; do not start another.")
+    if spec.get("prompt") == "argv":
+        cmd.append(opener)
+    else:
+        print("\n  then tell it:  %s" % opener)
+
+    print("\nstarting %s in %s\n" % (name, course["dir"]))
+    try:
+        os.chdir(course["root"])
+        os.execvp(cmd[0], cmd)          # hand the terminal over entirely
+    except OSError as exc:
+        print("could not start %s: %s" % (name, exc), file=sys.stderr)
+        print("check `tutor --agents`, or edit %s" % CONFIG, file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

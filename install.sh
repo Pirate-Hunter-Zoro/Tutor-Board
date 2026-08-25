@@ -37,10 +37,12 @@ fi
 # A clone can arrive without the executable bit -- some filesystems and some
 # archive paths drop it -- and then `board` is unrunnable for no visible reason.
 # Put it back rather than making anyone diagnose it.
-chmod +x "$HERE/bin/board" "$HERE/serve.py" "$HERE/install.sh" 2>/dev/null || true
+chmod +x "$HERE/bin/board" "$HERE/bin/tutor" "$HERE/serve.py" "$HERE/install.sh" \
+        "$HERE/scripts/save-and-push.sh" "$HERE/.githooks/commit-msg" 2>/dev/null || true
 mkdir -p "$BIN"
 ln -sf "$HERE/bin/board" "$BIN/board"
-good "board -> $BIN/board"
+ln -sf "$HERE/bin/tutor" "$BIN/tutor"
+good "tutor, board -> $BIN"
 case ":$PATH:" in
   *":$BIN:"*) : ;;
   *) warn "$BIN is not on your PATH — add it to your shell profile" ;;
@@ -107,11 +109,11 @@ esac
 
 say
 if [ "$ok" -eq 0 ]; then
-  say "Ready. From inside a course directory:"
+  say "Ready. From anywhere:"
 else
-  say "Usable, with the gaps above. From inside a course directory:"
+  say "Usable, with the gaps above. From anywhere:"
 fi
-say "  board start"
-say "  board open \"Course name\" \"What this session covers\""
-say "  board net"
+say "  tutor              # pick a course and begin"
+say "  tutor --list       # what it can see"
+say "  tutor --agents     # which assistants are configured"
 exit 0

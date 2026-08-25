@@ -63,6 +63,9 @@ Read `README.md` first.
   would quietly become the path of least resistance and undo the point of the thing. Code mode is
   the opposite and has one, because a sentence is the right unit for "look at what I just wrote".
   `test/modes.js` holds both halves of that.
+- **`tutor` is the entry point; `board` is the assistant's tool.** A person runs `tutor` and gets
+  a session. Never add a step that asks them to start the board themselves, or to tell an
+  assistant to — that ceremony is the thing the launcher exists to remove.
 - **Courses are discovered, never registered.** Any sibling directory with a `tutorboard.json`,
   an `AI_INSTRUCTIONS.md`, or a `live/` folder is a course. Do not add a list, a registry, or a
   config naming them — the filesystem is the source of truth and it cannot go stale.
