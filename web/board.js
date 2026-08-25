@@ -21,7 +21,7 @@ var els = {
   jump: document.getElementById("jump"),
   scratch: document.getElementById("scratch"),
   scratchList: document.getElementById("scratch-list"),
-  answer: document.getElementById("answer"),
+  writer: document.getElementById("writer"),
   session: document.getElementById("session"),
   agent: document.getElementById("agent"),
   finish: document.getElementById("finish"),
@@ -449,7 +449,11 @@ function render(data) {
     if (c.kind === "question" && c.mtime > lastQuestion) lastQuestion = c.mtime;
   });
   (data.messages || []).forEach(function (m) { if (m.t > lastSent) lastSent = m.t; });
-  els.answer.hidden = codeMode || !(lastQuestion && lastQuestion > lastSent);
+  var owed = !codeMode && !!(lastQuestion && lastQuestion > lastSent);
+  els.writer.hidden = !owed;
+  if (owed) mountWriter();
+  document.body.classList.toggle("writer-open",
+    owed && els.writer.dataset.open === "1");
   typeset(els.cards);
   renderScratch(data.uploads || [], data.slate || []);
 
@@ -581,6 +585,63 @@ function connect() {
     try { render(JSON.parse(ev.data)); } catch (e) { /* ignore a torn frame */ }
   };
 }
+
+/* ------------------------------------------------------- the writing drawer */
+/* Mounted lazily: there is no reason to build a canvas until an answer is
+   actually owed, and building it while hidden gives it a zero-sized wrap. */
+var writer = null;
+
+function mountWriter() {
+  if (writer || !window.Slate) return;
+  writer = window.Slate.create({
+    root: document.getElementById("slate"),
+    compact: true,
+    onSend: function () { setOpen(false); },
+  });
+}
+
+function setOpen(open) {
+  els.writer.dataset.open = open ? "1" : "0";
+  document.body.classList.toggle("writer-open", open);
+  try { localStorage.setItem("board.writer", open ? "1" : "0"); } catch (e) {}
+  if (open && writer) setTimeout(writer.relayout, 240);
+}
+
+(function () {
+  var grip = document.getElementById("writer-grip");
+  var toggle = document.getElementById("writer-toggle");
+  var drag = null;
+
+  toggle.addEventListener("click", function () {
+    if (drag && drag.moved) return;
+    setOpen(els.writer.dataset.open !== "1");
+  });
+
+  grip.addEventListener("pointerdown", function (ev) {
+    drag = { y: ev.clientY, h: els.writer.getBoundingClientRect().height, moved: false };
+    grip.setPointerCapture(ev.pointerId);
+    els.writer.classList.add("dragging");
+  });
+  grip.addEventListener("pointermove", function (ev) {
+    if (!drag) return;
+    var dy = drag.y - ev.clientY;
+    if (Math.abs(dy) > 4) drag.moved = true;
+    var h = Math.max(3.1 * 16, Math.min(window.innerHeight * 0.9, drag.h + dy));
+    els.writer.style.setProperty("--writer-h", h + "px");
+    if (h > 6 * 16) {
+      els.writer.dataset.open = "1";
+      document.body.classList.add("writer-open");
+    }
+  });
+  grip.addEventListener("pointerup", function () {
+    if (!drag) return;
+    els.writer.classList.remove("dragging");
+    var open = els.writer.getBoundingClientRect().height > 6 * 16;
+    setOpen(open);
+    drag = null;
+    if (writer) writer.relayout();
+  });
+})();
 
 /* ------------------------------------------------------------------ input */
 /* What comes back from the board depends on the mode. In a mathematics course

@@ -82,11 +82,17 @@
     <a href="/slate">slate</a>.</div>
 </aside>
 
-<!-- Maths: answering means writing, so the only way back is the slate. -->
-<a id="answer" class="answer" href="/slate" hidden>
-  <span class="answer-name">✎ Write your answer</span>
-  <span class="answer-sub">on the slate, then send it for review</span>
-</a>
+<!-- Maths: answering means writing, and the writing happens here, under the
+     question, so what you are answering stays on screen. -->
+<section id="writer" hidden data-open="0">
+  <div id="writer-grip" title="drag to resize">
+    <button id="writer-toggle" type="button">
+      <span class="grip-bar"></span>
+      <span id="writer-label">✎ Write your answer</span>
+    </button>
+  </div>
+  <div id="slate"></div>
+</section>
 
 <!-- Code: the useful things to say are sentences, not handwriting. -->
 <form id="composer" autocomplete="off" hidden>
@@ -102,6 +108,7 @@
 <script src="/static/katex/katex.min.js"></script>
 <script src="/static/katex/auto-render.min.js"></script>
 <script src="/static/macros.js"></script>
+<script src="/static/slate-core.js"></script>
 <script src="/static/board.js"></script>
 </body>
 </html>

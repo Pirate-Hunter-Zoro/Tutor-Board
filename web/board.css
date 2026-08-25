@@ -290,59 +290,46 @@ body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180de
   border: 0; background: none; font: inherit; color: var(--ink-3);
 }
 
-/* ---------- the way to answer ---------- */
-/* There is no text box. Answering means writing, which happens on the slate. */
-.answer {
-  position: fixed; left: 50%; transform: translateX(-50%);
-  bottom: calc(1rem + env(safe-area-inset-bottom));
-  z-index: 50;
-  display: flex; flex-direction: column; align-items: center;
-  width: min(24rem, calc(100vw - 2rem));
-  padding: .7rem 1.2rem;
-  border-radius: .8rem;
-  background: var(--ask); color: #fff;
-  font-family: var(--ui);
-  text-decoration: none;
-  box-shadow: 0 4px 20px rgba(0,0,0,.22);
-  transition: transform .12s ease;
-}
-.answer:active { transform: translateX(-50%) scale(.985); }
-.answer-name { font-weight: 650; font-size: 1rem; }
-.answer-sub { font-size: .76rem; opacity: .85; margin-top: .1rem; }
-
-/* ---------- code mode: a sentence is the right unit ---------- */
-#composer {
+/* ---------- the writing drawer ---------- */
+/* Docked under the lesson rather than on its own page, so the question being
+   answered stays on screen while it is answered. */
+#writer {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
-  display: flex; align-items: flex-end; gap: .5rem;
-  padding: .6rem max(.75rem, env(safe-area-inset-left))
-           calc(.6rem + env(safe-area-inset-bottom)) max(.75rem, env(safe-area-inset-right));
-  background: color-mix(in srgb, var(--paper) 92%, transparent);
-  backdrop-filter: blur(10px);
-  border-top: 1px solid var(--rule);
-  font-family: var(--ui);
+  display: flex; flex-direction: column;
+  height: 3.1rem;                       /* collapsed: just the handle */
+  background: #17181c;
+  border-top: 1px solid #33373f;
+  box-shadow: 0 -8px 28px rgba(0,0,0,.28);
+  transition: height .22s cubic-bezier(.2,.7,.3,1);
 }
-#composer-slate {
-  flex: none; width: 2.4rem; height: 2.4rem; border-radius: .5rem;
-  display: grid; place-items: center; text-decoration: none;
-  font-size: 1.05rem; color: var(--ink-2); border: 1px solid var(--rule);
+#writer[data-open="1"] { height: var(--writer-h, 58vh); }
+#writer.dragging { transition: none; }
+
+#writer-grip {
+  flex: none; height: 3.1rem;
+  display: flex; align-items: center; justify-content: center;
+  touch-action: none;
 }
-#composer-slate:hover { background: var(--paper-2); color: var(--ink); }
-#say {
-  flex: 1; resize: none; max-height: 9rem;
-  font: inherit; font-size: 1rem; line-height: 1.45;
-  padding: .6rem .7rem;
-  border: 1px solid var(--rule); border-radius: .5rem;
-  background: var(--paper); color: var(--ink);
+#writer-toggle {
+  display: flex; flex-direction: column; align-items: center; gap: .3rem;
+  width: 100%; height: 100%;
+  border: 0; background: none; cursor: grab;
+  font-family: var(--ui); font-size: .9rem; font-weight: 650;
+  color: #e8e5df;
 }
-#say:focus { outline: 2px solid color-mix(in srgb, var(--note) 45%, transparent); outline-offset: 1px; }
-#send {
-  flex: none; font: inherit; font-size: .9rem; font-weight: 600;
-  padding: .65rem 1rem; border-radius: .5rem;
-  border: 1px solid var(--rule); background: var(--paper-2); color: var(--ink);
-  cursor: pointer;
+#writer-toggle:active { cursor: grabbing; }
+.grip-bar {
+  width: 2.6rem; height: .25rem; border-radius: 999px;
+  background: #4a4f59;
 }
-#send:hover { background: var(--rule); }
-#send.sent { color: var(--good); }
+#writer[data-open="1"] #writer-label { display: none; }
+#writer[data-open="1"] #writer-grip { height: 1.4rem; }
+#writer[data-open="1"] #writer-toggle { justify-content: center; }
+
+#writer #slate { flex: 1 1 auto; min-height: 0; }
+
+/* The lesson needs room to scroll clear of the drawer. */
+body.writer-open #board { padding-bottom: calc(var(--writer-h, 58vh) + 2rem); }
 
 #btn-clip {
   cursor: pointer; user-select: none;
@@ -351,7 +338,7 @@ body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180de
 }
 #btn-clip:hover { background: var(--paper-2); color: var(--ink); }
 
-.jump { bottom: 5.6rem; }
+.jump { bottom: 4.2rem; }
 
 /* ---------- scratch drawer ---------- */
 #scratch {
@@ -395,7 +382,7 @@ body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180de
 
 /* ---------- print ---------- */
 @media print {
-  #bar, .answer, #composer, #scratch, .jump, .drop, .finish, .pushed { display: none !important; }
+  #bar, #writer, #composer, #scratch, .jump, .drop, .finish, .pushed { display: none !important; }
   body { background: #fff; color: #000; }
   #board { max-width: none; padding: 0; }
   .card { break-inside: avoid; animation: none; }

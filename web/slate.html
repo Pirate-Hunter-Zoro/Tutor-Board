@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Board">
-<meta name="theme-color" content="#1b1c20">
+<meta name="theme-color" content="#101114">
 <title>Slate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -19,80 +19,11 @@
 <!-- face is applied before anything paints -->
 <body>
 
-<header id="tools">
-  <a id="back" href="/board" title="back to the board">‹</a>
-
-  <div class="group" id="modes">
-    <button class="mode sel" data-tool="pen"    title="pen">✎</button>
-    <button class="mode"     data-tool="hl"     title="highlighter">▬</button>
-    <button class="mode"     data-tool="erase"  title="eraser">◧</button>
-    <button class="mode"     data-tool="lasso"  title="select — draw a loop around anything">✂</button>
-  </div>
-
-  <div class="group" id="nibs">
-    <button class="nib sel" data-w="1.6" title="fine">·</button>
-    <button class="nib"     data-w="2.8" title="medium">•</button>
-    <button class="nib"     data-w="5.0" title="broad">●</button>
-  </div>
-
-  <div class="group" id="inks">
-    <button class="ink sel" data-c="#16171a" style="--c:#16171a" title="graphite"></button>
-    <button class="ink"     data-c="#1a56b0" style="--c:#1a56b0" title="blue"></button>
-    <button class="ink"     data-c="#9a2020" style="--c:#9a2020" title="red"></button>
-    <button class="ink"     data-c="#1f5c34" style="--c:#1f5c34" title="green"></button>
-    <button class="ink"     data-c="#6b3fa0" style="--c:#6b3fa0" title="violet"></button>
-    <button class="ink"     data-c="#a86a12" style="--c:#a86a12" title="amber"></button>
-  </div>
-
-  <div class="group" id="edit">
-    <button id="undo" title="undo">↶</button>
-    <button id="redo" title="redo">↷</button>
-  </div>
-
-  <div class="group" id="view">
-    <button id="zoom-out" title="zoom out">−</button>
-    <span id="zoomlevel">100%</span>
-    <button id="zoom-in" title="zoom in">+</button>
-    <button id="zoom-fit" title="fit the page">⤢</button>
-  </div>
-
-  <div class="group" id="pager">
-    <button id="prev" title="previous page">‹</button>
-    <span id="pageno">1/1</span>
-    <button id="next" title="next page">›</button>
-    <button id="addpage" title="new page">+</button>
-    <button id="taller" title="make this page taller">↕</button>
-  </div>
-
-  <div class="group right">
-    <button id="rule" title="paper">grid</button>
-    <button id="live" title="let the tutor see each page as you pause writing">live</button>
-    <span id="saved" class="saved">saved</span>
-    <button id="send" class="primary" title="hand this page to the tutor">review</button>
-  </div>
-</header>
-
+<a id="back" href="/board" title="back to the board">‹ board</a>
 <div id="prompt" hidden><span class="kind"></span><span class="text"></span></div>
+<div id="slate"></div>
 
-<!-- Appears only while something is selected. -->
-<div id="selbar" hidden>
-  <button data-act="cut"       title="cut">✂ cut</button>
-  <button data-act="copy"      title="copy">copy</button>
-  <button data-act="paste"     title="paste">paste</button>
-  <button data-act="duplicate" title="duplicate">duplicate</button>
-  <span class="sep"></span>
-  <button data-act="colour"    title="recolour to the selected ink">recolour</button>
-  <button data-act="delete"    title="delete" class="danger">delete</button>
-  <span class="sep"></span>
-  <button data-act="done"      title="deselect">done</button>
-</div>
-
-<main id="sheetwrap">
-  <canvas id="sheet"></canvas>
-</main>
-
-<div id="toast" hidden></div>
-
+<script src="/static/slate-core.js"></script>
 <script src="/static/slate.js"></script>
 </body>
 </html>

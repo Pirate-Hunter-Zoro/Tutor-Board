@@ -22,11 +22,13 @@ const ids = new Set();
 
 function stub(tag) {
   const el = {
-    tagName: tag || 'div', style: {}, dataset: {},
+    tagName: tag || 'div', dataset: {},
+    style: { setProperty() {}, removeProperty() {} },
     classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
     hidden: false, disabled: false, value: '', textContent: '', innerHTML: '',
     children: [], files: [], scrollHeight: 20,
     addEventListener() {}, appendChild() {}, removeChild() {},
+    setPointerCapture() {}, releasePointerCapture() {}, remove() {}, type: '',
     querySelector: () => stub(), querySelectorAll: () => [],
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 900, height: 600 }),
     getContext: () => new Proxy({}, { get: () => () => {}, set: () => true }),
@@ -62,6 +64,9 @@ const sandbox = {
   scrollTo() {}, addEventListener() {}, print() {},
   location: { reload() {}, protocol: 'https:' },
   renderMathInElement: () => {},
+  requestAnimationFrame: (fn) => setTimeout(fn, 0),
+  ResizeObserver: function () { return { observe() {}, disconnect() {} }; },
+  devicePixelRatio: 2,
 };
 sandbox.window = sandbox;
 sandbox.globalThis = sandbox;
@@ -70,6 +75,7 @@ vm.createContext(sandbox);
 let src = fs.readFileSync(path.join(WEB, 'board.js'), 'utf8');
 src = src.replace('})();', 'window.__render = render;\n})();');
 vm.runInContext(fs.readFileSync(path.join(WEB, 'macros.js'), 'utf8'), sandbox);
+vm.runInContext(fs.readFileSync(path.join(WEB, 'slate-core.js'), 'utf8'), sandbox);
 vm.runInContext(src, sandbox, { filename: 'board.js' });
 
 const render = sandbox.window.__render;
@@ -84,7 +90,7 @@ function check(name, cond) {
 function paint(mode, cards, messages) {
   render({ state: { course: 'X', mode }, cards: cards || [], messages: messages || [],
            uploads: [], slate: [] });
-  return { composer: registry.composer.hidden, answer: registry.answer.hidden };
+  return { composer: registry.composer.hidden, answer: registry.writer.hidden };
 }
 
 const question = [{ id: '0001', kind: 'question', title: 'Which subfield?', body: 'q', mtime: now }];

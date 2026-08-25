@@ -1,155 +1,170 @@
 /* ==========================================================================
-   slate.css -- the iPad writing surface.
+   slate.css -- the writing surface, wherever it is mounted.
 
-   Paper is always light. The saved PNG is dark ink on white because that is
-   what reads best when the tutor opens it, so the screen shows the same thing
-   rather than a dark-mode variant that would not match the export.
+   The same rules serve the drawer docked under the lesson and the full-screen
+   page, because it is the same component. Paper is dark by default: chalk on
+   slate, which is easier on the eyes for a long sitting than a white page with
+   the brightness of a torch.
    ========================================================================== */
 
 :root {
-  --chrome:   #1b1c20;
-  --chrome-2: #26282e;
-  --chrome-3: #383b43;
+  --chrome:   #17181c;
+  --chrome-2: #212429;
+  --chrome-3: #33373f;
   --on-chrome:#e8e5df;
   --dim:      #9d988f;
-  --accent:   #7fb2ff;
-  --paper:    #fdfdfb;
-  --rule:     #dfe6ee;
+  --accent:   #7fd1ff;
 }
 
 * { box-sizing: border-box; }
-
-/* The `hidden` attribute has to actually hide things. A UA stylesheet's
-   [hidden]{display:none} loses to any author rule that sets a display, however
-   low its specificity -- author origin simply wins -- so every element toggled
-   by .hidden in the scripts needs this, or it is painted permanently. */
 [hidden] { display: none !important; }
 
-
+/* ---------- the standalone page ---------- */
 html { height: 100%; }
-body {
-  margin: 0; padding: 0;
-  height: 100%; height: 100dvh;  /* dvh keeps the sheet off the iPad's URL bar */
+body.slate-page,
+body:has(> #slate) {
+  margin: 0; height: 100%; height: 100dvh;
   display: flex; flex-direction: column;
-  background: var(--chrome);
-  color: var(--on-chrome);
+  background: var(--chrome); color: var(--on-chrome);
   font-family: var(--ui);
   overscroll-behavior: none;
   -webkit-user-select: none; user-select: none;
   -webkit-touch-callout: none;
-  -webkit-text-size-adjust: 100%;
 }
-
-/* ---------- toolbar ---------- */
-#tools {
-  flex: none;
-  display: flex; align-items: center; gap: .5rem; flex-wrap: nowrap;
-  overflow-x: auto; -webkit-overflow-scrolling: touch;
-  padding: calc(.45rem + env(safe-area-inset-top)) max(.6rem, env(safe-area-inset-right))
-           .45rem max(.6rem, env(safe-area-inset-left));
-  background: var(--chrome);
-  border-bottom: 1px solid var(--chrome-3);
-  font-size: .82rem;
+body > #back {
+  flex: none; align-self: flex-start;
+  padding: calc(.5rem + env(safe-area-inset-top)) .9rem .4rem;
+  color: var(--dim); text-decoration: none; font-size: .85rem;
 }
-#tools::-webkit-scrollbar { display: none; }
-
-.group { display: flex; align-items: center; gap: .2rem; flex: none; }
-.group.right { margin-left: auto; gap: .45rem; }
-
-#tools button, #back {
-  font: inherit; line-height: 1; color: var(--on-chrome);
-  background: var(--chrome-2); border: 1px solid var(--chrome-3);
-  border-radius: .45rem; padding: .5rem .6rem; cursor: pointer;
-  text-decoration: none; flex: none;
-  min-width: 2.2rem; min-height: 2.2rem;
-  display: inline-flex; align-items: center; justify-content: center;
-}
-#tools button:active { background: var(--chrome-3); }
-#tools button.sel, #tools button.on {
-  border-color: var(--accent); color: var(--accent);
-}
-#tools button.primary {
-  background: var(--accent); color: #10131a; border-color: var(--accent);
-  font-weight: 650; padding: .5rem .95rem;
-}
-#tools button:disabled { opacity: .35; }
-
-.mode, .nib { font-size: 1rem; }
-.ink { background: var(--c) !important; width: 2rem; }
-.ink.sel { box-shadow: 0 0 0 2px var(--accent); }
-
-#pageno { font-variant-numeric: tabular-nums; color: var(--dim); padding: 0 .2rem; flex: none; }
-.saved { color: var(--dim); font-size: .74rem; min-width: 3.6rem; text-align: right; flex: none; }
-.saved.busy { color: var(--accent); }
-
-/* ---------- the question being answered ---------- */
-#prompt {
+body > #prompt {
   flex: none;
   display: flex; align-items: baseline; gap: .5rem;
-  padding: .4rem .8rem;
-  background: var(--chrome-2); border-bottom: 1px solid var(--chrome-3);
+  padding: .35rem .9rem .5rem;
   font-size: .78rem; color: var(--dim);
 }
-#prompt .kind {
+body > #prompt .kind {
   font-size: .62rem; letter-spacing: .12em; text-transform: uppercase;
   color: var(--accent); font-weight: 700; flex: none;
 }
-#prompt .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body > #slate { flex: 1 1 auto; min-height: 0; }
+
+/* ---------- the component ---------- */
+.slate-root {
+  display: flex; flex-direction: column;
+  height: 100%; min-height: 0;
+  background: var(--chrome);
+  color: var(--on-chrome);
+  font-family: var(--ui);
+}
+
+.slate-bar {
+  flex: none;
+  display: flex; align-items: center; gap: .5rem;
+  padding: .4rem .5rem;
+  border-bottom: 1px solid var(--chrome-3);
+  font-size: .8rem;
+  min-width: 0;
+}
+
+/* Tools scroll when they do not fit. Actions never do — a Send button you have
+   to scroll sideways to find is a Send button that does not exist. */
+.slate-tools {
+  flex: 1 1 auto; min-width: 0;
+  display: flex; align-items: center; gap: .5rem;
+  overflow-x: auto; -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.slate-tools::-webkit-scrollbar { display: none; }
+
+.slate-actions {
+  flex: none;
+  display: flex; align-items: center; gap: .4rem;
+  padding-left: .5rem;
+  border-left: 1px solid var(--chrome-3);
+}
+
+.slate-group { display: flex; align-items: center; gap: .2rem; flex: none; }
+
+.slate-root button,
+.slate-root .s-ink,
+.s-full {
+  font: inherit; line-height: 1; color: var(--on-chrome);
+  background: var(--chrome-2); border: 1px solid var(--chrome-3);
+  border-radius: .45rem; padding: .5rem .6rem; cursor: pointer;
+  min-width: 2.3rem; min-height: 2.3rem;
+  display: inline-flex; align-items: center; justify-content: center;
+  text-decoration: none; flex: none;
+}
+.slate-root button:active { background: var(--chrome-3); }
+.slate-root button.sel, .slate-root button.on { border-color: var(--accent); color: var(--accent); }
+.slate-root button:disabled { opacity: .35; }
+.slate-root button.danger { color: #ff9c9c; border-color: #6a3333; }
+
+.s-tag {
+  font-variant-numeric: tabular-nums; color: var(--dim);
+  min-width: 3rem; text-align: center; flex: none; font-size: .75rem;
+}
+
+/* ---------- ink ---------- */
+.s-ink { background: var(--c) !important; width: 2.3rem; padding: 0; }
+.s-ink.sel { box-shadow: 0 0 0 2px var(--accent); }
+.s-custom { position: relative; overflow: hidden; }
+.s-custom input[type="color"] {
+  position: absolute; inset: -25%;
+  width: 150%; height: 150%;
+  border: 0; padding: 0; background: none; cursor: pointer;
+  opacity: 0;
+}
+.s-custom::after {
+  content: "◒"; color: #0006; font-size: 1rem; pointer-events: none;
+}
+
+/* ---------- send ---------- */
+.s-saved {
+  color: var(--dim); font-size: .72rem; white-space: nowrap;
+  min-width: 3rem; text-align: right;
+}
+.s-saved.busy { color: var(--accent); }
+.slate-root .s-send {
+  background: var(--accent); color: #10131a; border-color: var(--accent);
+  font-weight: 700; padding: .5rem 1rem; min-width: 4.2rem;
+}
+.slate-root .s-send:active { filter: brightness(.92); }
+
+/* ---------- selection bar ---------- */
+.slate-selbar {
+  flex: none;
+  display: flex; align-items: center; gap: .3rem;
+  overflow-x: auto; scrollbar-width: none;
+  padding: .4rem .6rem;
+  background: var(--chrome-2);
+  border-bottom: 1px solid var(--accent);
+  font-size: .78rem;
+}
+.slate-selbar::-webkit-scrollbar { display: none; }
 
 /* ---------- the sheet ---------- */
-#sheetwrap {
+.slate-wrap {
   position: relative;
-  flex: 1 1 auto;
-  min-height: 0;                 /* or the canvas refuses to shrink in flex */
+  flex: 1 1 auto; min-height: 0;
   overflow: hidden;
   padding-bottom: env(safe-area-inset-bottom);
 }
-/* The canvas now fills the wrapper and draws the page inside itself, so it can
-   be panned and zoomed without the element moving. */
-#sheet {
+.slate-sheet {
   touch-action: none;            /* the pen draws; it does not scroll the page */
-  display: block;
-  width: 100%; height: 100%;
+  display: block; width: 100%; height: 100%;
   cursor: crosshair;
 }
-body[data-tool="lasso"] #sheet { cursor: cell; }
-body[data-tool="erase"] #sheet { cursor: not-allowed; }
+.slate-root[data-tool="lasso"] .slate-sheet { cursor: cell; }
+.slate-root[data-tool="erase"] .slate-sheet { cursor: not-allowed; }
 
 /* ---------- toast ---------- */
-#toast {
-  position: fixed; left: 50%; transform: translateX(-50%);
-  bottom: calc(1.2rem + env(safe-area-inset-bottom));
+.slate-toast {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  bottom: calc(1rem + env(safe-area-inset-bottom));
   background: var(--chrome-2); border: 1px solid var(--chrome-3);
   color: var(--on-chrome); border-radius: 999px;
-  padding: .5rem 1rem; font-size: .82rem;
-  box-shadow: 0 4px 18px rgba(0,0,0,.4);
-  z-index: 90;
-}
-
-/* ---------- the selection bar ---------- */
-/* Only present while something is selected, so it never becomes furniture. */
-#selbar {
-  flex: none;
-  display: flex; align-items: center; gap: .3rem; flex-wrap: nowrap;
-  overflow-x: auto;
-  padding: .4rem .7rem;
-  background: var(--chrome-2);
-  border-bottom: 1px solid var(--accent);
-  font-size: .8rem;
-}
-#selbar::-webkit-scrollbar { display: none; }
-#selbar button {
-  font: inherit; flex: none;
-  color: var(--on-chrome); background: var(--chrome);
-  border: 1px solid var(--chrome-3); border-radius: .4rem;
-  padding: .45rem .7rem; cursor: pointer;
-  min-height: 2.1rem;
-}
-#selbar button:active { background: var(--chrome-3); }
-#selbar button.danger { color: #ff9c9c; border-color: #6a3333; }
-#selbar .sep { width: 1px; height: 1.4rem; background: var(--chrome-3); flex: none; margin: 0 .25rem; }
-
-#zoomlevel {
-  font-variant-numeric: tabular-nums; color: var(--dim);
-  min-width: 3.1rem; text-align: center; flex: none;
+  padding: .45rem 1rem; font-size: .8rem;
+  box-shadow: 0 4px 18px rgba(0,0,0,.5);
+  z-index: 5; pointer-events: none;
 }

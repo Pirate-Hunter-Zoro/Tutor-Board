@@ -17,8 +17,8 @@ const vm = require('vm');
 const WEB = path.join(__dirname, '..', 'web');
 const PAGES = [
   ['home.html', ['home.js']],
-  ['board.html', ['macros.js', 'board.js']],
-  ['slate.html', ['slate.js']],
+  ['board.html', ['macros.js', 'slate-core.js', 'board.js']],
+  ['slate.html', ['slate-core.js', 'slate.js']],
 ];
 
 let fails = 0;
@@ -46,6 +46,8 @@ function makeStub(tag) {
     querySelector: () => makeStub(),
     querySelectorAll: () => [],
     getContext: () => ctx2d(),
+    setPointerCapture() {}, releasePointerCapture() {},
+    remove() {}, insertBefore() {}, contains: () => false,
     toDataURL: () => 'data:image/png;base64,',
   };
   return el;
@@ -102,6 +104,7 @@ for (const [htmlName, scripts] of PAGES) {
     alert() {}, Image: function () { return makeStub('img'); },
     renderMathInElement: () => {},
     requestAnimationFrame: (fn) => setTimeout(fn, 0),
+  ResizeObserver: function () { return { observe() {}, disconnect() {} }; },
   };
   sandbox.window = sandbox;
   sandbox.self = sandbox;

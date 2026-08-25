@@ -478,15 +478,32 @@ after that is instant. Blank lines inside a fence are stripped, because a blank 
 
 ## The slate — writing by hand
 
-`/slate`, or the ✎ button in the board's title bar, is a writing surface for the Apple Pencil.
-Strokes are captured as pointer events with pressure, so the line thins and thickens the way ink
-does. Once a pen has been seen on the page, finger touches stop drawing, which is the whole of
-palm rejection.
+The writing surface is **docked under the lesson**, not on a separate page. A question raises a
+drawer at the bottom of the board; drag its handle to the height you want, and the card you are
+answering stays on screen while you answer it. `/slate` is the same component full-screen, for a
+derivation that wants the whole page.
+
+Strokes are captured as pointer events with pressure. Once a pen has been seen, finger touches
+stop drawing, which is the whole of palm rejection.
+
+**Paper is dark by default** — chalk on slate, unruled. The `paper` button cycles black, white and
+cream; `plain` cycles unruled, grid and lines. The ink palette follows the paper, so the default
+colour is always one you can see, and the last swatch is a colour picker for anything you like.
+
+Ink smoothness is deliberate work, not a default. Raw pointer samples are jittery and unevenly
+spaced, and drawing them directly is what produces a granular, faceted line. Instead each sample
+is blended into the last, a Catmull-Rom curve is run through the result, that curve is resampled
+to about a pixel of spacing, and the width varies smoothly along it. Committed strokes are cached
+to an offscreen canvas so only the live stroke is redrawn per frame — latency is most of what
+"smooth" actually means.
 
 Each page is saved twice: `live/slate/page-NN.json` holds the strokes as vectors, so the page
-survives a reload and reopens on any device; `live/slate/page-NN.png` is dark ink on white paper,
-which is the file the assistant actually opens and reads. Autosave runs about a second after the
-pen lifts. **Send** puts the page in the inbox and tells the assistant to look at it. The **live**
+survives a reload and reopens on any device; `live/slate/page-NN.png` is what the assistant opens
+and reads. The PNG is exactly what you see, paper colour included — inverting it would wreck a
+colour you chose on purpose. Autosave runs about a second after the
+pen lifts. **Send** — always visible, outside the scrolling tool strip, because a Send button you have to
+scroll sideways to find is a Send button that does not exist — puts the page in the inbox and
+tells the assistant to look at it. The **live**
 toggle does that automatically whenever writing pauses, at most once every fifteen seconds — that
 is the mode for being watched while you work.
 
