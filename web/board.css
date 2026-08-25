@@ -1,0 +1,386 @@
+/* ==========================================================================
+   board.css -- the live tutoring board.
+
+   Reading first. Wide margins, a real serif for prose, KaTeX for mathematics,
+   and enough type-size headroom that the same page is legible on a laptop at
+   arm's length and on an iPad propped across a desk.
+   ========================================================================== */
+
+:root {
+  --fs: 18px;
+
+  --paper:      #fbfaf7;
+  --paper-2:    #f3f1ec;
+  --ink:        #1c1b19;
+  --ink-2:      #55524c;
+  --ink-3:      #8d887f;
+  --rule:       #ddd9d0;
+  --accent:     #7a1f1f;   /* lesson    */
+  --ask:        #8a5a00;   /* question  */
+  --good:       #1f5c34;   /* correct   */
+  --bad:        #9a2020;   /* wrong     */
+  --note:       #2a4d7a;   /* aside     */
+  --mine:       #e8eef5;   /* student's own message */
+}
+
+body[data-mode="dark"], body[data-mode="auto"].sys-dark {
+  --paper:      #16171a;
+  --paper-2:    #1e2025;
+  --ink:        #e6e3dd;
+  --ink-2:      #a9a49b;
+  --ink-3:      #77726a;
+  --rule:       #2e3138;
+  --accent:     #e0827c;
+  --ask:        #e0b45c;
+  --good:       #7fc79a;
+  --bad:        #e88b8b;
+  --note:       #8fb6e6;
+  --mine:       #232a33;
+}
+
+* { box-sizing: border-box; }
+
+/* The `hidden` attribute has to actually hide things. A UA stylesheet's
+   [hidden]{display:none} loses to any author rule that sets a display, however
+   low its specificity -- author origin simply wins -- so every element toggled
+   by .hidden in the scripts needs this, or it is painted permanently. */
+[hidden] { display: none !important; }
+
+
+html, body {
+  margin: 0; padding: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: var(--fs);
+  font-family: "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Times New Roman", serif;
+  line-height: 1.62;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* ---------- top bar ---------- */
+#bar {
+  position: sticky; top: 0; z-index: 40;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: .75rem;
+  /* The top inset matters once this is installed to the iPad home screen and
+     runs without Safari's chrome above it. */
+  padding: calc(.5rem + env(safe-area-inset-top)) max(.75rem, env(safe-area-inset-right))
+           .5rem max(.75rem, env(safe-area-inset-left));
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--rule);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: .82rem;
+}
+.bar-left { display: flex; align-items: center; gap: .5rem; min-width: 0; }
+#btn-home { color: var(--ink-2); text-decoration: none; font-size: 1.1rem;
+            line-height: 1; padding: .1rem .3rem .25rem; border-radius: .3rem; }
+#btn-home:hover { background: var(--paper-2); color: var(--ink); }
+#course { font-weight: 650; letter-spacing: .01em; white-space: nowrap; }
+#chapter { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.muted { color: var(--ink-3); }
+
+.dot {
+  width: .55rem; height: .55rem; border-radius: 50%;
+  background: var(--ink-3); flex: none;
+  transition: background .3s;
+}
+.dot.live { background: #35a35f; box-shadow: 0 0 0 3px color-mix(in srgb, #35a35f 22%, transparent); }
+.dot.dead { background: #b64b4b; }
+
+.bar-right { display: flex; align-items: center; gap: .25rem; }
+#bar button, #bar a {
+  font: inherit; line-height: 1;
+  padding: .4rem .55rem;
+  border: 1px solid transparent; border-radius: .4rem;
+  background: transparent; color: var(--ink-2); cursor: pointer;
+  text-decoration: none;
+}
+#bar button:hover, #bar a:hover { background: var(--paper-2); color: var(--ink); }
+#btn-slate { border-color: var(--rule); font-weight: 600; white-space: nowrap; }
+.session {
+  flex: none; font-size: .62rem; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase;
+  padding: .18rem .4rem; border-radius: .25rem;
+  background: var(--paper-2); color: var(--ink-3);
+}
+.session[data-kind="homework"] { color: var(--ask); background: color-mix(in srgb, var(--ask) 14%, transparent); }
+
+/* ---------- the board ---------- */
+#board {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 1.6rem max(1rem, env(safe-area-inset-left)) 7rem max(1rem, env(safe-area-inset-right));
+}
+.empty { text-align: center; color: var(--ink-2); padding: 5rem 1rem; }
+.empty p { margin: .3rem 0; }
+
+.card {
+  margin: 0 0 2.1rem;
+  animation: rise .28s ease-out both;
+}
+.card.fresh { animation: rise .28s ease-out both, glow 1.6s ease-out .28s both; }
+@keyframes rise { from { opacity: 0; transform: translateY(.5rem); } to { opacity: 1; transform: none; } }
+@keyframes glow {
+  0%   { box-shadow: -1rem 0 0 -.82rem var(--accent); }
+  100% { box-shadow: -1rem 0 0 -.82rem transparent; }
+}
+
+.card-head {
+  display: flex; align-items: baseline; gap: .6rem;
+  margin-bottom: .5rem;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.kind {
+  font-size: .66rem; font-weight: 700;
+  letter-spacing: .13em; text-transform: uppercase;
+  color: var(--accent);
+  flex: none;
+}
+.card-title { font-size: 1.02rem; font-weight: 640; color: var(--ink); }
+.card-num { font-size: .7rem; color: var(--ink-3); margin-left: auto; flex: none; }
+
+.card[data-kind="question"] { --accent: var(--ask); }
+.card[data-kind="correct"]  { --accent: var(--good); }
+.card[data-kind="wrong"]    { --accent: var(--bad); }
+.card[data-kind="review"]   { --accent: var(--note); }
+.card[data-kind="note"]     { --accent: var(--ink-3); }
+
+.card[data-kind="question"] .body,
+.card[data-kind="correct"] .body,
+.card[data-kind="wrong"] .body,
+.card[data-kind="review"] .body {
+  border-left: 3px solid var(--accent);
+  padding-left: 1rem;
+  margin-left: -1rem;
+}
+
+/* ---------- prose ---------- */
+.body > :first-child { margin-top: 0; }
+.body > :last-child { margin-bottom: 0; }
+.body h1, .body h2, .body h3 {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.3; margin: 1.6rem 0 .5rem;
+}
+.body h1 { font-size: 1.3rem; }
+.body h2 { font-size: 1.12rem; }
+.body h3 { font-size: 1rem; color: var(--ink-2); }
+.body p { margin: .75rem 0; }
+.body ul, .body ol { margin: .7rem 0; padding-left: 1.5rem; }
+.body li { margin: .3rem 0; }
+.body li > ul, .body li > ol { margin: .25rem 0; }
+.body blockquote {
+  margin: .9rem 0; padding: .1rem 0 .1rem 1rem;
+  border-left: 3px solid var(--rule); color: var(--ink-2);
+}
+.body hr { border: 0; border-top: 1px solid var(--rule); margin: 1.6rem 0; }
+.body a { color: var(--note); }
+.body strong { font-weight: 700; }
+.body code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: .88em;
+  background: var(--paper-2); border-radius: .25rem; padding: .08em .3em;
+}
+.body pre {
+  background: var(--paper-2); border: 1px solid var(--rule); border-radius: .45rem;
+  padding: .8rem 1rem; overflow-x: auto; font-size: .85rem; line-height: 1.5;
+}
+.body pre code { background: none; padding: 0; font-size: inherit; }
+
+.body table {
+  border-collapse: collapse; margin: 1rem 0;
+  font-size: .95em;
+  display: block; overflow-x: auto; max-width: 100%;
+}
+.body th, .body td {
+  border: 1px solid var(--rule); padding: .35rem .7rem; text-align: left;
+  white-space: nowrap;
+}
+.body th { background: var(--paper-2); font-weight: 650; }
+
+/* ---------- mathematics ---------- */
+.katex { font-size: 1.06em; }
+.katex-display { margin: 1.05rem 0; overflow-x: auto; overflow-y: hidden; padding: .15rem 0; }
+.katex-error { color: var(--bad); font-family: ui-monospace, monospace; font-size: .85em; }
+
+/* ---------- figures compiled from TikZ ---------- */
+.figure { margin: 1.3rem 0; text-align: center; }
+.figure img { max-width: 100%; height: auto; }
+body[data-mode="dark"] .figure img,
+body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180deg); }
+.figure.pending, .figure.error {
+  font-family: ui-monospace, monospace; font-size: .78rem;
+  color: var(--ink-3); border: 1px dashed var(--rule); border-radius: .45rem;
+  padding: 1.4rem; text-align: center;
+}
+.figure.error { color: var(--bad); border-color: var(--bad); }
+
+/* ---------- student messages echoed on the board ---------- */
+.mine {
+  margin: 0 0 1.4rem auto;
+  max-width: 32rem;
+  background: var(--mine);
+  border-radius: .7rem;
+  padding: .6rem .9rem;
+  font-size: .93rem;
+  animation: rise .28s ease-out both;
+}
+.mine .when {
+  display: block; font-size: .68rem; color: var(--ink-3);
+  font-family: ui-sans-serif, system-ui, sans-serif; margin-bottom: .15rem;
+}
+.mine .files { margin-top: .4rem; display: flex; gap: .4rem; flex-wrap: wrap; }
+.mine .files img { max-height: 8rem; border-radius: .35rem; border: 1px solid var(--rule); }
+.slate-shot { display: block; margin-top: .5rem; }
+.slate-shot img {
+  width: 100%; border-radius: .4rem;
+  border: 1px solid var(--rule); background: #fff;
+}
+
+/* ---------- end of session ---------- */
+.finish, .pushed {
+  position: sticky; top: 0; z-index: 39;
+  display: flex; align-items: center; gap: .8rem;
+  padding: .7rem max(1rem, env(safe-area-inset-left)) .7rem max(1rem, env(safe-area-inset-right));
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: .88rem;
+  border-bottom: 1px solid var(--rule);
+  animation: rise .25s ease-out both;
+}
+.finish { background: color-mix(in srgb, var(--note) 12%, var(--paper)); }
+.finish-text { display: flex; flex-direction: column; min-width: 0; }
+.finish-text span { color: var(--ink-2); font-size: .8rem; }
+.finish-acts { margin-left: auto; display: flex; gap: .4rem; flex: none; }
+.finish button {
+  font: inherit; font-size: .85rem;
+  padding: .5rem .9rem; border-radius: .45rem; cursor: pointer;
+  border: 1px solid var(--rule); background: var(--paper); color: var(--ink);
+}
+.finish button.primary { background: var(--note); border-color: var(--note); color: #fff; font-weight: 600; }
+
+.pushed { background: var(--paper-2); }
+.pushed.ok   { background: color-mix(in srgb, var(--good) 14%, var(--paper)); }
+.pushed.bad  { background: color-mix(in srgb, var(--bad) 14%, var(--paper)); }
+.pushed-icon { flex: none; font-weight: 700; }
+.pushed.ok .pushed-icon  { color: var(--good); }
+.pushed.bad .pushed-icon { color: var(--bad); }
+#pushed-text { min-width: 0; overflow-wrap: anywhere; }
+.pushed.bad #pushed-text {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .76rem;
+}
+#pushed-close {
+  margin-left: auto; flex: none; cursor: pointer;
+  border: 0; background: none; font: inherit; color: var(--ink-3);
+}
+
+/* ---------- the way to answer ---------- */
+/* There is no text box. Answering means writing, which happens on the slate. */
+.answer {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(1rem + env(safe-area-inset-bottom));
+  z-index: 50;
+  display: flex; flex-direction: column; align-items: center;
+  width: min(24rem, calc(100vw - 2rem));
+  padding: .7rem 1.2rem;
+  border-radius: .8rem;
+  background: var(--ask); color: #fff;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  text-decoration: none;
+  box-shadow: 0 4px 20px rgba(0,0,0,.22);
+  transition: transform .12s ease;
+}
+.answer:active { transform: translateX(-50%) scale(.985); }
+.answer-name { font-weight: 650; font-size: 1rem; }
+.answer-sub { font-size: .76rem; opacity: .85; margin-top: .1rem; }
+
+/* ---------- code mode: a sentence is the right unit ---------- */
+#composer {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
+  display: flex; align-items: flex-end; gap: .5rem;
+  padding: .6rem max(.75rem, env(safe-area-inset-left))
+           calc(.6rem + env(safe-area-inset-bottom)) max(.75rem, env(safe-area-inset-right));
+  background: color-mix(in srgb, var(--paper) 92%, transparent);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid var(--rule);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+#composer-slate {
+  flex: none; width: 2.4rem; height: 2.4rem; border-radius: .5rem;
+  display: grid; place-items: center; text-decoration: none;
+  font-size: 1.05rem; color: var(--ink-2); border: 1px solid var(--rule);
+}
+#composer-slate:hover { background: var(--paper-2); color: var(--ink); }
+#say {
+  flex: 1; resize: none; max-height: 9rem;
+  font: inherit; font-size: 1rem; line-height: 1.45;
+  padding: .6rem .7rem;
+  border: 1px solid var(--rule); border-radius: .5rem;
+  background: var(--paper); color: var(--ink);
+}
+#say:focus { outline: 2px solid color-mix(in srgb, var(--note) 45%, transparent); outline-offset: 1px; }
+#send {
+  flex: none; font: inherit; font-size: .9rem; font-weight: 600;
+  padding: .65rem 1rem; border-radius: .5rem;
+  border: 1px solid var(--rule); background: var(--paper-2); color: var(--ink);
+  cursor: pointer;
+}
+#send:hover { background: var(--rule); }
+#send.sent { color: var(--good); }
+
+#btn-clip {
+  cursor: pointer; user-select: none;
+  border: 1px solid var(--rule); border-radius: .4rem;
+  padding: .4rem .55rem; color: var(--ink-2); line-height: 1;
+}
+#btn-clip:hover { background: var(--paper-2); color: var(--ink); }
+
+.jump { bottom: 5.6rem; }
+
+/* ---------- scratch drawer ---------- */
+#scratch {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 60;
+  width: min(24rem, 92vw);
+  background: var(--paper); border-left: 1px solid var(--rule);
+  display: flex; flex-direction: column;
+  box-shadow: -8px 0 26px rgba(0,0,0,.16);
+  font-family: ui-sans-serif, system-ui, sans-serif; font-size: .85rem;
+}
+.scratch-head, .scratch-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: .7rem .9rem; border-bottom: 1px solid var(--rule);
+}
+.scratch-foot { border-bottom: 0; border-top: 1px solid var(--rule); font-size: .74rem; }
+.scratch-head button { border: 0; background: none; font: inherit; cursor: pointer; color: var(--ink-2); }
+#scratch-list { flex: 1; overflow-y: auto; padding: .6rem; }
+#scratch-list a { display: block; margin-bottom: .7rem; color: var(--ink); text-decoration: none; }
+#scratch-list img { width: 100%; border-radius: .4rem; border: 1px solid var(--rule); }
+#scratch-list .name { font-size: .72rem; color: var(--ink-3); word-break: break-all; }
+
+/* ---------- drop target ---------- */
+.drop {
+  position: fixed; inset: 0; z-index: 80;
+  /* The drop is handled on window, so this never needs to receive a pointer --
+     and if it ever sticks visible it must not become a wall across the board. */
+  pointer-events: none;
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--paper) 82%, transparent);
+  backdrop-filter: blur(3px);
+  font: 600 1rem ui-sans-serif, system-ui, sans-serif; color: var(--accent);
+}
+.drop span {
+  border: 2px dashed var(--accent); border-radius: 1rem; padding: 2.5rem 3rem;
+  display: block; text-align: center;
+}
+.drop small {
+  display: block; margin-top: .5rem;
+  font-weight: 400; font-size: .78rem; color: var(--ink-2);
+}
+
+/* ---------- print ---------- */
+@media print {
+  #bar, .answer, #composer, #scratch, .jump, .drop, .finish, .pushed { display: none !important; }
+  body { background: #fff; color: #000; }
+  #board { max-width: none; padding: 0; }
+  .card { break-inside: avoid; animation: none; }
+  .mine { background: #f2f2f2; }
+}

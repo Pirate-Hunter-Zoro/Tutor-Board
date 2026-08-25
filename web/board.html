@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Board">
+<meta name="theme-color" content="#fbfaf7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#16171a" media="(prefers-color-scheme: dark)">
+<title>Board</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/icon-192.png">
+<link rel="stylesheet" href="/static/katex/katex.min.css">
+<link rel="stylesheet" href="/static/board.css">
+</head>
+<body data-mode="auto">
+
+<header id="bar">
+  <div class="bar-left">
+    <a id="btn-home" href="/" title="home">‹</a>
+    <span id="dot" class="dot" title="connection"></span>
+    <span id="course">board</span>
+    <span id="chapter" class="muted"></span>
+    <span id="session" class="session" hidden></span>
+  </div>
+  <div class="bar-right">
+    <a id="btn-slate" href="/slate" title="write with the Apple Pencil">✎ slate</a>
+    <label id="btn-clip" for="file" title="attach a photo or a PDF">＋</label>
+    <button id="btn-smaller" title="smaller type">A&minus;</button>
+    <button id="btn-bigger" title="larger type">A+</button>
+    <button id="btn-theme" title="light / dark / auto">◐</button>
+    <button id="btn-reload" title="reload the app">↻</button>
+    <button id="btn-scratch" title="scratch work">▤</button>
+    <button id="btn-print" title="print or save as PDF">⎙</button>
+  </div>
+</header>
+
+<!-- End of session. Asked here, because the person answering is on an iPad. -->
+<div id="finish" class="finish" hidden>
+  <div class="finish-text">
+    <strong>Session finished.</strong>
+    <span>Save this work and push it to GitHub?</span>
+  </div>
+  <div class="finish-acts">
+    <button id="finish-no" type="button">Not now</button>
+    <button id="finish-yes" type="button" class="primary">Push</button>
+  </div>
+</div>
+
+<div id="pushed" class="pushed" hidden>
+  <span id="pushed-icon" class="pushed-icon"></span>
+  <span id="pushed-text"></span>
+  <button id="pushed-close" type="button" title="dismiss">✕</button>
+</div>
+
+<main id="board">
+  <div id="cards"></div>
+  <div id="empty" class="empty">
+    <p>Nothing on the board yet.</p>
+    <p class="muted">The tutor writes here. It appears the moment it is written.</p>
+    <p class="muted">Your working goes on the <a href="/slate">slate</a>.</p>
+  </div>
+</main>
+
+<button id="jump" class="jump" hidden>↓ new</button>
+
+<aside id="scratch" hidden>
+  <div class="scratch-head">
+    <strong>Scratch work</strong>
+    <button id="btn-scratch-close">✕</button>
+  </div>
+  <div id="scratch-list"></div>
+  <div class="scratch-foot muted">Drop a photo or a PDF anywhere on this page, or write on the
+    <a href="/slate">slate</a>.</div>
+</aside>
+
+<!-- Maths: answering means writing, so the only way back is the slate. -->
+<a id="answer" class="answer" href="/slate" hidden>
+  <span class="answer-name">✎ Write your answer</span>
+  <span class="answer-sub">on the slate, then send it for review</span>
+</a>
+
+<!-- Code: the useful things to say are sentences, not handwriting. -->
+<form id="composer" autocomplete="off" hidden>
+  <a id="composer-slate" href="/slate" title="sketch something instead">✎</a>
+  <textarea id="say" rows="1" placeholder="say something — “look at what I just wrote”…"></textarea>
+  <button id="send" type="submit">send</button>
+</form>
+
+<input id="file" type="file" multiple accept="image/*,application/pdf" hidden>
+
+<div id="drop" class="drop" hidden><span>drop a photo or a PDF<small>for work that is not on the slate — paper, a scan, a problem sheet</small></span></div>
+
+<script src="/static/katex/katex.min.js"></script>
+<script src="/static/katex/auto-render.min.js"></script>
+<script src="/static/macros.js"></script>
+<script src="/static/board.js"></script>
+</body>
+</html>

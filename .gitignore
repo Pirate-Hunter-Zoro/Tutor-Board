@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+node_modules/
+*.log
+
+# the board scratch dir, when the tool is itself opened as a course
+live/

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Board">
+<meta name="theme-color" content="#fbfaf7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#16171a" media="(prefers-color-scheme: dark)">
+<title>Board</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/icon-192.png">
+<link rel="stylesheet" href="/static/home.css">
+</head>
+<body>
+
+<header id="bar">
+  <div class="bar-left">
+    <span id="dot" class="dot" title="connection"></span>
+    <span class="wordmark">Board</span>
+  </div>
+  <div class="bar-right">
+    <button id="btn-theme" title="light / dark / auto">◐</button>
+    <button id="btn-reload" title="reload the app">↻</button>
+  </div>
+</header>
+
+<main>
+  <section id="current" class="hero">
+    <p class="eyebrow" id="hero-eyebrow">current</p>
+    <h1 id="hero-course">…</h1>
+    <p class="chapter" id="hero-chapter"></p>
+
+    <p id="waiting" class="waiting" hidden>
+      <span class="waiting-tag">your move</span>
+      <span id="waiting-text"></span>
+    </p>
+
+    <div class="actions">
+      <a class="action primary" href="/board">
+        <span class="action-name">Continue the lesson</span>
+        <span class="action-sub" id="hero-count"></span>
+      </a>
+      <a class="action" href="/slate">
+        <span class="action-name">✎ Write</span>
+        <span class="action-sub" id="hero-slate">the slate</span>
+      </a>
+    </div>
+  </section>
+
+  <section id="others-wrap" hidden>
+    <h2>Other courses</h2>
+    <p class="hint">Tapping one moves the board to it. The address does not change.</p>
+    <ul id="others" class="courses"></ul>
+  </section>
+
+  <section id="past-wrap" hidden>
+    <h2>Earlier</h2>
+    <ul id="past" class="courses"></ul>
+  </section>
+
+  <p id="where" class="where"></p>
+</main>
+
+<div id="busy" class="busy" hidden><span></span></div>
+
+<script src="/static/home.js"></script>
+</body>
+</html>

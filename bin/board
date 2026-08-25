@@ -1,0 +1,1159 @@
+#!/usr/bin/env python3
+"""
+board -- command line for the live tutoring board.
+
+The assistant runs these. The student never does.
+
+    board start [--port N] [--lan]     bring the board up (loopback unless --lan)
+    board status                       is it up, and on what URLs
+    board stop                         bring it down
+    board open "Galois Theory" "Ch 7 -- splitting fields" [--lecture|--homework]
+                                       archive the last lesson, label the new one
+    board finish                       offer the push, on the iPad, at session end
+    board push ["message"]             commit and push this repository now
+    board next [kind] [slug]           print the path of the next card to write
+    board write <kind> <slug>          read a card body on stdin, write the card
+    board inbox [--all]                what the student sent; marks it read
+    board slate [--all]                paths of the pages written on the iPad
+    board wait [--timeout N]           block until the student sends something
+    board archive                      file the current lesson away
+    board export [--build]             turn the lesson into a .tex (and compile it)
+    board net                          every URL the board answers on
+    board vpn up|status|serve|down     the Tailscale link, for devices off this network
+    board init [name] [--code|--math]  write tutorboard.json for this repository
+    board doctor                       check the machine has what this needs
+    board eyes [--answer]              can the assistant driving this actually see?
+
+Card kinds: lesson, question, correct, wrong, review, note, recap.
+"""
+
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import time
+
+TOOL = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, TOOL)
+import boardlib
+SERVE = os.path.join(TOOL, "serve.py")
+KINDS = ("lesson", "question", "correct", "wrong", "review", "note", "recap")
+
+
+# ---------------------------------------------------------------------------
+def find_repo(start=None):
+    """Nearest ancestor holding .git or AI_INSTRUCTIONS.md."""
+    d = os.path.abspath(start or os.getcwd())
+    while True:
+        if os.path.isdir(os.path.join(d, ".git")) or \
+           os.path.isfile(os.path.join(d, "tutorboard.json")) or \
+           os.path.isfile(os.path.join(d, "AI_INSTRUCTIONS.md")):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            return os.path.abspath(start or os.getcwd())
+        d = parent
+
+
+class Live:
+    def __init__(self, root):
+        self.root = root
+        self.dir = os.path.join(root, "live")
+        self.cards = os.path.join(self.dir, "cards")
+        self.inbox = os.path.join(self.dir, "inbox")
+        self.uploads = os.path.join(self.inbox, "uploads")
+        self.archive = os.path.join(self.dir, "archive")
+        self.tikz = os.path.join(self.dir, "tikzcache")
+        self.slate = os.path.join(self.dir, "slate")
+        for d in (self.dir, self.cards, self.inbox, self.uploads, self.archive,
+                  self.tikz, self.slate):
+            os.makedirs(d, exist_ok=True)
+
+    def path(self, *parts):
+        return os.path.join(self.dir, *parts)
+
+    def info(self):
+        try:
+            with open(self.path(".board.json"), "r", encoding="utf-8") as fh:
+                return json.load(fh)
+        except Exception:
+            return None
+
+    def state(self):
+        try:
+            with open(self.path("state.json"), "r", encoding="utf-8") as fh:
+                return json.load(fh)
+        except Exception:
+            return {}
+
+    def set_state(self, **kw):
+        s = self.state()
+        for k, v in kw.items():
+            if v is None:
+                s.pop(k, None)          # explicit None clears
+            else:
+                s[k] = v
+        with open(self.path("state.json"), "w", encoding="utf-8") as fh:
+            json.dump(s, fh, indent=2)
+        return s
+
+    def card_names(self):
+        return sorted(n for n in os.listdir(self.cards) if re.match(r"^\d{4}[-_.]", n))
+
+    def next_index(self):
+        names = self.card_names()
+        return (int(names[-1][:4]) + 1) if names else 1
+
+
+def this_node():
+    import socket as _s
+    return _s.gethostname().split(".")[0]
+
+
+def alive(info):
+    """Is this board actually running *here*?
+
+    The home directory is shared across every compute node, so `live/.board.json`
+    may well have been written by a board on a different machine. A bare pid check
+    would then report a stranger's process as ours.
+    """
+    if not info:
+        return False
+    node = info.get("node")
+    if node and node != this_node():
+        return False
+    try:
+        os.kill(info.get("pid", -1), 0)
+        return True
+    except OSError:
+        return False
+
+
+def slurm_nodes():
+    """Nodes where this user currently holds an allocation, or None if unknown."""
+    try:
+        p = subprocess.run(["squeue", "-h", "-u", os.environ.get("USER", ""), "-o", "%N"],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=10)
+        if p.returncode != 0:
+            return None
+        out = p.stdout.decode("utf-8", "replace")
+        nodes = set()
+        for tok in re.findall(r"compute\[?([0-9,\-]+)\]?", out):
+            for part in tok.split(","):
+                if "-" in part:
+                    a, b = part.split("-", 1)
+                    for n in range(int(a), int(b) + 1):
+                        nodes.add("compute%d" % n)
+                else:
+                    nodes.add("compute" + part)
+        return nodes
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+
+
+def default_port(root):
+    """Stable per-repository port so two courses can hold boards at once."""
+    h = 0
+    for ch in os.path.basename(root):
+        h = (h * 131 + ord(ch)) % 60
+    return 8780 + h
+
+
+def slugify(s):
+    s = re.sub(r"[^A-Za-z0-9]+", "-", (s or "").strip().lower()).strip("-")
+    return (s or "card")[:48]
+
+
+# ---------------------------------------------------------------------------
+def cmd_start(live, args):
+    info = live.info()
+    if info and alive(info):
+        print("already up: " + "  ".join(info["urls"]))
+        ts_repoint(info["port"])
+        return 0
+    if info and info.get("node") and info["node"] != this_node():
+        # Shared home, different machine. Either it is still serving over the
+        # tailnet and nothing needs doing, or its allocation ended and the record
+        # is stale.
+        held = slurm_nodes()
+        if held is not None and info["node"] not in held:
+            print("clearing a stale record from %s (no allocation there any more)"
+                  % info["node"])
+        else:
+            print("a board for this repository is already running on %s." % info["node"])
+            print("it serves the same files over the tailnet, so you probably want that one:")
+            print("  board net")
+            print("start one here anyway with: board start --force")
+            if "--force" not in args:
+                return 1
+
+    port = default_port(live.root)
+    lan = False
+    i = 0
+    while i < len(args):
+        if args[i] in ("--port", "-p"):
+            i += 1
+            port = int(args[i])
+        elif args[i] == "--lan":
+            lan = True
+        i += 1
+
+    log = open(live.path("board.log"), "ab")
+    cmd = [sys.executable, SERVE, "--root", live.root, "--port", str(port)]
+    if lan:
+        cmd.append("--lan")
+    proc = subprocess.Popen(cmd, stdout=log, stderr=log, start_new_session=True,
+                            cwd=live.root)
+    for _ in range(60):
+        time.sleep(0.1)
+        info = live.info()
+        if info and info.get("pid") == proc.pid:
+            break
+    else:
+        print("board failed to come up; see " + live.path("board.log"), file=sys.stderr)
+        return 1
+    print("board up (pid %d)" % proc.pid)
+    for u in info["urls"]:
+        print("  " + u)
+    ts_repoint(port)
+    return 0
+
+
+def cmd_stop(live, args):
+    info = live.info()
+    if info and not alive(info) and info.get("node") not in (None, this_node()):
+        print("the record points at %s, not this node; not touching it." % info["node"])
+        print("removing the local record only.")
+        try:
+            os.remove(live.path(".board.json"))
+        except OSError:
+            pass
+        return 0
+    if not info or not alive(info):
+        print("not running")
+        return 0
+    try:
+        os.killpg(os.getpgid(info["pid"]), signal.SIGTERM)
+    except OSError:
+        try:
+            os.kill(info["pid"], signal.SIGTERM)
+        except OSError:
+            pass
+    try:
+        os.remove(live.path(".board.json"))
+    except OSError:
+        pass
+    print("board down")
+    return 0
+
+
+def cmd_status(live, args):
+    info = live.info()
+    st = live.state()
+    up = bool(info and alive(info))
+    print("board:   %s" % ("up" if up else "down"))
+    if up:
+        for u in info["urls"]:
+            print("  " + u)
+    if info and info.get("node"):
+        print("node:    %s%s" % (info["node"],
+                                 "" if info["node"] == this_node() else "  (not this one)"))
+    print("repo:    %s" % live.root)
+    cfg = read_config(live.root)
+    print("course:  %s  (%s mode)" % (st.get("course") or cfg["name"], cfg["mode"]))
+    print("chapter: %s" % st.get("chapter", "-"))
+    print("session: %s%s" % (st.get("session", "lecture"),
+                             "  (finish offered)" if st.get("finished") else ""))
+    print("cards:   %d" % len(live.card_names()))
+    msgs = read_messages(live)
+    print("unread:  %d" % sum(1 for m in msgs if not m.get("read")))
+    return 0
+
+
+def cmd_open(live, args):
+    """Start a session, and say what kind it is.
+
+    A lecture and a homework sitting are different jobs. In a lecture the user is
+    being taught and writes back to show they followed. In homework they are
+    producing work that has to end up typeset and compiled, and the write-up is
+    the assistant's to do once the mathematics is agreed.
+    """
+    session = None
+    rest = []
+    for a in args:
+        if a == "--lecture":
+            session = "lecture"
+        elif a == "--homework":
+            session = "homework"
+        else:
+            rest.append(a)
+    course = rest[0] if len(rest) > 0 else None
+    chapter = rest[1] if len(rest) > 1 else None
+    cmd_archive(live, [])
+    live.set_state(course=course, chapter=chapter, session=session or "lecture",
+                   finished=None, opened=time.strftime("%Y-%m-%d %H:%M"))
+    print("%s open: %s / %s" % (session or "lecture", course or "-", chapter or "-"))
+    if session == "homework":
+        print("  you write the mathematics; the write-up and the compile are mine")
+    return 0
+
+
+def cmd_archive(live, args):
+    names = live.card_names()
+    slate = sorted(n for n in os.listdir(live.slate) if re.match(r"^page-\d+\.(json|png)$", n))
+    if not names and not slate:
+        print("nothing to archive")
+        return 0
+    st = live.state()
+    label = slugify(st.get("chapter") or st.get("course") or "lesson")
+    dest = os.path.join(live.archive, time.strftime("%Y%m%d-%H%M%S") + "-" + label)
+    os.makedirs(dest, exist_ok=True)
+    for n in names:
+        os.rename(os.path.join(live.cards, n), os.path.join(dest, n))
+    if slate:
+        sdest = os.path.join(dest, "slate")
+        os.makedirs(sdest, exist_ok=True)
+        for n in slate:
+            os.rename(os.path.join(live.slate, n), os.path.join(sdest, n))
+        print("archived %d slate pages" % len([n for n in slate if n.endswith(".png")]))
+    try:
+        with open(os.path.join(dest, "state.json"), "w", encoding="utf-8") as fh:
+            json.dump(st, fh, indent=2)
+    except OSError:
+        pass
+    print("archived %d cards to %s" % (len(names), os.path.relpath(dest, live.root)))
+    return 0
+
+
+def cmd_next(live, args):
+    kind = args[0] if args and args[0] in KINDS else "lesson"
+    rest = args[1:] if (args and args[0] in KINDS) else args
+    slug = slugify(" ".join(rest)) if rest else kind
+    print(os.path.join(live.cards, "%04d-%s.md" % (live.next_index(), slug)))
+    return 0
+
+
+def cmd_write(live, args):
+    if not args:
+        print("usage: board write <kind> [slug] < body.md", file=sys.stderr)
+        return 1
+    kind = args[0] if args[0] in KINDS else "lesson"
+    rest = args[1:] if args[0] in KINDS else args
+    title = " ".join(rest)
+    body = sys.stdin.read()
+    name = "%04d-%s.md" % (live.next_index(), slugify(title or kind))
+    path = os.path.join(live.cards, name)
+    head = "---\nkind: %s\n" % kind
+    if title:
+        head += "title: %s\n" % title
+    head += "---\n"
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(head + body.rstrip() + "\n")
+    print(path)
+    return 0
+
+
+def read_messages(live):
+    out = []
+    try:
+        with open(os.path.join(live.inbox, "messages.jsonl"), "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line:
+                    try:
+                        out.append(json.loads(line))
+                    except ValueError:
+                        pass
+    except OSError:
+        pass
+    return out
+
+
+def cmd_inbox(live, args):
+    show_all = "--all" in args
+    msgs = read_messages(live)
+    pick = msgs if show_all else [m for m in msgs if not m.get("read")]
+    if not pick:
+        print("inbox empty")
+        return 0
+    for m in pick:
+        print("[%s] %s" % (m.get("iso", "?"), m.get("text", "")))
+        for f in m.get("files", []):
+            print("    file: %s" % os.path.join(live.uploads, f))
+        if m.get("slate"):
+            print("    slate: %s" % m["slate"])
+    if not show_all:
+        for m in msgs:
+            m["read"] = True
+        with open(os.path.join(live.inbox, "messages.jsonl"), "w", encoding="utf-8") as fh:
+            for m in msgs:
+                fh.write(json.dumps(m) + "\n")
+    return 0
+
+
+def cmd_finish(live, args):
+    """Raise the end-of-session offer on the board.
+
+    The user is on an iPad, so the question has to be asked there rather than in
+    a terminal they are not looking at.
+    """
+    live.set_state(finished=time.strftime("%Y-%m-%d %H:%M"))
+    print("the board is now offering to save and push this session's work")
+    return 0
+
+
+def cmd_push(live, args):
+    message = " ".join(a for a in args if not a.startswith("--")) or "lesson complete"
+    script = os.path.join(live.root, "scripts", "save-and-push.sh")
+    if not os.path.exists(script):
+        print("no scripts/save-and-push.sh in this repository", file=sys.stderr)
+        return 1
+    p = subprocess.run(["bash", script, message], cwd=live.root,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    out = p.stdout.decode("utf-8", "replace").strip()
+    print(out)
+    record = {"ok": p.returncode == 0, "at": time.time(),
+              "iso": time.strftime("%Y-%m-%d %H:%M:%S"), "detail": out[-1200:]}
+    with open(live.path("push.json"), "w", encoding="utf-8") as fh:
+        json.dump(record, fh, indent=2)
+    st = live.state()
+    if st.pop("finished", None) is not None:
+        with open(live.path("state.json"), "w", encoding="utf-8") as fh:
+            json.dump(st, fh, indent=2)
+    return p.returncode
+
+
+def cmd_slate(live, args):
+    """Where the iPad pages are on disk. Open the PNGs -- that is the handwriting."""
+    pages = sorted(n for n in os.listdir(live.slate) if re.match(r"^page-\d+\.png$", n))
+    if not pages:
+        print("slate empty")
+        return 0
+    show = pages if "--all" in args else pages[-6:]
+    if len(show) < len(pages):
+        print("(%d earlier pages not listed; --all for all)" % (len(pages) - len(show)))
+    for n in show:
+        p = os.path.join(live.slate, n)
+        print("%s  %s  %.0f KiB" % (
+            time.strftime("%H:%M:%S", time.localtime(os.path.getmtime(p))),
+            p, os.path.getsize(p) / 1024.0))
+    return 0
+
+
+def cmd_wait(live, args):
+    """Block until the student sends something, then print it and exit.
+
+    This is the wake-up primitive. Any agent that can run a shell command can use
+    it: run it in the background and act when it exits, or call it in a loop with
+    a timeout. It polls a file mtime and costs nothing while it waits.
+    """
+    timeout = 900.0
+    if "--timeout" in args:
+        timeout = float(args[args.index("--timeout") + 1])
+
+    path = os.path.join(live.inbox, "messages.jsonl")
+    before = len([m for m in read_messages(live) if not m.get("read")])
+    start = time.time()
+    while time.time() - start < timeout:
+        time.sleep(1.0)
+        msgs = read_messages(live)
+        unread = [m for m in msgs if not m.get("read")]
+        if len(unread) > before:
+            return cmd_inbox(live, [])
+    print("nothing sent in %.0fs" % timeout)
+    return 2
+
+
+# ---------------------------------------------------------------------------
+# export: cards -> one .tex, so a lesson becomes a permanent typeset document
+# ---------------------------------------------------------------------------
+TEX_HEAD = r"""%% Generated by `board export` -- a transcript of one live lesson.
+\documentclass[11pt]{article}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage[margin=1in]{geometry}
+\usepackage{tikz}
+\usepackage{tikz-cd}
+\usetikzlibrary{arrows.meta,positioning,calc,fit,shapes.geometric}
+%(macros)s\input{board-macros.tex}
+\usepackage{needspace}
+\title{%(title)s}
+\author{%(author)s}
+\date{%(date)s}
+\begin{document}
+\maketitle
+"""
+
+KIND_HEAD = {
+    "question": "Your move",
+    "correct": "Correct",
+    "wrong": "Not quite",
+    "review": "Review",
+    "note": "Aside",
+    "recap": "Recap",
+}
+
+
+def author_name(live):
+    """Whose name goes on an exported lesson: state.json, then git, then nobody."""
+    name = live.state().get("author")
+    if name:
+        return name
+    try:
+        p = subprocess.run(["git", "config", "user.name"], cwd=live.root,
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5)
+        if p.returncode == 0:
+            return p.stdout.decode("utf-8", "replace").strip()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return ""
+
+
+def tex_escape(s):
+    for a, b in (("\\", "\\textbackslash{}"), ("&", "\\&"), ("%", "\\%"),
+                 ("#", "\\#"), ("_", "\\_"), ("{", "\\{"), ("}", "\\}")):
+        s = s.replace(a, b)
+    return s
+
+
+def md_to_tex(body):
+    """Enough markdown for a lesson transcript. Math and tikz pass through."""
+    out = []
+    lines = body.replace("\r\n", "\n").split("\n")
+    i = 0
+    list_stack = []
+
+    def close_lists(to=0):
+        while len(list_stack) > to:
+            out.append("\\end{%s}" % list_stack.pop())
+
+    while i < len(lines):
+        line = lines[i]
+
+        m = re.match(r"^[ \t]*```[ \t]*(tikz|tikzcd|latex)[ \t]*$", line)
+        if m:
+            kind = m.group(1)
+            i += 1
+            buf = []
+            while i < len(lines) and not re.match(r"^[ \t]*```", lines[i]):
+                buf.append(lines[i])
+                i += 1
+            i += 1
+            src = "\n".join(buf)
+            if kind == "tikzcd" and "\\begin{tikzcd}" not in src:
+                src = "\\begin{tikzcd}\n%s\n\\end{tikzcd}" % src
+            elif kind == "tikz" and "\\begin{tikzpicture}" not in src and "\\begin{tikzcd}" not in src:
+                src = "\\begin{tikzpicture}\n%s\n\\end{tikzpicture}" % src
+            close_lists()
+            out.append("\\begin{center}\n%s\n\\end{center}" % src)
+            continue
+
+        if not line.strip():
+            close_lists()
+            out.append("")
+            i += 1
+            continue
+
+        h = re.match(r"^(#{1,6})\s+(.*)$", line)
+        if h:
+            close_lists()
+            level = len(h[1])
+            cmd = "subsection*" if level >= 2 else "section*"
+            if level >= 3:
+                cmd = "subsubsection*"
+            out.append("\\%s{%s}" % (cmd, inline_tex(h[2])))
+            i += 1
+            continue
+
+        if re.match(r"^\s*(-{3,}|\*{3,}|_{3,})\s*$", line):
+            close_lists()
+            out.append("\\medskip\\hrule\\medskip")
+            i += 1
+            continue
+
+        # table
+        if "|" in line and i + 1 < len(lines) and re.match(r"^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$", lines[i + 1]):
+            close_lists()
+            rows = []
+            header = [c.strip() for c in line.strip().strip("|").split("|")]
+            i += 2
+            while i < len(lines) and "|" in lines[i] and lines[i].strip():
+                rows.append([c.strip() for c in lines[i].strip().strip("|").split("|")])
+                i += 1
+            spec = "l" * len(header)
+            out.append("\\begin{center}\\begin{tabular}{%s}\\hline" % spec)
+            out.append(" & ".join("\\textbf{%s}" % inline_tex(c) for c in header) + " \\\\ \\hline")
+            for r in rows:
+                out.append(" & ".join(inline_tex(c) for c in r) + " \\\\")
+            out.append("\\hline\\end{tabular}\\end{center}")
+            continue
+
+        b = re.match(r"^(\s*)([-*+]|\d+[.)])\s+(.*)$", line)
+        if b:
+            depth = len(b[1]) // 2 + 1
+            env = "enumerate" if re.match(r"\d", b[2]) else "itemize"
+            while len(list_stack) > depth:
+                out.append("\\end{%s}" % list_stack.pop())
+            while len(list_stack) < depth:
+                list_stack.append(env)
+                out.append("\\begin{%s}" % env)
+            out.append("  \\item " + inline_tex(b[3]))
+            i += 1
+            continue
+
+        if line.lstrip().startswith(">"):
+            close_lists()
+            buf = []
+            while i < len(lines) and lines[i].lstrip().startswith(">"):
+                buf.append(re.sub(r"^\s*>\s?", "", lines[i]))
+                i += 1
+            out.append("\\begin{quote}\n%s\n\\end{quote}" % inline_tex(" ".join(buf)))
+            continue
+
+        close_lists()
+        out.append(inline_tex(line))
+        i += 1
+
+    close_lists()
+    return "\n".join(out)
+
+
+def inline_tex(s):
+    """Markdown emphasis and code to LaTeX, leaving math spans alone."""
+    parts = re.split(r"(\$\$.*?\$\$|\$[^$]*\$|\\\[.*?\\\]|\\\(.*?\\\))", s, flags=re.DOTALL)
+    for n, part in enumerate(parts):
+        if n % 2:
+            continue
+        part = re.sub(r"`([^`]+)`", lambda m: "\\texttt{%s}" % tex_escape(m.group(1)), part)
+        part = re.sub(r"\*\*\*(.+?)\*\*\*", r"\\textbf{\\emph{\1}}", part)
+        part = re.sub(r"\*\*(.+?)\*\*", r"\\textbf{\1}", part)
+        part = re.sub(r"(?<![\w*])\*([^*\n]+)\*(?![\w*])", r"\\emph{\1}", part)
+        part = re.sub(r"\[([^\]]+)\]\(([^)\s]+)\)", r"\\href{\2}{\1}", part)
+        for a, b in (("&", "\\&"), ("%", "\\%"), ("#", "\\#")):
+            part = part.replace(a, b)
+        part = re.sub(r"(?<![\\{])_", r"\\_", part)
+        parts[n] = part
+    return "".join(parts)
+
+
+def cmd_export(live, args):
+    names = live.card_names()
+    if not names:
+        print("no cards to export")
+        return 1
+    st = live.state()
+    title = st.get("chapter") or st.get("course") or "Lesson"
+    body = []
+    for n in names:
+        with open(os.path.join(live.cards, n), "r", encoding="utf-8") as fh:
+            raw = fh.read()
+        meta = {}
+        text = raw
+        if raw.startswith("---"):
+            end = raw.find("\n---", 3)
+            if end != -1:
+                for line in raw[3:end].splitlines():
+                    if ":" in line:
+                        k, v = line.split(":", 1)
+                        meta[k.strip().lower()] = v.strip()
+                text = raw[end + 4:].lstrip("\n")
+        head = KIND_HEAD.get((meta.get("kind") or "lesson").lower())
+        card_title = meta.get("title", "")
+        if head or card_title:
+            label = " -- ".join(x for x in (head, card_title) if x)
+            body.append("\\needspace{3\\baselineskip}\\subsection*{%s}" % inline_tex(label))
+        body.append(md_to_tex(text))
+        body.append("")
+
+    out_dir = os.path.join(live.dir, "export")
+    os.makedirs(out_dir, exist_ok=True)
+    stem = time.strftime("%Y%m%d-%H%M%S") + "-" + slugify(title)
+    path = os.path.join(out_dir, stem + ".tex")
+    with open(path, "w", encoding="utf-8") as fh:
+        # A course that ships its own macros keeps them; one that does not still
+        # exports, because board-macros.tex fills the vocabulary either way.
+        sty = os.path.join(live.root, "latex", "coursemacros.sty")
+        fh.write(TEX_HEAD % {
+            "title": inline_tex(title),
+            "author": inline_tex(author_name(live)),
+            "date": time.strftime("%B %d, %Y"),
+            "macros": "\\usepackage{coursemacros}\n" if os.path.exists(sty) else "",
+        })
+        fh.write("\n".join(body))
+        fh.write("\n\\end{document}\n")
+    print(path)
+
+    if "--build" in args:
+        build = os.path.join(live.root, "scripts", "build.sh")
+        if os.path.exists(build):
+            subprocess.run(["bash", build, path])
+        else:
+            print(compile_tex(live, path))
+    return 0
+
+
+def compile_tex(live, path):
+    """Fallback compile, for a course with no build script of its own."""
+    outdir = os.path.dirname(path)
+    env = boardlib.tex_env([
+        os.path.join(live.root, "latex"),
+        os.path.join(TOOL, "tex"),
+    ])
+    pdf = os.path.splitext(path)[0] + ".pdf"
+    for _ in range(2):        # twice, so references settle
+        p = subprocess.run(
+            ["pdflatex", "-interaction=nonstopmode", "-halt-on-error",
+             "-output-directory=" + outdir, path],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=180)
+    if p.returncode != 0 or not os.path.exists(pdf):
+        log = os.path.splitext(path)[0] + ".log"
+        detail = ""
+        if os.path.exists(log):
+            with open(log, "r", encoding="utf-8", errors="replace") as fh:
+                detail = "".join(ln for ln in fh if ln.startswith("!"))[:400]
+        return "FAILED to compile\n" + detail
+    return "OK: " + pdf
+
+
+# ---------------------------------------------------------------------------
+# Tailscale, in userspace mode so it needs no root and no TUN device.
+#
+# The compute node is on the institute network and the iPad is not, so there is
+# no LAN route between them. Tailscale gives both machines an address on the
+# same private network wherever they happen to be.
+# ---------------------------------------------------------------------------
+TS_DIR = boardlib.TS_DIR
+TS_SOCK = boardlib.TS_SOCK
+TS_LOG = os.path.join(TS_DIR, "tailscaled.log")
+
+
+def ts(*args, **kw):
+    """Run the tailscale CLI, whether it is ours or the system's."""
+    prefix, kind = boardlib.tailscale_cli()
+    if not prefix:
+        return 1, "tailscale is not installed"
+    cmd = prefix + list(args)
+    try:
+        p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           timeout=kw.get("timeout", 25))
+        return p.returncode, p.stdout.decode("utf-8", "replace")
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return 1, str(exc)
+
+
+def ts_daemon_running():
+    try:
+        p = subprocess.run(["pgrep", "-f", "tailscaled --tun=userspace-networking"],
+                           stdout=subprocess.PIPE)
+        return p.returncode == 0
+    except OSError:
+        return False
+
+
+TS_OWNER = os.path.join(TS_DIR, "owner.json")
+
+
+def ts_owner():
+    try:
+        with open(TS_OWNER, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:
+        return None
+
+
+def ts_claim():
+    os.makedirs(TS_DIR, exist_ok=True)
+    with open(TS_OWNER, "w", encoding="utf-8") as fh:
+        json.dump({"node": this_node(), "at": time.strftime("%Y-%m-%d %H:%M:%S")}, fh)
+
+
+def ts_check_owner(force=False):
+    """Only one node may run the daemon at a time.
+
+    The state file lives in the shared home, which is what makes the tailnet
+    identity follow you from compute node to compute node -- and also what would
+    let two daemons on two nodes claw at the same node key. A record from a node
+    where the allocation has ended is stale and gets cleared.
+    """
+    owner = ts_owner()
+    if not owner or owner.get("node") in (None, this_node()) or force:
+        return True
+    held = slurm_nodes()
+    if held is not None and owner["node"] not in held:
+        return True
+    print("tailscale is already linked from %s (since %s)."
+          % (owner["node"], owner.get("at", "?")), file=sys.stderr)
+    print("the tailnet address is the same either way -- try: board net", file=sys.stderr)
+    print("to move the link to this node, stop it there, or: board vpn up --force",
+          file=sys.stderr)
+    return False
+
+
+def ts_start_daemon():
+    if ts_daemon_running():
+        return True
+    os.makedirs(TS_DIR, exist_ok=True)
+    log = open(TS_LOG, "ab")
+    subprocess.Popen(
+        ["tailscaled", "--tun=userspace-networking", "--socket=" + TS_SOCK,
+         "--statedir=" + TS_DIR, "--socks5-server=localhost:1055"],
+        stdout=log, stderr=log, start_new_session=True)
+    for _ in range(40):
+        time.sleep(0.25)
+        if os.path.exists(TS_SOCK):
+            ts_claim()
+            return True
+    return False
+
+
+def ts_info():
+    """(ipv4, dns_name) for this node, or (None, None)."""
+    code, out = ts("status", "--json")
+    if code != 0:
+        return None, None
+    try:
+        data = json.loads(out)
+    except ValueError:
+        return None, None
+    me = data.get("Self") or {}
+    ips = me.get("TailscaleIPs") or []
+    v4 = next((i for i in ips if ":" not in i), None)
+    name = (me.get("DNSName") or "").rstrip(".")
+    return v4, (name or None)
+
+
+def ts_repoint(port):
+    """Keep the HTTPS name pointed at whichever board is current.
+
+    Each repository has its own port, so switching from one course to another
+    would otherwise leave https://board…/ proxying to a board that is no longer
+    running. The address is the thing that must stay constant, not the target.
+    """
+    if not ts_daemon_running():
+        return
+    code, out = ts("serve", "status", timeout=15)
+    if code != 0 or "https://" not in out:
+        return
+    if ("127.0.0.1:%d" % port) in out:
+        return
+    code, _ = ts("serve", "--bg", "--https=443", "http://127.0.0.1:%d" % port, timeout=40)
+    if code == 0:
+        _, name = ts_info()
+        print("  https://%s/ now points here" % (name or "the tailnet name"))
+
+
+def cmd_vpn(live, args):
+    sub = args[0] if args else "status"
+
+    if sub == "down":
+        ts("down")
+        subprocess.run(["pkill", "-f", "tailscaled --tun=userspace-networking"])
+        try:
+            os.remove(TS_OWNER)
+        except OSError:
+            pass
+        print("tailscale stopped")
+        return 0
+
+    prefix, kind = boardlib.tailscale_cli()
+    if kind == "system":
+        # Tailscale is already installed and running here -- a Mac, typically.
+        # There is nothing for us to start, and starting a second daemon would
+        # only fight the one that works.
+        if sub in ("up", "status"):
+            code, out = ts("status")
+            print(out.strip() or "tailscale is managed by this system")
+            return cmd_net(live, []) if sub == "up" else code
+        if sub == "down":
+            print("tailscale is managed by this system; leave it alone")
+            return 0
+
+    if kind == "missing":
+        print("tailscale is not installed. To reach the board from another\n"
+              "network you need it on this machine:\n\n"
+              + boardlib.tailscale_download_hint(), file=sys.stderr)
+        return 1
+
+    if not ts_check_owner("--force" in args):
+        return 1
+
+    if not ts_start_daemon():
+        print("tailscaled would not start; see " + TS_LOG, file=sys.stderr)
+        return 1
+
+    if sub == "up":
+        # Always "board", never the compute node's own name. The state file is
+        # shared, so this is one machine that moves -- exactly like a laptop
+        # changing networks -- and its address never changes.
+        code, out = ts("up", "--hostname=board", "--accept-dns=false", timeout=20)
+        _, status = ts("status")
+        if "Log in at:" in status:
+            url = status.split("Log in at:", 1)[1].strip().split()[0]
+            print("NOT LOGGED IN. Open this once, on any device, to link this node:")
+            print("  " + url)
+            return 3
+        print(out.strip() or "tailscale up")
+        return cmd_net(live, [])
+
+    if sub == "serve":
+        info = live.info()
+        if not info:
+            print("start the board first", file=sys.stderr)
+            return 1
+        code, out = ts("serve", "--bg", "--https=443",
+                       "http://127.0.0.1:%d" % info["port"], timeout=40)
+        print(out.strip() or "serving")
+        if code != 0:
+            print("\nHTTPS needs certificates enabled once for the tailnet:\n"
+                  "  admin console -> DNS -> HTTPS Certificates -> Enable", file=sys.stderr)
+        return code
+
+    code, out = ts("status")
+    print(out.strip())
+    return code
+
+
+def socket_hostname():
+    import socket as _s
+    return _s.gethostname().split(".")[0]
+
+
+def cmd_net(live, args):
+    """Everywhere the board can be reached from, in the order worth trying."""
+    info = live.info()
+    if not info:
+        print("board is down; run: board start")
+        return 1
+    port = info["port"]
+    ts_repoint(port)
+
+    print("on this machine")
+    print("  http://127.0.0.1:%d/" % port)
+
+    lan = [u for u in info["urls"] if "127.0.0.1" not in u]
+    if lan and info.get("bind") == "0.0.0.0":
+        print("on the local network  (--lan was given; there is no authentication)")
+        for u in lan:
+            print("  " + u)
+
+    v4, name = ts_info()
+    if v4 or name:
+        print("over tailscale — from anywhere, on any of your devices")
+        print("  this address does not change when you move to another compute node")
+        if name:
+            code, out = ts("serve", "status")
+            if code == 0 and "https://" in out:
+                print("  https://%s/       <- open this on the iPad" % name)
+                print("     (HTTPS, so Add to Home Screen gives a real app)")
+            print("  http://%s:%d/" % (name, port))
+        if v4:
+            print("  http://%s:%d/" % (v4, port))
+    else:
+        print("tailscale not linked — run: board vpn up")
+    return 0
+
+
+def read_config(root):
+    cfg = {"name": None, "mode": None}
+    try:
+        with open(os.path.join(root, "tutorboard.json"), "r", encoding="utf-8") as fh:
+            cfg.update(json.load(fh) or {})
+    except (OSError, ValueError):
+        pass
+    if not cfg.get("name"):
+        cfg["name"] = os.path.basename(root).replace("-", " ")
+    if cfg.get("mode") not in ("math", "code"):
+        cfg["mode"] = guess_mode(root)
+    return cfg
+
+
+def guess_mode(root):
+    if os.path.isdir(os.path.join(root, "latex")):
+        return "math"
+    for base, dirs, names in os.walk(root):
+        dirs[:] = [d for d in dirs
+                   if d not in (".git", "live", "node_modules", "build", "__pycache__")]
+        if any(n.endswith(".tex") for n in names):
+            return "math"
+        if base.count(os.sep) - root.count(os.sep) > 2:
+            dirs[:] = []
+    return "code"
+
+
+def cmd_init(live, args):
+    """Declare what this repository is, so the board stops guessing."""
+    mode = None
+    rest = []
+    for a in args:
+        if a == "--code":
+            mode = "code"
+        elif a == "--math":
+            mode = "math"
+        else:
+            rest.append(a)
+    name = " ".join(rest) or os.path.basename(live.root).replace("-", " ")
+    if mode is None:
+        mode = guess_mode(live.root)
+        print("mode not given; guessed %s from what is in the repository" % mode)
+
+    path = os.path.join(live.root, "tutorboard.json")
+    cfg = {}
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                cfg = json.load(fh) or {}
+        except ValueError:
+            pass
+    cfg["name"] = name
+    cfg["mode"] = mode
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(cfg, fh, indent=2)
+        fh.write("\n")
+    print("%s\n  name: %s\n  mode: %s" % (path, name, mode))
+    if mode == "math":
+        print("  -> no text box; answers are written on the slate")
+    else:
+        print("  -> a text box on the board; the slate is there for sketching")
+    return 0
+
+
+EYES_DOC = r"""\documentclass[border=24pt]{standalone}
+\usepackage{amsmath,amssymb}
+\begin{document}
+\begin{minipage}{9cm}
+\centering
+{\Huge\bfseries %(token)s}\\[10pt]
+{\Large $\displaystyle \int_0^{%(a)s} x^{%(b)s}\,dx$}\\[10pt]
+{\large the word is \textbf{%(word)s}}
+\end{minipage}
+\end{document}
+"""
+
+EYES_WORDS = ["lattice", "kernel", "cyclotomic", "residue", "orbit", "cocycle",
+              "spectrum", "filtration", "adjoint", "quotient"]
+
+
+def cmd_eyes(live, args):
+    """Settle, by experiment, whether the assistant driving this can see.
+
+    Model capabilities are a moving target and the harness matters as much as the
+    model: something vision-capable behind a tool that only ever sends text is
+    still blind here. Rather than trust anyone's recollection, render an image
+    with a value nobody could guess and ask.
+    """
+    import random
+    stamp = os.path.join(live.dir, "eyes")
+    os.makedirs(stamp, exist_ok=True)
+    answer_path = os.path.join(stamp, "answer.txt")
+
+    if "--answer" in args:
+        try:
+            with open(answer_path, "r", encoding="utf-8") as fh:
+                print(fh.read().strip())
+        except OSError:
+            print("nothing generated yet; run: board eyes")
+        return 0
+
+    token = "%04d-%04d" % (random.randint(1000, 9999), random.randint(1000, 9999))
+    word = random.choice(EYES_WORDS)
+    a, b = random.randint(2, 9), random.randint(2, 5)
+    integral = "%s^%s/%s" % (a, b + 1, b + 1)
+
+    tex = os.path.join(stamp, "eyes.tex")
+    with open(tex, "w", encoding="utf-8") as fh:
+        fh.write(EYES_DOC % {"token": token, "word": word, "a": a, "b": b})
+
+    env = boardlib.tex_env()
+    proc = subprocess.run(
+        ["pdflatex", "-interaction=nonstopmode", "-halt-on-error",
+         "-output-directory=" + stamp, tex],
+        env=env, cwd=stamp, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=90)
+    pdf = os.path.join(stamp, "eyes.pdf")
+    if proc.returncode != 0 or not os.path.exists(pdf):
+        print("could not render the test image; is TeX installed? (board doctor)",
+              file=sys.stderr)
+        return 1
+
+    png = os.path.join(stamp, "eyes.png")
+    subprocess.run(["pdftoppm", "-png", "-r", "120", "-singlefile", pdf,
+                    os.path.splitext(png)[0]],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
+    if not os.path.exists(png):
+        # pdftoppm is not everywhere; the PDF on its own is still a fair test.
+        png = pdf
+
+    with open(answer_path, "w", encoding="utf-8") as fh:
+        fh.write("token: %s\nword:  %s\nintegral evaluates to: %s\n"
+                 % (token, word, integral))
+
+    print(png)
+    print()
+    print("Ask the assistant driving this to open that file and report the token,")
+    print("the word, and what the integral evaluates to.")
+    print("Then run `board eyes --answer` to see whether it read them or invented them.")
+    print()
+    print("If it cannot: this repository should be in code mode, where nothing")
+    print("needs to be seen. Handwriting review needs an assistant that can look.")
+    return 0
+
+
+def cmd_doctor(live, args):
+    import platform as _pl
+    import shutil as _sh
+    env_path = boardlib.tex_env().get("PATH", "")
+    ok = True
+    print("system:   %s %s" % (_pl.system(), _pl.machine()))
+    print("python:   %s" % sys.version.split()[0])
+    for exe in ("latex", "pdflatex", "dvisvgm"):
+        found = _sh.which(exe, path=env_path)
+        print("%-9s %s" % (exe + ":", found or "MISSING"))
+        ok = ok and bool(found)
+    print("katex:    %s" % ("vendored" if os.path.exists(
+        os.path.join(TOOL, "web", "katex", "katex.min.js")) else "MISSING"))
+    cfg = read_config(live.root)
+    print("repo:     %s" % live.root)
+    print("course:   %s  (%s mode)" % (cfg["name"], cfg["mode"]))
+    print("node:     %s" % this_node())
+    print("port:     %d (default for this repo)" % default_port(live.root))
+    owner = ts_owner()
+    v4, tsname = ts_info()
+    print("tailnet:  %s" % (tsname or "not linked"))
+    if owner:
+        print("vpn host: %s%s" % (owner.get("node"),
+                                  "" if owner.get("node") == this_node() else "  (not this one)"))
+    return 0 if ok else 1
+
+
+# ---------------------------------------------------------------------------
+COMMANDS = {
+    "start": cmd_start, "stop": cmd_stop, "status": cmd_status,
+    "open": cmd_open, "next": cmd_next, "write": cmd_write,
+    "inbox": cmd_inbox, "archive": cmd_archive, "export": cmd_export,
+    "doctor": cmd_doctor, "slate": cmd_slate, "wait": cmd_wait,
+    "net": cmd_net, "vpn": cmd_vpn, "init": cmd_init, "eyes": cmd_eyes,
+    "finish": cmd_finish, "push": cmd_push,
+}
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return 0
+    cmd = argv[0]
+    rest = argv[1:]
+    root = None
+    if "--repo" in rest:
+        n = rest.index("--repo")
+        root = rest[n + 1]
+        rest = rest[:n] + rest[n + 2:]
+    live = Live(find_repo(root))
+    fn = COMMANDS.get(cmd)
+    if not fn:
+        print("unknown command: %s (try: board help)" % cmd, file=sys.stderr)
+        return 1
+    return fn(live, rest)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

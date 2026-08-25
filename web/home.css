@@ -1,0 +1,175 @@
+/* ==========================================================================
+   home.css -- the front door.
+
+   This is what start_url points at, so it is the first thing the installed app
+   shows. It answers three questions and no others: what am I in the middle of,
+   is the tutor waiting on me, and what else could I open.
+   ========================================================================== */
+
+:root {
+  --paper:   #fbfaf7;
+  --paper-2: #f3f1ec;
+  --ink:     #1c1b19;
+  --ink-2:   #55524c;
+  --ink-3:   #8d887f;
+  --rule:    #ddd9d0;
+  --accent:  #7a1f1f;
+  --ask:     #8a5a00;
+  --slate:   #22302b;
+}
+
+body[data-mode="dark"], body[data-mode="auto"].sys-dark {
+  --paper:   #16171a;
+  --paper-2: #1e2025;
+  --ink:     #e6e3dd;
+  --ink-2:   #a9a49b;
+  --ink-3:   #77726a;
+  --rule:    #2e3138;
+  --accent:  #e0827c;
+  --ask:     #e0b45c;
+  --slate:   #cfd8d2;
+}
+
+* { box-sizing: border-box; }
+
+/* The `hidden` attribute has to actually hide things -- see board.css. */
+[hidden] { display: none !important; }
+
+html, body {
+  margin: 0; padding: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Times New Roman", serif;
+  line-height: 1.6;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* ---------- bar ---------- */
+#bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: calc(.5rem + env(safe-area-inset-top)) max(.75rem, env(safe-area-inset-right))
+           .5rem max(.75rem, env(safe-area-inset-left));
+  border-bottom: 1px solid var(--rule);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: .82rem;
+}
+.bar-left { display: flex; align-items: center; gap: .55rem; }
+.wordmark { font-weight: 650; letter-spacing: .02em; }
+.bar-right { display: flex; gap: .25rem; }
+#bar button {
+  font: inherit; line-height: 1; padding: .4rem .55rem;
+  border: 1px solid transparent; border-radius: .4rem;
+  background: transparent; color: var(--ink-2); cursor: pointer;
+}
+#bar button:hover { background: var(--paper-2); color: var(--ink); }
+
+.dot { width: .55rem; height: .55rem; border-radius: 50%; background: var(--ink-3); transition: background .3s; }
+.dot.live { background: #35a35f; box-shadow: 0 0 0 3px color-mix(in srgb, #35a35f 22%, transparent); }
+.dot.dead { background: #b64b4b; }
+
+/* ---------- page ---------- */
+main {
+  max-width: 34rem; margin: 0 auto;
+  padding: 2rem max(1.1rem, env(safe-area-inset-left))
+           calc(3rem + env(safe-area-inset-bottom)) max(1.1rem, env(safe-area-inset-right));
+}
+
+.eyebrow {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: .66rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--ink-3); margin: 0 0 .35rem;
+}
+.hero h1 {
+  margin: 0; font-size: 1.9rem; line-height: 1.2; font-weight: 600;
+  letter-spacing: -.01em;
+}
+.hero .chapter { margin: .3rem 0 0; color: var(--ink-2); font-size: 1.02rem; }
+
+.waiting {
+  margin: 1.2rem 0 0;
+  padding: .7rem .9rem;
+  border-left: 3px solid var(--ask);
+  background: color-mix(in srgb, var(--ask) 8%, transparent);
+  border-radius: 0 .4rem .4rem 0;
+  font-size: .95rem;
+}
+.waiting-tag {
+  display: block;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: .62rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--ask); margin-bottom: .15rem;
+}
+
+/* ---------- the two big doors ---------- */
+.actions { display: grid; gap: .7rem; margin-top: 1.6rem; }
+@media (min-width: 30rem) { .actions { grid-template-columns: 1.4fr 1fr; } }
+
+.action {
+  display: flex; flex-direction: column; justify-content: center;
+  min-height: 5.2rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--rule); border-radius: .7rem;
+  text-decoration: none; color: var(--ink);
+  background: var(--paper-2);
+  transition: transform .12s ease, border-color .12s ease;
+}
+.action:active { transform: scale(.985); }
+.action:hover { border-color: var(--ink-3); }
+.action.primary { background: var(--slate); color: var(--paper); border-color: var(--slate); }
+body[data-mode="dark"] .action.primary,
+body[data-mode="auto"].sys-dark .action.primary { color: #16171a; }
+.action-name {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-weight: 620; font-size: 1rem;
+}
+.action-sub { font-size: .8rem; opacity: .72; margin-top: .2rem; }
+
+/* ---------- lists ---------- */
+h2 {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: .78rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 2.6rem 0 .2rem;
+}
+.hint { margin: 0 0 .8rem; font-size: .82rem; color: var(--ink-3); }
+
+.courses { list-style: none; margin: 0; padding: 0; }
+.courses li { margin-bottom: .5rem; }
+.courses button, .courses a {
+  display: flex; align-items: baseline; gap: .6rem; width: 100%;
+  font: inherit; text-align: left; text-decoration: none;
+  padding: .7rem .9rem;
+  border: 1px solid var(--rule); border-radius: .55rem;
+  background: transparent; color: var(--ink); cursor: pointer;
+}
+.courses button:hover, .courses a:hover { background: var(--paper-2); }
+.courses .name { font-weight: 600; }
+.courses .meta { margin-left: auto; font-size: .76rem; color: var(--ink-3); white-space: nowrap;
+                 font-family: ui-sans-serif, system-ui, sans-serif; }
+.courses .live { color: #35a35f; }
+
+.where {
+  margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: .7rem; color: var(--ink-3); word-break: break-all;
+}
+
+/* ---------- switching ---------- */
+.busy {
+  position: fixed; inset: 0; z-index: 90;
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--paper) 86%, transparent);
+  backdrop-filter: blur(3px);
+  font-family: ui-sans-serif, system-ui, sans-serif; font-size: .9rem; color: var(--ink-2);
+}
+.busy span::after {
+  content: "moving the board…";
+}
+
+/* last push, so the state of the repository is visible without a terminal */
+.pushline {
+  margin: 1rem 0 0; font-size: .78rem;
+  font-family: ui-sans-serif, system-ui, sans-serif; color: var(--ink-3);
+}
+.pushline.ok  { color: #2f7d4f; }
+.pushline.bad { color: var(--accent); overflow-wrap: anywhere; }

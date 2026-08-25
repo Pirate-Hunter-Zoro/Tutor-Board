@@ -1,0 +1,16 @@
+\documentclass[border=0pt]{standalone}
+\usepackage{tikz}
+\usepackage{amsmath,amssymb}
+\usepackage{xcolor}
+\definecolor{slate}{HTML}{22302B}
+\definecolor{chalk}{HTML}{F4F7F2}
+\begin{document}
+\begin{tikzpicture}[x=1bp,y=1bp]
+  % Full bleed: iOS applies its own squircle mask, so no corners here.
+  \fill[slate] (0,0) rectangle (512,512);
+  \draw[chalk, line width=6bp, opacity=.28, rounded corners=26bp]
+        (54,54) rectangle (458,458);
+  \node[chalk, inner sep=0] at (256,250)
+        {\fontsize{170}{170}\selectfont$\displaystyle\sum$};
+\end{tikzpicture}
+\end{document}
