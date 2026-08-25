@@ -52,6 +52,42 @@ def have_tex(env=None):
     return all(shutil.which(x, path=path) for x in ("latex", "pdflatex", "dvisvgm"))
 
 
+def board_is_running(pid, root):
+    """Is this pid genuinely our board for this repository?
+
+    A pid alone proves nothing: it may have been recycled, and on a shared
+    filesystem the record may have been written by a different machine
+    altogether. Check that the process is actually serving this directory.
+    """
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), 0)
+    except (OSError, TypeError, ValueError):
+        return False
+    args = _cmdline(pid)
+    if args is None:
+        return True          # cannot tell; the pid is alive, so believe it
+    return "serve.py" in args and os.path.abspath(root) in args
+
+
+def _cmdline(pid):
+    proc = "/proc/%s/cmdline" % pid
+    if os.path.exists(proc):
+        try:
+            with open(proc, "rb") as fh:
+                return fh.read().replace(b"\x00", b" ").decode("utf-8", "replace")
+        except OSError:
+            return None
+    try:
+        import subprocess
+        out = subprocess.run(["ps", "-p", str(pid), "-o", "args="],
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5)
+        return out.stdout.decode("utf-8", "replace") if out.returncode == 0 else None
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Tailscale
 # ---------------------------------------------------------------------------

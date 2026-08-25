@@ -7,6 +7,9 @@ tutor -- start a tutoring session.
     tutor galois --homework     and open a homework sitting
     tutor trd --agent opencode  with a particular assistant
     tutor galois --no-agent     just bring the board up
+    tutor headless galois       run the assistant as a daemon, driven from the iPad
+    tutor headless --stop       stop it
+    tutor where                 what is up, on this machine and on the tailnet
 
 One command, from anywhere. It finds the course, brings its board up, opens a
 session, and launches whichever assistant you use -- already pointed at the
@@ -42,12 +45,27 @@ DEFAULT_CONFIG = {
     "agents": {
         # `prompt: argv`  -- the brief is passed as a final argument
         # `prompt: none`  -- the agent is launched bare and told where to read
-        "claude":   {"cmd": ["claude"],   "prompt": "argv"},
-        "opencode": {"cmd": ["opencode"], "prompt": "argv"},
-        "codex":    {"cmd": ["codex"],    "prompt": "argv"},
-        "aider":    {"cmd": ["aider"],    "prompt": "none"},
-        "cursor":   {"cmd": ["cursor-agent"], "prompt": "none"},
+        #
+        # `headless` is how to run one turn without a terminal: a command that
+        # takes a prompt, does the work, and exits. {prompt} is substituted.
+        # Continuity across turns is the agent's own business -- most keep a
+        # session and offer a flag to resume it, which is what belongs here.
+        "claude": {
+            "cmd": ["claude"], "prompt": "argv",
+            "headless": ["claude", "-p", "{prompt}", "--continue"],
+        },
+        "opencode": {
+            "cmd": ["opencode"], "prompt": "argv",
+            "headless": ["opencode", "run", "--continue", "{prompt}"],
+        },
+        "codex": {
+            "cmd": ["codex"], "prompt": "argv",
+            "headless": ["codex", "exec", "{prompt}"],
+        },
+        "aider":  {"cmd": ["aider"], "prompt": "none"},
+        "cursor": {"cmd": ["cursor-agent"], "prompt": "none"},
     },
+    "headless_timeout": 900,
 }
 
 
@@ -166,6 +184,191 @@ Check `board inbox` at the start of every turn. When the session ends, run
 """
 
 
+# ---------------------------------------------------------------------------
+# Headless: the assistant as a daemon, driven entirely from the iPad.
+#
+# `board wait` blocks until the student sends something and then exits. That is
+# the whole engine: wait, hand what arrived to the assistant, let it write cards,
+# wait again. Nobody is at a terminal at any point.
+#
+# It writes a heartbeat as it goes, because a daemon you cannot see is worse than
+# no daemon -- the board shows whether anything is actually listening.
+# ---------------------------------------------------------------------------
+import signal
+import time
+
+HEADLESS_PROMPT = (
+    "You are running headless: there is no terminal and nobody will read stdout. "
+    "The student is on the board. Read live/BRIEF.md and AI_INSTRUCTIONS.md if you "
+    "have not already.\n\n"
+    "They just sent this:\n\n%s\n\n"
+    "Run `board inbox` for the full detail including any file paths, open anything "
+    "they sent, and reply by writing ONE new card into live/cards/. Do not write "
+    "more than one card. Do not ask them to type in a terminal."
+)
+
+
+def agent_state(live, **kw):
+    path = os.path.join(live, "agent.json")
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            st = json.load(fh)
+    except (OSError, ValueError):
+        st = {}
+    st.update(kw)
+    st["last_seen"] = time.time()
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(st, fh, indent=2)
+    os.replace(tmp, path)
+    return st
+
+
+def headless_stop(cfg, args):
+    stopped = 0
+    for c in courses(cfg):
+        path = os.path.join(c["root"], "live", "agent.json")
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                st = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        pid = st.get("pid")
+        if pid and st.get("host") == os.uname().nodename.split(".")[0]:
+            try:
+                os.kill(pid, signal.SIGTERM)
+                print("  stopped %s (pid %d)" % (c["dir"], pid))
+                stopped += 1
+            except OSError:
+                pass
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    print("stopped %d" % stopped if stopped else "nothing was listening")
+    return 0
+
+
+def headless(cfg, course, agent_name, session):
+    spec = cfg["agents"].get(agent_name) or {}
+    recipe = spec.get("headless")
+    if not recipe:
+        print("'%s' has no headless recipe in %s.\n"
+              "Add one: a command that takes a prompt, does the work, and exits."
+              % (agent_name, CONFIG), file=sys.stderr)
+        return 1
+
+    root = course["root"]
+    live = os.path.join(root, "live")
+    os.makedirs(live, exist_ok=True)
+    log = open(os.path.join(live, "agent.log"), "a", buffering=1)
+    host = os.uname().nodename.split(".")[0]
+
+    board(root, "start")
+    if session:
+        board(root, "open", course.get("name") or course["dir"], "session", "--" + session)
+    _, net = board(root, "net")
+    urls = "\n".join("  " + l.strip() for l in net.splitlines() if l.strip().startswith("http"))
+    with open(os.path.join(live, "BRIEF.md"), "w", encoding="utf-8") as fh:
+        fh.write(BRIEF % {"name": course.get("name") or course["dir"],
+                          "mode": course.get("mode") or "unknown",
+                          "session": session or "lecture", "urls": urls})
+
+    agent_state(live, host=host, agent=agent_name, pid=os.getpid(),
+                started=time.time(), state="listening", turns=0, last_error=None)
+    print(net.rstrip())
+    print("\n%s is listening in %s. Send from the board; nothing here needs a keyboard."
+          % (agent_name, course["dir"]))
+    print("stop with: tutor headless --stop\n")
+
+    running = {"go": True}
+
+    def bye(*_):
+        running["go"] = False
+    signal.signal(signal.SIGTERM, bye)
+    signal.signal(signal.SIGINT, bye)
+
+    turns = 0
+    while running["go"]:
+        code, out = board(root, "wait", "--timeout", "300")
+        if not running["go"]:
+            break
+        if code != 0:
+            agent_state(live, state="listening")     # timed out; still alive
+            continue
+
+        turns += 1
+        agent_state(live, state="working", turns=turns)
+        log.write("\n=== %s turn %d ===\n%s\n" % (time.strftime("%H:%M:%S"), turns, out))
+
+        cmd = [a.replace("{prompt}", HEADLESS_PROMPT % out.strip()) for a in recipe]
+        try:
+            p = subprocess.run(cmd, cwd=root, stdout=log, stderr=subprocess.STDOUT,
+                               timeout=cfg.get("headless_timeout", 900))
+            err = None if p.returncode == 0 else "exit %d" % p.returncode
+        except subprocess.TimeoutExpired:
+            err = "timed out"
+        except OSError as exc:
+            err = str(exc)
+
+        if err:
+            log.write("!! %s\n" % err)
+            agent_state(live, state="listening", last_error=err)
+        else:
+            agent_state(live, state="listening", last_error=None)
+
+    agent_state(live, state="stopped")
+    try:
+        os.remove(os.path.join(live, "agent.json"))
+    except OSError:
+        pass
+    print("stopped after %d turn(s)" % turns)
+    return 0
+
+
+def cmd_where(cfg, args):
+    """What is up, and whether anything is listening."""
+    host = os.uname().nodename.split(".")[0]
+    print("this machine: %s\n" % host)
+    any_up = False
+    for c in courses(cfg):
+        live = os.path.join(c["root"], "live")
+        board_up, on, agent = "-", "", "-"
+        try:
+            with open(os.path.join(live, ".board.json"), "r", encoding="utf-8") as fh:
+                info = json.load(fh)
+            on = info.get("node") or "?"
+            if on == host:
+                import boardlib
+                if boardlib.board_is_running(info.get("pid"), c["root"]):
+                    board_up = "up :%s" % info.get("port", "?")
+                    any_up = True
+                else:
+                    board_up = "down"
+            else:
+                board_up = "on " + on
+        except (OSError, ValueError):
+            pass
+        try:
+            with open(os.path.join(live, "agent.json"), "r", encoding="utf-8") as fh:
+                st = json.load(fh)
+            fresh = time.time() - st.get("last_seen", 0) < 120
+            agent = ("%s %s" % (st.get("agent"), st.get("state"))) if fresh else "stale"
+        except (OSError, ValueError):
+            pass
+        print("  %-24s board:%-10s agent:%s" % (c.get("name") or c["dir"], board_up, agent))
+    if any_up:
+        print()
+        for c in courses(cfg):
+            _, net = board(c["root"], "net")
+            for l in net.splitlines():
+                if "ts.net/" in l and "https" in l:
+                    print("  reachable at %s" % l.strip().split()[0])
+                    break
+            break
+    return 0
+
+
 def main(argv):
     cfg = load_config()
     args, flags = [], {"session": None, "agent": None, "no_agent": False}
@@ -193,12 +396,25 @@ def main(argv):
             flags["session"] = "lecture"
         elif a == "--no-agent":
             flags["no_agent"] = True
+        elif a == "--stop":
+            pass
         elif a == "--agent":
             i += 1
             flags["agent"] = argv[i]
         else:
             args.append(a)
         i += 1
+
+    if args and args[0] == "where":
+        return cmd_where(cfg, args[1:])
+
+    if args and args[0] == "headless":
+        rest = args[1:]
+        if "--stop" in argv:
+            return headless_stop(cfg, rest)
+        found = courses(cfg)
+        course = pick(found, rest[0]) if rest else choose(found)
+        return headless(cfg, course, flags["agent"] or cfg["default_agent"], flags["session"])
 
     found = courses(cfg)
     if not found:

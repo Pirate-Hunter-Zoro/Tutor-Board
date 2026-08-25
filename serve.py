@@ -203,6 +203,22 @@ def load_slate(repo, limit=40):
     return out
 
 
+def load_agent(repo):
+    """Is a headless assistant attached, and is it working or waiting?
+
+    A daemon nobody can see is worse than no daemon. The heartbeat goes stale in
+    two minutes, so a crashed one stops claiming to be listening.
+    """
+    try:
+        with open(os.path.join(repo.live, "agent.json"), "r", encoding="utf-8") as fh:
+            st = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if time.time() - st.get("last_seen", 0) > 120:
+        st["state"] = "stale"
+    return st
+
+
 def load_push(repo):
     """The outcome of the last push, so the iPad can see it without a terminal."""
     try:
@@ -542,6 +558,7 @@ class Hub:
             "uploads": load_uploads(self.repo),
             "slate": load_slate(self.repo),
             "push": load_push(self.repo),
+            "agent": load_agent(self.repo),
         }
         return data
 

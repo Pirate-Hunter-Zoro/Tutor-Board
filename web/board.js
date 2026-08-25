@@ -23,6 +23,7 @@ var els = {
   scratchList: document.getElementById("scratch-list"),
   answer: document.getElementById("answer"),
   session: document.getElementById("session"),
+  agent: document.getElementById("agent"),
   finish: document.getElementById("finish"),
   pushed: document.getElementById("pushed"),
   pushedIcon: document.getElementById("pushed-icon"),
@@ -435,7 +436,7 @@ function render(data) {
   els.cards.appendChild(frag);
   els.empty.hidden = items.length > 0;
 
-  paintSession(state, data.push);
+  paintSession(state, data.push, data.agent);
 
   var codeMode = (state.mode || "math") === "code";
   document.body.dataset.mode2 = state.mode || "math";
@@ -467,7 +468,17 @@ function render(data) {
    person who needs to know a push failed, is holding an iPad. */
 var pushDismissed = 0;
 
-function paintSession(state, push) {
+function paintSession(state, push, agent) {
+  /* Whether an assistant is attached, and whether it is thinking. Without this
+     the page looks identical when nothing is listening at all. */
+  els.agent.hidden = !agent;
+  if (agent) {
+    els.agent.dataset.state = agent.state || "stale";
+    els.agent.textContent =
+      agent.state === "working" ? (agent.agent || "assistant") + " is working"
+    : agent.state === "listening" ? (agent.agent || "assistant") + " listening"
+    : "assistant not responding";
+  }
   var kind = state.session;
   els.session.hidden = !kind;
   if (kind) {

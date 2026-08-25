@@ -81,6 +81,68 @@ It replaces: remember which directory, `cd` there, start an agent, then tell the
 board. That last step is ceremony nobody should have to perform, and forgetting it produces a
 session where the assistant talks into a terminal no one is reading.
 
+### Headless — no terminal at all
+
+```
+tutor headless galois --agent opencode
+tutor headless --stop
+```
+
+The assistant runs as a daemon. `board wait` blocks until you send something from the board, hands
+it over, the assistant writes a card, and it goes back to waiting. You are on the sofa with an
+iPad; nobody is at a keyboard at any point.
+
+Each agent needs a `headless` recipe in the config — a command that takes a prompt, does the work,
+and exits:
+
+```json
+"opencode": { "headless": ["opencode", "run", "--continue", "{prompt}"] },
+"claude":   { "headless": ["claude", "-p", "{prompt}", "--continue"] }
+```
+
+`{prompt}` is substituted. Continuity across turns is the agent's own business; the flag that
+resumes its session belongs in the recipe. Output goes to `live/agent.log`.
+
+**This needs a machine that stays on.** On a cluster node your processes live and die with your
+allocation, so the daemon dies when the job ends — headless there is only useful for as long as
+you hold the node. An always-on machine is the right home for it: a Mac mini already on your
+tailnet, with its own clones of the course repositories, kept in step by pushing.
+
+### Knowing what is actually up
+
+A daemon you cannot see is worse than no daemon, so nothing has to be assumed:
+
+```
+tutor where
+```
+
+```
+this machine: mac-mini
+
+  Galois Theory            board:up :8787   agent:opencode listening
+  Probability              board:-          agent:-
+  TRD-EHR                  board:on compute301  agent:-
+
+  reachable at https://board.<tailnet>.ts.net/
+```
+
+On the board itself, a dot beside the course name says whether an assistant is attached: green and
+*listening*, amber and pulsing while it is *working*, red when the heartbeat has gone stale. The
+heartbeat expires after two minutes, so a daemon that crashed stops claiming to be there.
+
+Liveness is checked against the process, not just the pid — a record on a shared filesystem may
+have been written by another machine, and a pid on its own can be a stranger's.
+
+### Two machines, and which one owns the address
+
+The tailnet identity is one machine that moves, so `board.<tailnet>.ts.net` points at whichever
+host currently holds it, and `board vpn up` refuses to start a second daemon against the same
+state. That is the right behaviour for one machine at a time.
+
+If you want an always-on host *and* an occasional cluster node live together, give them separate
+identities — a different `--hostname` and a different `TS_DIR` on the second — and install the
+board on the iPad from each address. Two apps, two icons, no ambiguity about which is which.
+
 ### Which assistant runs is configuration
 
 `~/.config/tutor-board/config.json`, written on first run:

@@ -124,11 +124,11 @@ def alive(info):
     node = info.get("node")
     if node and node != this_node():
         return False
-    try:
-        os.kill(info.get("pid", -1), 0)
-        return True
-    except OSError:
-        return False
+    return boardlib.board_is_running(info.get("pid"), info.get("root") or live_root(info))
+
+
+def live_root(info):
+    return info.get("root", "")
 
 
 def slurm_nodes():
