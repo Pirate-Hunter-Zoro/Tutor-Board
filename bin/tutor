@@ -9,6 +9,9 @@ tutor -- start a tutoring session.
     tutor galois --no-agent     just bring the board up
     tutor headless galois       run the assistant as a daemon, driven from the iPad
     tutor headless --stop       stop it
+    tutor agent status          which course has an assistant attached
+    tutor agent start galois    attach one there, detaching whatever was elsewhere
+    tutor agent stop galois     ask it to write its handoff and go
     tutor where                 what is up, on this machine and on the tailnet
 
 One command, from anywhere. It finds the course, brings its board up, opens a
@@ -65,7 +68,14 @@ DEFAULT_CONFIG = {
         "aider":  {"cmd": ["aider"], "prompt": "none"},
         "cursor": {"cmd": ["cursor-agent"], "prompt": "none"},
     },
+    # Which assistant a given machine prefers, keyed by its short hostname. A
+    # laptop and a cluster node do not have the same tools installed and should
+    # not need different configuration files to say so. Empty means every
+    # machine falls through to default_agent.
+    "hosts": {},
     "headless_timeout": 900,
+    # How long the wrap-up turn gets. It is one turn, but it writes files.
+    "handoff_timeout": 600,
 }
 
 
@@ -97,6 +107,35 @@ def read_course(root):
     except (OSError, ValueError):
         pass
     return cfg
+
+
+def this_host():
+    return os.uname().nodename.split(".")[0]
+
+
+def resolve_agent(cfg, course, override=None):
+    """Which assistant tutors this course, on this machine.
+
+    Most specific wins, and every layer is configuration rather than code:
+
+      1. --agent on the command line          -- this once
+      2. "agent" in the course's tutorboard.json -- this course, everywhere
+      3. "hosts" in the config, by hostname   -- this machine, every course
+      4. default_agent                        -- everything else
+
+    Which model an assistant runs is not a layer here and never should be: an
+    agent entry is a command recipe, so a second model is a second entry whose
+    `cmd` carries the flag. Nothing in this file knows what a model is.
+    """
+    for pick in (override, (course or {}).get("agent"),
+                 (cfg.get("hosts") or {}).get(this_host()),
+                 cfg.get("default_agent")):
+        if pick and pick in cfg["agents"]:
+            return pick
+        if pick:
+            print("no agent called '%s'; try: tutor --agents" % pick, file=sys.stderr)
+            return None
+    return None
 
 
 def courses(cfg):
@@ -164,6 +203,31 @@ def board(root, *args):
     return p.returncode, p.stdout.decode("utf-8", "replace")
 
 
+def link(root):
+    """Bring the tailnet link up, on every launch, before anything reads addresses.
+
+    An allocation ending takes the daemon with it, so the first thing a new
+    session needs is the link back -- and asking a person to run it themselves
+    is exactly the ceremony this launcher exists to remove. Nothing is forced:
+    the ownership check inside `board` clears a claim from a node that is no
+    longer held, and refuses when another live node really is holding it.
+
+    A machine with no tailscale, or one that is not logged in, is a legitimate
+    outcome; the board is still up on loopback. This never fails a launch.
+    """
+    code, out = board(root, "vpn", "up")
+    if code == 3:
+        print(out.strip())              # not logged in -- the URL is the point
+        return
+    if code != 0:
+        return
+    # `board net` re-points an existing serve on its own; this is for the case
+    # where there is no serve yet, which is every first link on a fresh daemon.
+    code, out = board(root, "vpn", "serve")
+    if code != 0:
+        print(out.strip(), file=sys.stderr)
+
+
 BRIEF = """# Session brief
 
 You are tutoring in this repository. Read `AI_INSTRUCTIONS.md` in full before
@@ -181,7 +245,31 @@ The user is reading that page, probably on an iPad, not this terminal. Write eac
 teaching turn as a card in `live/cards/` and keep the terminal to a line or two.
 Check `board inbox` at the start of every turn. When the session ends, run
 `board finish` so the board can offer to save and push.
+
+**Read `HANDOFF.md` before your first card** if the repository has one. It is
+what the last session left for you: where the student got to, what they got
+wrong, and what comes next. Sessions end without warning — a switched course, a
+closed lid, an allocation that expired — so it is the only continuity there is.
 """
+
+# Sessions do not end tidily. A course is switched on the iPad, a lid closes, an
+# allocation expires. Whatever the reason, the assistant gets one last turn to
+# write down where things got to, because the alternative is the next session
+# opening cold and asking the student to recap their own lesson.
+HANDOFF_PROMPT = (
+    "This session is ending now. You get one turn and nobody will read stdout.\n\n"
+    "Write `HANDOFF.md` at the root of this repository -- replacing it, not "
+    "appending -- so that the next assistant can pick this course up cold. Keep "
+    "it short and concrete:\n\n"
+    "- where the student got to, by topic, not by card number\n"
+    "- what they got wrong, and what the misunderstanding actually was\n"
+    "- what they got right, so it is not re-taught\n"
+    "- the single next thing to teach, and why that one\n"
+    "- anything about how this student works that took you a while to learn\n\n"
+    "If the course's own README or AI_INSTRUCTIONS.md drifted out of date during "
+    "the session, fix them too. Do not ask questions, do not start new teaching, "
+    "and do not write a card -- the student has already gone."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -249,6 +337,135 @@ def headless_stop(cfg, args):
     return 0
 
 
+def agent_live(root):
+    """The daemon recorded for this course, if it is really there.
+
+    A pid on a shared filesystem proves nothing -- the record may have been
+    written by a node whose allocation has since ended -- so the host is checked
+    before the pid is believed.
+    """
+    try:
+        with open(os.path.join(root, "live", "agent.json"), "r", encoding="utf-8") as fh:
+            st = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if st.get("host") != this_host() or not st.get("pid"):
+        return None
+    try:
+        os.kill(st["pid"], 0)
+    except OSError:
+        return None
+    return st
+
+
+def agent_start(cfg, course, agent_name, session=None):
+    """Put an assistant in this course's repository, detached.
+
+    Detached because the thing asking is usually an HTTP request from the iPad,
+    which must not wait on an agent, and because the daemon has to outlive the
+    request that started it.
+    """
+    root = course["root"]
+    live_dir = os.path.join(root, "live")
+    st = agent_live(root)
+    if st:
+        return 0, "%s already listening in %s" % (st.get("agent"), course["dir"])
+    if not agent_name:
+        return 1, "no agent resolved for %s" % course["dir"]
+    if not (cfg["agents"].get(agent_name) or {}).get("headless"):
+        return 1, "'%s' has no headless recipe; add one in %s" % (agent_name, CONFIG)
+
+    os.makedirs(live_dir, exist_ok=True)
+    cmd = [sys.executable, os.path.realpath(__file__), "headless", course["dir"],
+           "--agent", agent_name]
+    if session:
+        cmd.append("--" + session)
+    out = open(os.path.join(live_dir, "agent.log"), "a", buffering=1)
+    kw = {"cwd": root, "stdout": out, "stderr": subprocess.STDOUT,
+          "stdin": subprocess.DEVNULL}
+    if hasattr(os, "setsid"):
+        kw["preexec_fn"] = os.setsid      # survives the terminal that spawned it
+    try:
+        subprocess.Popen(cmd, **kw)
+    except OSError as exc:
+        return 1, str(exc)
+    return 0, "%s starting in %s" % (agent_name, course["dir"])
+
+
+def agent_stop(course, wait=False):
+    """Ask the daemon to finish. It writes the handoff on its way out.
+
+    SIGTERM rather than a kill, because the whole point of the wrap-up turn is
+    that it happens. It can take a minute; nothing here waits for it unless
+    asked, since the caller is usually a person switching course.
+    """
+    st = agent_live(course["root"])
+    if not st:
+        return 0, "nothing was listening in %s" % course["dir"]
+    try:
+        os.kill(st["pid"], signal.SIGTERM)
+    except OSError as exc:
+        return 1, str(exc)
+    if wait:
+        for _ in range(120):
+            if not agent_live(course["root"]):
+                break
+            time.sleep(1)
+    return 0, "%s in %s is wrapping up" % (st.get("agent"), course["dir"])
+
+
+def cmd_agent(cfg, args):
+    """tutor agent status|start|stop [course]
+
+    The board drives this when a course is opened or left. One assistant is
+    alive at a time, always the one whose board is in front of you.
+    """
+    sub = args[0] if args else "status"
+    rest = [a for a in args[1:] if not a.startswith("--")]
+    found = courses(cfg)
+
+    if sub == "status":
+        for c in found:
+            st = agent_live(c["root"])
+            print("  %-26s %s" % (c.get("name") or c["dir"],
+                                  ("%s (%s, %d turn(s))"
+                                   % (st.get("agent"), st.get("state"), st.get("turns", 0)))
+                                  if st else "-"))
+        return 0
+
+    if not rest:
+        print("which course? try: tutor agent %s <name>" % sub, file=sys.stderr)
+        return 1
+    course = pick(found, rest[0])
+
+    if sub == "stop":
+        code, msg = agent_stop(course, wait="--wait" in args)
+        print(msg, file=sys.stderr if code else sys.stdout)
+        return code
+
+    if sub == "start":
+        # One at a time: whatever was listening elsewhere is asked to wrap up
+        # first, so its handoff is written before attention moves.
+        for other in found:
+            if other["root"] != course["root"] and agent_live(other["root"]):
+                _, msg = agent_stop(other)
+                print(msg)
+        name = resolve_agent(cfg, course, _flag(args, "--agent"))
+        code, msg = agent_start(cfg, course, name)
+        print(msg, file=sys.stderr if code else sys.stdout)
+        return code
+
+    print("unknown: tutor agent %s" % sub, file=sys.stderr)
+    return 1
+
+
+def _flag(args, name):
+    for n, a in enumerate(args):
+        if a == name and n + 1 < len(args):
+            return args[n + 1]
+    return None
+
+
 def headless(cfg, course, agent_name, session):
     spec = cfg["agents"].get(agent_name) or {}
     recipe = spec.get("headless")
@@ -265,6 +482,7 @@ def headless(cfg, course, agent_name, session):
     host = os.uname().nodename.split(".")[0]
 
     board(root, "start")
+    link(root)
     if session:
         board(root, "open", course.get("name") or course["dir"], "session", "--" + session)
     _, net = board(root, "net")
@@ -281,16 +499,30 @@ def headless(cfg, course, agent_name, session):
           % (agent_name, course["dir"]))
     print("stop with: tutor headless --stop\n")
 
-    running = {"go": True}
+    running = {"go": True, "waiter": None}
 
     def bye(*_):
         running["go"] = False
+        # Kill the blocking `board wait` too, or shutting down takes as long as
+        # its timeout -- five minutes of a course that has already been left.
+        w = running["waiter"]
+        if w and w.poll() is None:
+            try:
+                w.terminate()
+            except OSError:
+                pass
     signal.signal(signal.SIGTERM, bye)
     signal.signal(signal.SIGINT, bye)
 
     turns = 0
     while running["go"]:
-        code, out = board(root, "wait", "--timeout", "300")
+        running["waiter"] = subprocess.Popen(
+            [sys.executable, BOARD, "wait", "--timeout", "300"], cwd=root,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        raw = running["waiter"].communicate()[0]
+        code = running["waiter"].returncode
+        out = raw.decode("utf-8", "replace")
+        running["waiter"] = None
         if not running["go"]:
             break
         if code != 0:
@@ -316,6 +548,19 @@ def headless(cfg, course, agent_name, session):
             agent_state(live, state="listening", last_error=err)
         else:
             agent_state(live, state="listening", last_error=None)
+
+    # The last turn, and the only one the student never sees.
+    if turns:
+        agent_state(live, state="wrapping up")
+        log.write("\n=== %s handoff ===\n" % time.strftime("%H:%M:%S"))
+        cmd = [a.replace("{prompt}", HANDOFF_PROMPT) for a in recipe]
+        try:
+            subprocess.run(cmd, cwd=root, stdout=log, stderr=subprocess.STDOUT,
+                           timeout=cfg.get("handoff_timeout", 600))
+            wrote = os.path.isfile(os.path.join(root, "HANDOFF.md"))
+            log.write("handoff written\n" if wrote else "!! no HANDOFF.md was written\n")
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            log.write("!! handoff failed: %s\n" % exc)
 
     agent_state(live, state="stopped")
     try:
@@ -408,13 +653,17 @@ def main(argv):
     if args and args[0] == "where":
         return cmd_where(cfg, args[1:])
 
+    if args and args[0] == "agent":
+        return cmd_agent(cfg, argv[argv.index("agent") + 1:])
+
     if args and args[0] == "headless":
         rest = args[1:]
         if "--stop" in argv:
             return headless_stop(cfg, rest)
         found = courses(cfg)
         course = pick(found, rest[0]) if rest else choose(found)
-        return headless(cfg, course, flags["agent"] or cfg["default_agent"], flags["session"])
+        return headless(cfg, course, resolve_agent(cfg, course, flags["agent"]),
+                        flags["session"])
 
     found = courses(cfg)
     if not found:
@@ -427,6 +676,7 @@ def main(argv):
     if code != 0:
         print(out.strip(), file=sys.stderr)
         return 1
+    link(course["root"])
     if flags["session"]:
         title = " ".join(args[1:]) or "session"
         board(course["root"], "open", course.get("name") or course["dir"], title,
@@ -453,10 +703,11 @@ def main(argv):
         return 0
 
     # --- the assistant -----------------------------------------------------
-    name = flags["agent"] or cfg["default_agent"]
-    spec = cfg["agents"].get(name)
+    name = resolve_agent(cfg, course, flags["agent"])
+    spec = cfg["agents"].get(name) if name else None
     if not spec:
-        print("\nno agent called '%s'. Try: tutor --agents" % name, file=sys.stderr)
+        print("\nno assistant resolved for %s. Try: tutor --agents" % course["dir"],
+              file=sys.stderr)
         return 1
 
     cmd = list(spec.get("cmd", []))

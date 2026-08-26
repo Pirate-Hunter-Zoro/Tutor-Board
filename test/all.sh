@@ -35,7 +35,7 @@ if ! node -e "require('jsdom')" >/dev/null 2>&1; then
   echo
 fi
 
-SUITES="markdown macros hidden pages modes typeface interactive sizing"
+SUITES="markdown macros hidden chrome pages modes typeface export interactive sizing"
 fails=0
 skipped=0
 
@@ -55,6 +55,24 @@ for t in $SUITES; do
     echo "$last"
   fi
 done
+
+printf '%-12s ' "transcript"
+if out="$(python3 test/transcript.py 2>&1)"; then
+  printf '%s\n' "$out" | tail -1
+else
+  fails=$((fails + 1))
+  echo "FAILED"
+  printf '%s\n' "$out" | grep '^FAIL' | sed 's/^/             /'
+fi
+
+printf '%-12s ' "agents"
+if out="$(python3 test/agents.py 2>&1)"; then
+  printf '%s\n' "$out" | tail -1
+else
+  fails=$((fails + 1))
+  echo "FAILED"
+  printf '%s\n' "$out" | grep '^FAIL' | sed 's/^/             /'
+fi
 
 printf '%-12s ' "macros/tex"
 if python3 tools/sync-macros.py --check >/dev/null 2>&1; then

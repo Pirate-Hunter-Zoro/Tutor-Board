@@ -34,6 +34,21 @@ Read `README.md` first.
   still survives.
 - **A bad formula must not blank the board.** KaTeX runs with `throwOnError: false`; a broken TikZ
   fence caches an `.err` and renders as a marked box. Nothing in the render path may throw.
+- **A lesson is a transcript, and both halves of it are kept.** The student's answers are turns:
+  anchored to the card they answer, frozen at the moment they are sent (the slate is a working
+  surface and gets written over — never render a live slate page as though it were a submission),
+  and versioned, so a correction supersedes the original *in place* rather than appending another
+  copy. `live/turns.jsonl` is append-only; every revision stays, only the newest is shown.
+  Archiving takes cards, turns and the frozen answers together — a folder of the assistant's cards
+  with the student's half missing is a record of half a conversation. `test/transcript.py` guards
+  all of it.
+- **Two courses, two session boundaries.** Maths ends a session when the chapter does, which is
+  what `board open` marks. Code ends it at the commit: `board push` archives and starts the next
+  one, because a commit is what "we got this working" means. Do not invent a third.
+- **Code mode is not a chat box.** The work happens in the editor on the student's own machine.
+  The board carries the three things worth saying about it — ready to check, need help, confused —
+  and only opens a keyboard for the two that need a sentence. A free-text box that invites
+  conversation is the thing this must never drift into.
 - **The slate never loses ink.** Strokes are saved as vectors on an idle timer and again on page
   change and unload. A change that can drop a stroke is a change that must not ship — the student
   is writing a proof, not doodling.
@@ -83,6 +98,19 @@ Read `README.md` first.
 - **Nothing model-specific, ever.** The interface is a command line and a directory of files. No
   SDK, no plugin, no assumption about which assistant is driving. `board wait` is the wake-up
   primitive precisely because a blocking process exiting is something every agent understands.
+  A model is never a concept in the code: an agent entry is a command recipe, so a different model
+  is a different entry whose `cmd` carries the flag. If you find yourself adding a `model` field,
+  stop.
+- **The assistant belongs to the course, not to the terminal.** One is alive at a time, in the
+  repository whose board is showing, resolved most-specific-first: `--agent`, then the course's
+  `tutorboard.json`, then the machine by hostname, then `default_agent`. Switching course on the
+  hub moves it. Never tie an assistant's lifetime to a terminal session, and never make the student
+  start one.
+- **No session ends without a handoff.** Sessions end by being abandoned — a switched course, a
+  closed lid, an expired allocation — so the departing assistant gets one last turn, with no student
+  attached, to write `HANDOFF.md` at the course root. `SIGTERM` starts that wrap-up; nothing may
+  kill the daemon outright, and no code path may stop an agent without going through it. An
+  assistant's own history does not survive a node, a vendor, or a week. That file is the continuity.
 
 ## Where the work is
 
@@ -116,7 +144,23 @@ a lattice collided with a paragraph.
 
 ## Persona and mode
 
-The persona, the two modes, and the no-code rule are the same as in the course repositories: aloof,
-blunt, no emojis, no empty praise; normal mode gives English-only guidance for implementation work
-and the phrase "Fuck learning" suspends that for exactly one response. Work on this repository is
-ordinary programming work and is governed by that rule like anything else.
+The persona is the same as in the course repositories: aloof, blunt, no emojis, no empty praise.
+
+**The no-code rule does not apply here.** In a course repository the point is that the student
+writes the code; withholding it is the teaching. This repository is the *tool*, not the course.
+Nobody is learning anything by being told in English which argument to pass — they are trying to
+get a board in front of a person who is waiting to be taught on it. Write the code, make the edits,
+run the tests, report what happened.
+
+Concretely, in this repository and no other:
+
+- Edit the files directly. Do not narrate an edit the user is then expected to perform.
+- Ship the whole change, not the next step of it. The one-step-at-a-time cadence is a teaching
+  device and there is nothing being taught here.
+- Verification is still yours: `bash test/all.sh` before you claim anything works, and a test for
+  any defect a person had to find on a device.
+- The override phrase is not needed and should never be asked for.
+
+The teaching rules resume the moment the work is in a course repository — including a course whose
+subject happens to be programming. The distinction is what the code is *for*, not what it is
+written in.

@@ -87,9 +87,11 @@ function check(name, cond) {
   else { fails++; console.log('FAIL ' + name); }
 }
 
-function paint(mode, cards, messages) {
-  render({ state: { course: 'X', mode }, cards: cards || [], messages: messages || [],
-           uploads: [], slate: [] });
+// A student turn, not a raw message: the transcript is what the board renders
+// now, and "something has been sent" means a turn exists.
+function paint(mode, cards, turns) {
+  render({ state: { course: 'X', mode }, cards: cards || [], turns: turns || [],
+           messages: [], uploads: [], slate: [] });
   return { composer: registry.composer.hidden, answer: registry.writer.hidden };
 }
 
@@ -99,8 +101,19 @@ let r = paint('math', question, []);
 check('math: no text box, ever', r.composer === true);
 check('math: the slate is offered while an answer is owed', r.answer === false);
 
-r = paint('math', question, [{ t: now + 10, text: 'answered' }]);
-check('math: the offer goes once something has been sent', r.answer === true);
+// Sending is a checkpoint, not an exit. The tutor's next move is usually to
+// point at a mistake in what was just sent, so the panel and the ink have to
+// still be there to correct. It used to close on send, which made a correction
+// impossible without leaving the lesson.
+r = paint('math', question, [{ id: 't0001', rev: 1, kind: 'ink', answers: '0001',
+                               t: now + 10, t0: now + 10 }]);
+check('math: the answer block survives a send, so it can be corrected', r.answer === false);
+
+// A different question is the thing that closes it.
+const question2 = [{ id: '0002', kind: 'question', title: 'And now?', body: 'q', mtime: now + 20 }];
+r = paint('math', question2, [{ id: 't0001', rev: 1, kind: 'ink', answers: '0001',
+                                t: now + 30, t0: now + 30 }]);
+check('math: a new question closes the block for the old one', r.answer === true);
 
 r = paint('math', [{ id: '0001', kind: 'lesson', body: 'x', mtime: now }], []);
 check('math: no offer when nothing was asked', r.answer === true);

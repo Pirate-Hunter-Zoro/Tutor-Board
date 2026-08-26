@@ -68,8 +68,9 @@ class Live:
         self.archive = os.path.join(self.dir, "archive")
         self.tikz = os.path.join(self.dir, "tikzcache")
         self.slate = os.path.join(self.dir, "slate")
+        self.answers = os.path.join(self.dir, "answers")
         for d in (self.dir, self.cards, self.inbox, self.uploads, self.archive,
-                  self.tikz, self.slate):
+                  self.tikz, self.slate, self.answers):
             os.makedirs(d, exist_ok=True)
 
     def path(self, *parts):
@@ -302,9 +303,18 @@ def cmd_open(live, args):
 
 
 def cmd_archive(live, args):
+    """Close the current session and put the whole of it somewhere permanent.
+
+    The transcript goes with the cards. A lesson the student can reopen and
+    still see their own working in is the entire reason for keeping these; a
+    folder of the assistant's cards with the student's half missing is a
+    record of half a conversation.
+    """
     names = live.card_names()
     slate = sorted(n for n in os.listdir(live.slate) if re.match(r"^page-\d+\.(json|png)$", n))
-    if not names and not slate:
+    turns_path = live.path("turns.jsonl")
+    has_turns = os.path.exists(turns_path)
+    if not names and not slate and not has_turns:
         print("nothing to archive")
         return 0
     st = live.state()
@@ -319,12 +329,54 @@ def cmd_archive(live, args):
         for n in slate:
             os.rename(os.path.join(live.slate, n), os.path.join(sdest, n))
         print("archived %d slate pages" % len([n for n in slate if n.endswith(".png")]))
+    if has_turns:
+        os.rename(turns_path, os.path.join(dest, "turns.jsonl"))
+    frozen = sorted(os.listdir(live.answers)) if os.path.isdir(live.answers) else []
+    if frozen:
+        adest = os.path.join(dest, "answers")
+        os.makedirs(adest, exist_ok=True)
+        for n in frozen:
+            os.rename(os.path.join(live.answers, n), os.path.join(adest, n))
+        print("archived %d answer file(s)" % len(frozen))
     try:
         with open(os.path.join(dest, "state.json"), "w", encoding="utf-8") as fh:
             json.dump(st, fh, indent=2)
     except OSError:
         pass
     print("archived %d cards to %s" % (len(names), os.path.relpath(dest, live.root)))
+    return 0
+
+
+def cmd_history(live, args):
+    """Every past session in this repository, newest first."""
+    try:
+        names = sorted(os.listdir(live.archive), reverse=True)
+    except OSError:
+        names = []
+    shown = 0
+    for name in names:
+        folder = os.path.join(live.archive, name)
+        if not os.path.isdir(folder):
+            continue
+        st = {}
+        try:
+            with open(os.path.join(folder, "state.json"), "r", encoding="utf-8") as fh:
+                st = json.load(fh) or {}
+        except (OSError, ValueError):
+            pass
+        cards = len([n for n in os.listdir(folder) if re.match(r"^\d{4}[-_.]", n)])
+        turns = 0
+        try:
+            with open(os.path.join(folder, "turns.jsonl"), "r", encoding="utf-8") as fh:
+                turns = len({json.loads(l).get("id") for l in fh if l.strip()})
+        except (OSError, ValueError):
+            pass
+        print("  %-24s %-10s %-28s %2d cards  %2d answered"
+              % (name, st.get("session") or "-",
+                 (st.get("chapter") or st.get("course") or "-")[:28], cards, turns))
+        shown += 1
+    if not shown:
+        print("nothing archived yet")
     return 0
 
 
@@ -406,6 +458,14 @@ def cmd_finish(live, args):
 
 
 def cmd_push(live, args):
+    """Commit and push -- and, in a code course, end the session.
+
+    The two kinds of course have different natural boundaries. A maths lesson
+    ends when the chapter does, which is what `board open` marks. Code work ends
+    when it is committed: that is the unit, that is what "we got this working"
+    means, and it is the point at which the next session should start clean with
+    the transcript filed rather than carried forward.
+    """
     message = " ".join(a for a in args if not a.startswith("--")) or "lesson complete"
     script = os.path.join(live.root, "scripts", "save-and-push.sh")
     if not os.path.exists(script):
@@ -423,6 +483,13 @@ def cmd_push(live, args):
     if st.pop("finished", None) is not None:
         with open(live.path("state.json"), "w", encoding="utf-8") as fh:
             json.dump(st, fh, indent=2)
+
+    if p.returncode == 0 and read_config(live.root).get("mode") == "code" \
+            and "--keep-open" not in args:
+        print()
+        cmd_archive(live, [])
+        live.set_state(opened=time.strftime("%Y-%m-%d %H:%M"), finished=None)
+        print("session closed; the next one starts here")
     return p.returncode
 
 
@@ -1146,7 +1213,7 @@ COMMANDS = {
     "inbox": cmd_inbox, "archive": cmd_archive, "export": cmd_export,
     "doctor": cmd_doctor, "slate": cmd_slate, "wait": cmd_wait,
     "net": cmd_net, "vpn": cmd_vpn, "init": cmd_init, "eyes": cmd_eyes,
-    "finish": cmd_finish, "push": cmd_push,
+    "finish": cmd_finish, "push": cmd_push, "history": cmd_history,
 }
 
 

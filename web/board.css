@@ -59,8 +59,13 @@ html, body {
 }
 
 /* ---------- top bar ---------- */
+/* The whole top stack sticks as one piece: the bar, and the two banners that
+   belong under it. They used to stick to top:0 individually, one layer below
+   the bar, so the end-of-session question and the result of a push were both
+   posted underneath the header where nobody could read them. */
+#chrome { position: sticky; top: 0; z-index: 40; }
+
 #bar {
-  position: sticky; top: 0; z-index: 40;
   display: flex; align-items: center; justify-content: space-between;
   gap: .75rem;
   /* The top inset matters once this is installed to the iPad home screen and
@@ -256,7 +261,6 @@ body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180de
 
 /* ---------- end of session ---------- */
 .finish, .pushed {
-  position: sticky; top: 0; z-index: 39;
   display: flex; align-items: center; gap: .8rem;
   padding: .7rem max(1rem, env(safe-area-inset-left)) .7rem max(1rem, env(safe-area-inset-right));
   font-family: var(--ui);
@@ -290,14 +294,34 @@ body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180de
   border: 0; background: none; font: inherit; color: var(--ink-3);
 }
 
-/* ---------- the drawing tools, in the page chrome ---------- */
-/* They belong to the app, beside the type-size and theme buttons, rather than
-   being a widget that floats over the lesson. */
+/* ---------- the drawing tools, along the bottom ---------- */
+/* They belong to the app rather than floating over the lesson -- but not at the
+   top. Both bars were sticky at top:0 and this one, later in the document and a
+   layer above, simply painted over the header: home, reload, scratch, type size
+   and theme all vanished the moment an answer was owed. They are also the wrong
+   controls to put furthest from the hand holding the pen. So: app chrome at the
+   top where it is always reachable, pen tools at the bottom where the hand is.
+   Column-reverse so the overflow sheet and the selection bar, which follow the
+   tool row in the markup, open upwards from it instead of off the screen. */
 #drawbar {
-  position: sticky; top: 0; z-index: 41;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 41;
+  display: flex; flex-direction: column-reverse;
   background: #1c1e23;
-  border-bottom: 1px solid #2c2f37;
+  border-top: 1px solid #2c2f37;
+  padding-bottom: env(safe-area-inset-bottom);
+  box-shadow: 0 -6px 20px rgba(0,0,0,.28);
 }
+#drawbar .sl-bar, #drawbar .sl-menu, #drawbar .sl-selbar {
+  border-bottom: 0;
+  border-top: 1px solid var(--sl-line, #2c2f37);
+}
+#drawbar .sl-bar { border-top: 0; }
+/* The overflow sheet opens upward into the lesson; it must not grow past the
+   top of the window on a phone. */
+#drawbar .sl-menu { max-height: 50vh; overflow-y: auto; }
+/* Room for it, so the tools never cover the end of the lesson or the Send
+   button they belong to. Toggled with the bar itself. */
+body.tools-out { padding-bottom: 5.5rem; }
 
 /* ---------- the answer block, inline in the lesson ---------- */
 /* Part of the flow, under the question it answers. It never covers anything,
@@ -333,6 +357,109 @@ body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180de
 #btn-clip:hover { background: var(--paper-2); color: var(--ink); }
 
 .jump { bottom: 1.5rem; }
+/* Clear of the tool bar, which owns the bottom of the window while writing. */
+body.tools-out .jump { bottom: calc(6.5rem + env(safe-area-inset-bottom)); }
+
+/* ---------- what the student said, in the lesson ---------- */
+.mine .signal {
+  display: inline-block; margin-left: .5rem;
+  font-size: .62rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  padding: .16rem .4rem; border-radius: .25rem;
+  background: var(--paper-2); color: var(--ink-2);
+}
+.mine .signal[data-signal="done"]     { background: color-mix(in srgb, var(--good) 20%, var(--paper)); color: var(--good); }
+.mine .signal[data-signal="help"]     { background: color-mix(in srgb, var(--bad) 18%, var(--paper)); color: var(--bad); }
+.mine .signal[data-signal="confused"] { background: color-mix(in srgb, var(--note, var(--accent)) 18%, var(--paper)); }
+
+/* ---------- past lessons ---------- */
+#history {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 61;
+  width: min(26rem, 94vw);
+  background: var(--paper); border-left: 1px solid var(--rule);
+  display: flex; flex-direction: column;
+  box-shadow: -8px 0 26px rgba(0,0,0,.16);
+  font-family: var(--ui); font-size: .85rem;
+}
+#history-list { flex: 1; overflow-y: auto; padding: .5rem; }
+.session-row {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  font: inherit; color: var(--ink);
+  padding: .6rem .7rem; margin-bottom: .4rem;
+  border: 1px solid var(--rule); border-radius: .5rem; background: var(--paper);
+}
+.session-row:hover { background: var(--paper-2); }
+.session-name { display: block; font-weight: 650; }
+.session-sub { display: block; margin-top: .15rem; font-size: .72rem; color: var(--ink-3); }
+
+/* Reading an old lesson: say so, plainly, and give one way back. */
+.reading {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(1.2rem + env(safe-area-inset-bottom)); z-index: 45;
+  display: flex; align-items: center; gap: .7rem;
+  padding: .5rem .5rem .5rem .9rem;
+  border-radius: 2rem; border: 1px solid var(--rule);
+  background: var(--paper-2); box-shadow: 0 6px 22px rgba(0,0,0,.22);
+  font: 600 .8rem var(--ui);
+}
+#reading-what { color: var(--ink-2); }
+#reading-back {
+  font: inherit; cursor: pointer; padding: .35rem .7rem;
+  border-radius: 1.4rem; border: 1px solid var(--accent);
+  background: var(--accent); color: var(--paper);
+}
+
+/* ---------- the composer, in a code course ---------- */
+/* Code mode's answer is a sentence, so this is the counterpart of the pen tools
+   and lives in the same place: docked along the bottom. It had no styling at
+   all -- a bare form in the document flow, scrolled off the end of the lesson
+   like a paragraph -- which is why it has never been usable. */
+#composer {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 41;
+  display: flex; flex-direction: column; gap: .5rem;
+  padding: .55rem max(.75rem, env(safe-area-inset-right))
+           calc(.55rem + env(safe-area-inset-bottom)) max(.75rem, env(safe-area-inset-left));
+  background: color-mix(in srgb, var(--paper) 92%, transparent);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid var(--rule);
+  font-family: var(--ui);
+}
+#signals { display: flex; gap: .5rem; flex-wrap: wrap; }
+.sig {
+  font: 600 .84rem var(--ui); cursor: pointer;
+  padding: .5rem .85rem; border-radius: 1.4rem;
+  border: 1px solid var(--rule); background: var(--paper); color: var(--ink-2);
+}
+.sig:hover { background: var(--paper-2); color: var(--ink); }
+.sig.primary { border-color: var(--good); color: var(--good); }
+.sig.on { background: var(--paper-2); color: var(--ink); border-color: var(--accent); }
+#composer-row { display: flex; align-items: flex-end; gap: .5rem; }
+#composer-slate {
+  flex: none; text-decoration: none; color: var(--ink-2);
+  border: 1px solid var(--rule); border-radius: .45rem;
+  padding: .5rem .6rem; line-height: 1;
+}
+#composer-slate:hover { background: var(--paper-2); color: var(--ink); }
+#say {
+  flex: 1 1 auto; min-width: 0;
+  font: inherit; font-size: .92rem; line-height: 1.4;
+  padding: .55rem .7rem;
+  border: 1px solid var(--rule); border-radius: .45rem;
+  background: var(--paper); color: var(--ink);
+  resize: none; overflow-y: auto;
+}
+#say:focus { outline: none; border-color: var(--accent); }
+#send {
+  flex: none; font: inherit; font-weight: 600;
+  padding: .55rem 1rem; border-radius: .45rem; cursor: pointer;
+  /* The accent is dark in the light theme and light in the dark one, so the
+     label takes the paper colour rather than a fixed white. */
+  border: 1px solid var(--accent); background: var(--accent); color: var(--paper);
+}
+#send:hover { filter: brightness(1.08); }
+#send.sent { background: var(--good); border-color: var(--good); }
+/* Same reservation the pen tools get: a fixed bar covers the end of the lesson
+   unless the page gives up the height. */
+body[data-mode2="code"] { padding-bottom: 5rem; }
 
 /* ---------- scratch drawer ---------- */
 #scratch {
@@ -374,9 +501,41 @@ body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180de
   font-weight: 400; font-size: .78rem; color: var(--ink-2);
 }
 
+/* ---------- the image viewer ---------- */
+/* Opening a picture used to hand it to a new browsing context. Installed to the
+   home screen that context has no chrome and no back button, so looking at your
+   own handwriting was a one-way trip out of the app. This is the way back. */
+#viewer {
+  position: fixed; inset: 0; z-index: 90;
+  display: flex; align-items: center; justify-content: center;
+  padding: 1.5rem;
+  padding-top: max(1.5rem, env(safe-area-inset-top));
+  padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+  background: rgba(8, 9, 11, .92);
+  backdrop-filter: blur(4px);
+}
+#viewer figure { margin: 0; max-width: 100%; max-height: 100%; display: flex;
+                 flex-direction: column; align-items: center; gap: .6rem; }
+#viewer img {
+  max-width: 100%; max-height: calc(100vh - 7rem);
+  object-fit: contain;
+  border-radius: .5rem; background: #fff;
+  box-shadow: 0 10px 40px rgba(0,0,0,.5);
+}
+#viewer figcaption { font: 500 .8rem var(--ui); color: #b9bec7; }
+#viewer-close {
+  position: absolute; top: max(.9rem, env(safe-area-inset-top)); right: .9rem;
+  width: 2.6rem; height: 2.6rem; border-radius: 50%;
+  border: 1px solid #3a3f48; background: #1c1e23; color: #e9e7e2;
+  font-size: 1.1rem; line-height: 1; cursor: pointer;
+}
+#viewer-close:hover { background: #262a31; }
+body.viewing { overflow: hidden; }
+
 /* ---------- print ---------- */
 @media print {
-  #bar, #drawbar, #composer, #scratch, .jump, .drop, .finish, .pushed { display: none !important; }
+  #bar, #drawbar, #composer, #scratch, .jump, .drop, .finish, .pushed,
+  #viewer { display: none !important; }
   body { background: #fff; color: #000; }
   #board { max-width: none; padding: 0; }
   .card { break-inside: avoid; animation: none; }

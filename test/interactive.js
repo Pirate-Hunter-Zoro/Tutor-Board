@@ -132,7 +132,107 @@ setTimeout(() => setTimeout(() => {
     ? ok('the tools scroll inside their own column')
     : fail('the tools are not confined to their column');
 
-  done();
+  // Undo and redo were in the scrolling row, off the right-hand edge of a
+  // narrow screen, with the scrollbar hidden so nothing said they were there.
+  // They are the two controls a person writing by hand reaches for most.
+  const undo = acts && acts.querySelector('button[title="undo"]');
+  const redo = acts && acts.querySelector('button[title="redo"]');
+  undo && redo
+    ? ok('undo and redo are in the fixed column, never scrolled off')
+    : fail('undo/redo are not reachable in the pinned column');
+
+  // A re-render must not throw away a zoom the writer set. The board renders on
+  // every server event, and relayout used to refit the page each time.
+  const dbg = window.__writerDebug;
+  if (dbg) {
+    const zoomIn = chrome.querySelector('.sl-menu button[title="in"]')
+                || doc.querySelector('.sl-menu button[title="in"]');
+    if (zoomIn) {
+      zoomIn.click();
+      const zoomed = dbg().k;
+      window.__render({
+        state: { course: 'X', mode: 'math' },
+        cards: [{ id: '0001', kind: 'question', title: 'Q', body: 'hi', mtime: now }],
+        messages: [], uploads: [], slate: [],
+      });
+      setTimeout(() => {
+        Math.abs(dbg().k - zoomed) < 1e-6
+          ? ok('a zoom survives a re-render (' + zoomed.toFixed(3) + ')')
+          : fail('the zoom was reset by a render: ' + zoomed + ' -> ' + dbg().k);
+        viewerChecks();
+      }, 40);
+      return;
+    }
+  }
+  viewerChecks();
+
+  function viewerChecks() {
+    // What the student wrote belongs in the lesson, under the question it
+    // answers -- not in a drawer of unlabelled thumbnails at the bottom of the
+    // screen, which is where it used to go.
+    window.__render({
+      state: { course: 'X', mode: 'math' },
+      cards: [{ id: '0001', kind: 'question', title: 'Q', body: 'hi', mtime: now }],
+      messages: [], uploads: [], slate: [],
+      turns: [{ id: 't0001', rev: 1, kind: 'ink', answers: '0001',
+                t: now + 5, t0: now + 5, png: '/answers/t0001-r1.png',
+                ink: '/answers/t0001-r1.json', strokes: 12 }],
+    });
+    const mine = doc.querySelector('.mine[data-turn="t0001"]');
+    mine ? ok('an answer appears in the lesson, not in a drawer')
+         : fail('the answer is not in the card flow');
+    const q = doc.querySelector('.card[data-kind="question"]');
+    mine && q && q.nextElementSibling && q.nextElementSibling.dataset.turn === 't0001'
+      ? ok('the answer sits directly under its question')
+      : fail('the answer is not under the question it answers');
+    mine && mine.querySelector('.slate-shot img')
+      ? ok('the ink that was sent is shown in place')
+      : fail('the sent ink is not rendered in the lesson');
+
+    // A revision supersedes in place rather than piling up at the end.
+    window.__render({
+      state: { course: 'X', mode: 'math' },
+      cards: [{ id: '0001', kind: 'question', title: 'Q', body: 'hi', mtime: now }],
+      messages: [], uploads: [], slate: [],
+      turns: [{ id: 't0001', rev: 2, kind: 'ink', answers: '0001',
+                t: now + 90, t0: now + 5, png: '/answers/t0001-r2.png',
+                ink: '/answers/t0001-r2.json', strokes: 14 }],
+    });
+    doc.querySelectorAll('.mine[data-turn="t0001"]').length === 1
+      ? ok('a revision replaces the answer instead of adding one')
+      : fail('a revision produced a second block');
+    /revised/.test(doc.querySelector('.mine .when').textContent)
+      ? ok('a revised answer says so')
+      : fail('a revision is indistinguishable from the original');
+
+    // Tapping a picture used to open a new browsing context. Installed to the
+    // home screen there is no chrome and no back button, so it was a one-way
+    // trip out of the app.
+    window.__render({
+      state: { course: 'X', mode: 'math' },
+      cards: [{ id: '0001', kind: 'question', title: 'Q', body: 'hi', mtime: now }],
+      messages: [], turns: [], slate: [],
+      uploads: [{ url: '/uploads/photo.png', name: 'photo.png', mtime: now }],
+    });
+    const tileEl = doc.querySelector('#scratch-list a');
+    if (!tileEl) { fail('no scratch tile to open'); return done(); }
+    tileEl.target === '_blank'
+      ? fail('a picture still opens in a context with no way back')
+      : ok('a picture does not open in a new context');
+
+    tileEl.dispatchEvent(new window.Event('click', { bubbles: true, cancelable: true }));
+    const v = doc.getElementById('viewer');
+    v && !v.hidden ? ok('the viewer opens in the page') : fail('the viewer did not open');
+
+    const closeBtn = v && v.querySelector('#viewer-close');
+    closeBtn ? ok('the viewer has a close button') : fail('the viewer has no way out');
+    if (closeBtn) {
+      closeBtn.dispatchEvent(new window.Event('click', { bubbles: true, cancelable: true }));
+      v.hidden ? ok('the close button closes it') : fail('the close button did nothing');
+    }
+    done();
+  }
+  return;
 }, 60), 60);
 
 function done() {

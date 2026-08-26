@@ -284,6 +284,67 @@ The brief itself is written to `live/BRIEF.md` every time, so an assistant that 
 can still be told to read it. It names the course, the mode, the session kind, and the board's
 addresses, and says plainly that the board is already running.
 
+### Which one, for this course, on this machine
+
+A laptop and a cluster node do not have the same tools installed, and a course may want a
+particular assistant regardless of where it runs. Four layers settle it, most specific first:
+
+| Layer | Where it is written | Scope |
+|---|---|---|
+| `--agent opencode` | the command line | this once |
+| `"agent": "opencode"` | the course's `tutorboard.json` | this course, on every machine |
+| `"hosts": { "mac-mini": "deepseek" }` | the config, by short hostname | this machine, every course |
+| `"default_agent"` | the config | everything else |
+
+```json
+{
+  "default_agent": "claude",
+  "hosts": { "mac-mini": "deepseek", "compute301": "claude" },
+  "agents": {
+    "claude":   { "cmd": ["claude"], "prompt": "argv",
+                  "headless": ["claude", "-p", "{prompt}", "--continue"] },
+    "deepseek": { "cmd": ["opencode", "--model", "…"], "prompt": "argv",
+                  "headless": ["opencode", "run", "--continue", "{prompt}"] }
+  }
+}
+```
+
+**A model is not a layer, and must never become one.** An agent entry is a command recipe, so a
+second model is a second entry whose `cmd` carries the flag — which is why "opencode with DeepSeek"
+and "opencode with something else" are two names in this file and nothing in the code changes.
+
+### The assistant belongs to the course, not to the terminal
+
+One assistant is alive at a time, in the repository whose board is in front of you. Switching
+course on the hub moves it: the board for the new course comes up, whatever was listening elsewhere
+is asked to finish, and a new one is started in the new repository — resolved by the table above,
+reading that repository's own `AI_INSTRUCTIONS.md`.
+
+```
+tutor agent status           which course has one attached
+tutor agent start galois     attach one there, detaching whatever was elsewhere
+tutor agent stop galois      ask it to write its handoff and go
+```
+
+Nothing about this asks the student to operate anything. They open a course; the assistant is
+there.
+
+### Nothing ends tidily, so every session ends in writing
+
+A session does not finish with a goodbye. A course is switched, a lid closes, an allocation
+expires. So the last thing a departing assistant does — before its process goes — is one turn with
+no student attached, writing **`HANDOFF.md`** at the root of the course: where the student got to,
+what they got wrong and what the misunderstanding actually was, what not to re-teach, and the one
+next thing to cover. If the course's README or contract drifted during the session, it fixes those
+too.
+
+The brief tells every starting assistant to read that file first. It is committed with the rest of
+the work, so it survives the machine, and it is the only continuity there is — an assistant's own
+conversation history does not cross a node, a vendor, or a week.
+
+`SIGTERM` is what starts the wrap-up, deliberately: the whole point is that it happens, so nothing
+kills the daemon outright. It takes as long as one turn takes, and nobody waits for it.
+
 ### Why there is no registry
 
 Courses are whatever directories are sitting beside the tool. Adding one means making a directory;
@@ -607,6 +668,45 @@ something a canvas and a few hundred lines of JavaScript will approximate.
 That is a smaller loss here than it sounds, because **the recogniser is the tutor**. Nebo has to
 convert your ink into something a computer can act on; this only has to get your ink in front of
 someone who reads mathematics. The PNG goes straight to them. Write the way you would on paper.
+
+## The lesson is a transcript
+
+Both halves of the conversation are on the board, in order. A card the assistant writes, then what
+the student wrote back, directly beneath the question it answers — not in a drawer.
+
+A **turn** is one contribution from the student. It carries the card it answers, it is frozen at
+the moment it is sent (the slate is a working surface and will be written over), and it is
+**versioned**: reading feedback and sending a corrected answer supersedes the previous revision *in
+place* rather than adding another block at the end. Every revision stays in `live/turns.jsonl`,
+which is append-only; only the newest is shown.
+
+That is what makes the loop work. The assistant points at a mistake, the previous answer comes back
+under the pen, the student fixes it, and the block updates where it already was.
+
+### A session, and what ends one
+
+| Course | A session is | Ended by |
+|---|---|---|
+| maths | a lesson, chapter, or homework sitting | `board open`, which files the last one |
+| code | a piece of work that got committed | `board push` |
+
+Ending one archives the whole of it — cards, turns and the frozen answers — into
+`live/archive/<stamp>-<slug>/`. `board history` lists them; on the board, **◷** in the top bar
+opens past lessons and renders one read-only, with everything the student wrote still in it. The
+button is hidden until there is something to read.
+
+## What the board is for in a code course
+
+In a code course the work happens in the editor, on the student's own machine. The board is not
+where code gets written and never should be. What it carries is the three things worth saying
+about work that is happening somewhere else:
+
+- **Ready to check** — one tap, no typing.
+- **I need help** and **I'm confused** — these open a text box, and that is the moment a keyboard
+  should appear, because neither is useful without a sentence after it.
+
+All three are recorded as turns like any other, so the transcript of a code session is a record of
+where the student got stuck and what unstuck them.
 
 ## Getting work back
 

@@ -7,6 +7,7 @@ function stubEl() {
     style: {}, dataset: {}, classList: { add(){}, remove(){}, toggle(){} },
     hidden: false, value: '', textContent: '', innerHTML: '', files: [],
     addEventListener(){}, appendChild(){}, querySelector(){ return stubEl(); },
+    querySelectorAll(){ return []; }, after(){},
     scrollHeight: 0,
   };
   Object.defineProperty(el, 'onclick', { set(){}, get(){ return null; } });
@@ -14,6 +15,7 @@ function stubEl() {
 }
 global.document = {
   getElementById: () => stubEl(),
+  querySelectorAll: () => [],
   createElement: () => stubEl(),
   createDocumentFragment: () => stubEl(),
   addEventListener(){}, body: { scrollHeight: 0, dataset: {}, classList: { toggle(){} } },

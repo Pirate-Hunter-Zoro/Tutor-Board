@@ -29,6 +29,7 @@ var els = {
   pushedIcon: document.getElementById("pushed-icon"),
   pushedText: document.getElementById("pushed-text"),
   composer: document.getElementById("composer"),
+  composerRow: document.getElementById("composer-row"),
   say: document.getElementById("say"),
   send: document.getElementById("send"),
   file: document.getElementById("file"),
@@ -353,17 +354,30 @@ function timeLabel(t) {
 }
 
 function render(data) {
+  /* A live frame that arrives while a past lesson is open is kept, not shown.
+     Being yanked out of what you are reading because the tutor wrote something
+     is worse than finding it when you come back. */
+  if (!data.archived) {
+    lastLive = data;
+    document.getElementById("btn-history").hidden = !(data.history > 0);
+    if (reading) { els.jump.hidden = false; return; }
+  }
   var state = data.state || {};
   els.course.textContent = state.course || "board";
   els.chapter.textContent = state.chapter ? "· " + state.chapter : "";
   document.title = (state.course || "Board") + (state.chapter ? " · " + state.chapter : "");
 
+  /* The lesson is one transcript: the tutor's cards and the student's answers
+     in the order they happened, the answer directly under the question it
+     answers. A revised answer keeps its original place -- it supersedes what
+     was there rather than being appended to the end -- which is why the sort
+     runs on when the turn STARTED, not when it was last edited. */
   var items = [];
   (data.cards || []).forEach(function (c) {
     items.push({ t: c.mtime, key: "card:" + c.id, card: c });
   });
-  (data.messages || []).forEach(function (m, n) {
-    items.push({ t: m.t, key: "msg:" + n + ":" + m.t, msg: m });
+  (data.turns || []).forEach(function (t) {
+    items.push({ t: t.t0 || t.t, key: "turn:" + t.id, turn: t });
   });
   items.sort(function (a, b) { return a.t - b.t; });
 
@@ -372,9 +386,10 @@ function render(data) {
   var anythingNew = false;
 
   items.forEach(function (item) {
-    var fresh = !firstPaint && !seenIds[item.key];
+    var stamp = item.key + (item.turn ? ":r" + (item.turn.rev || 1) : "");
+    var fresh = !firstPaint && !seenIds[stamp];
     if (fresh) anythingNew = true;
-    seenIds[item.key] = true;
+    seenIds[stamp] = true;
 
     var node = document.createElement(item.card ? "article" : "div");
     if (item.card) {
@@ -392,32 +407,49 @@ function render(data) {
       if (c.title) node.querySelector(".card-title").textContent = c.title;
       node.querySelector(".body").innerHTML = renderMarkdown(c.body || "");
     } else {
-      var m = item.msg;
-      node.className = "mine";
-      node.innerHTML = '<span class="when"></span><span class="text"></span>' +
-                       (m.files && m.files.length ? '<div class="files"></div>' : "");
-      node.querySelector(".when").textContent = "you · " + timeLabel(m.t);
+      var m = item.turn;
+      node.className = "mine" + (fresh ? " fresh" : "");
+      node.dataset.turn = m.id;
+      if (m.answers) node.dataset.answers = m.answers;
+      node.innerHTML = '<span class="when"></span><span class="text"></span>';
+      var when = "you · " + timeLabel(m.t);
+      if ((m.rev || 1) > 1) when += " · revised";
+      node.querySelector(".when").textContent = when;
+      if (m.signal) {
+        var chip = document.createElement("span");
+        chip.className = "signal";
+        chip.dataset.signal = m.signal;
+        chip.textContent = SIGNAL_LABEL[m.signal] || m.signal;
+        node.querySelector(".when").after(chip);
+      }
       node.querySelector(".text").innerHTML = renderMarkdown(m.text || "");
-      if (m.slate) {
-        /* The PNG is overwritten in place as the page is edited, so the
-           timestamp is what keeps the browser from showing a stale one. */
-        var name = m.slate.replace(/^.*\//, "");
-        var wrapA = document.createElement("a");
-        wrapA.href = "/slate/" + name;
-        wrapA.target = "_blank";
-        wrapA.className = "slate-shot";
+      if (m.png) {
+        /* Frozen at the moment it was sent, so it is what was handed in and
+           not whatever the slate says now. The revision is in the URL, so
+           there is nothing stale for the browser to hold on to. */
+        var shotWrap = document.createElement("a");
+        shotWrap.href = m.png;
+        shotWrap.className = "slate-shot";
+        shotWrap.addEventListener("click", function (e) {
+          e.preventDefault();
+          openViewer(m.png, "your answer · " + (m.iso || ""));
+        });
         var shot = document.createElement("img");
-        shot.src = "/slate/" + name + "?t=" + Math.round(m.t);
+        shot.src = m.png;
         shot.loading = "lazy";
-        wrapA.appendChild(shot);
-        node.appendChild(wrapA);
+        shot.alt = "what you wrote";
+        shotWrap.appendChild(shot);
+        node.appendChild(shotWrap);
       }
       if (m.files && m.files.length) {
-        var box = node.querySelector(".files");
+        var box = document.createElement("div");
+        box.className = "files";
+        node.appendChild(box);
         m.files.forEach(function (f) {
           var a = document.createElement("a");
           a.href = "/uploads/" + encodeURIComponent(f);
           a.target = "_blank";
+          a.rel = "noopener";
           if (/\.(png|jpe?g|gif|webp|heic)$/i.test(f)) {
             var img = document.createElement("img");
             img.src = a.href;
@@ -443,19 +475,48 @@ function render(data) {
   els.composer.hidden = !codeMode;
 
   /* In maths, offer the slate only while an answer is actually owed: a question
-     card with nothing sent after it. A permanent button would be furniture. */
-  var lastQuestion = 0, lastSent = 0;
+     card with nothing sent after it. A permanent button would be furniture.
+
+     Sending is a checkpoint, not an exit. Once the panel has opened for a
+     question it stays open for that question however many times the page is
+     sent, because the next thing that happens is usually the tutor pointing at
+     a mistake in it. It closes when a *different* question arrives. */
+  var lastQuestion = 0, lastSent = 0, newestQ = null;
   (data.cards || []).forEach(function (c) {
-    if (c.kind === "question" && c.mtime > lastQuestion) lastQuestion = c.mtime;
+    if (c.kind === "question" && c.mtime > lastQuestion) {
+      lastQuestion = c.mtime;
+      newestQ = c.id;
+    }
   });
-  (data.messages || []).forEach(function (m) { if (m.t > lastSent) lastSent = m.t; });
+  (data.turns || []).forEach(function (m) { if (m.t > lastSent) lastSent = m.t; });
+  if (pinnedTo && pinnedTo !== newestQ) pinnedTo = null;
   var owed = !codeMode && !!(lastQuestion && lastQuestion > lastSent);
+  if (owed) pinnedTo = newestQ;
+  owed = owed || (!codeMode && !!pinnedTo && pinnedTo === newestQ);
+
+  /* Which answer the panel is editing. An ink turn already sent against the
+     current question is the one to correct; anything else starts a new one. */
+  var mine = (data.turns || []).filter(function (t) {
+    return t.kind === "ink" && t.answers === newestQ;
+  });
+  answering = { question: newestQ, turn: mine.length ? mine[mine.length - 1] : null };
+
+  /* The panel goes after the question AND after anything already sent for it,
+     so the order reads question, what you handed in, the surface to correct it
+     on. Sliding it in above your own answer put the two out of order. */
   var qNode = null;
   var nodes = els.cards.querySelectorAll('.card[data-kind="question"]');
   if (nodes.length) qNode = nodes[nodes.length - 1];
-  placeWriter(owed, qNode);
+  if (qNode && newestQ) {
+    var mineNodes = els.cards.querySelectorAll('.mine[data-answers="' + newestQ + '"]');
+    if (mineNodes.length) qNode = mineNodes[mineNodes.length - 1];
+  }
+  /* A past lesson is read only: no pen, no box, nothing to send into a session
+     that has already been filed. */
+  placeWriter(owed && !data.archived, qNode);
+  paintComposer(codeMode && !data.archived, data);
   typeset(els.cards);
-  renderScratch(data.uploads || [], data.slate || []);
+  renderScratch(data.uploads || []);
 
   if (firstPaint) {
     firstPaint = false;
@@ -539,18 +600,35 @@ function nearBottom() {
   return window.innerHeight + window.scrollY >= document.body.scrollHeight - 160;
 }
 
-function renderScratch(uploads, slate) {
+/* Photos and PDFs only. Sent pages used to land here too, which is why answers
+   appeared as a pile of thumbnails at the bottom of the screen with nothing to
+   say which question they belonged to. They are part of the lesson now. */
+function renderScratch(uploads) {
   els.scratchList.innerHTML = "";
-  if (!uploads.length && !slate.length) {
-    els.scratchList.innerHTML = '<p class="name">nothing written or dropped yet.</p>';
+  if (!uploads.length) {
+    els.scratchList.innerHTML = '<p class="name">nothing dropped yet. '
+      + 'What you write goes into the lesson itself.</p>';
     return;
   }
 
   function tile(url, label, bust) {
     var a = document.createElement("a");
     a.href = url;
-    a.target = "_blank";
-    if (/\.(png|jpe?g|gif|webp|heic)(\?|$)/i.test(url)) {
+    /* Never a new context. Installed to the home screen there is no browser
+       chrome, so a raw image opened this way has no back button and no way out
+       of it short of killing the app. Images open in a viewer this page owns
+       and can close; anything else is left to the system. */
+    var isImage = /\.(png|jpe?g|gif|webp|heic)(\?|$)/i.test(url);
+    if (isImage) {
+      a.addEventListener("click", function (e) {
+        e.preventDefault();
+        openViewer(bust ? url + "?t=" + Math.round(bust) : url, label);
+      });
+    } else {
+      a.target = "_blank";
+      a.rel = "noopener";
+    }
+    if (isImage) {
       var img = document.createElement("img");
       img.src = bust ? url + "?t=" + Math.round(bust) : url;
       img.loading = "lazy";
@@ -563,12 +641,110 @@ function renderScratch(uploads, slate) {
     els.scratchList.appendChild(a);
   }
 
-  slate.slice().reverse().forEach(function (p) {
-    tile(p.url, "slate — page " + p.page, p.mtime);
-  });
   uploads.slice().reverse().forEach(function (u) {
     tile(u.url, u.name);
   });
+}
+
+/* ------------------------------------------------------------ past lessons */
+/* Reading an old lesson is reading the same transcript, so it goes through the
+   same renderer. The live stream is what is suspended, not the page: whatever
+   arrives while you are reading is still there when you come back. */
+var reading = null;
+var lastLive = null;
+
+function openHistory() {
+  var panel = document.getElementById("history");
+  var list = document.getElementById("history-list");
+  panel.hidden = false;
+  list.innerHTML = '<p class="name">looking…</p>';
+  fetch("/archive").then(function (r) { return r.json(); }).then(function (d) {
+    var sessions = d.sessions || [];
+    if (!sessions.length) {
+      list.innerHTML = '<p class="name">no finished lessons yet.</p>';
+      return;
+    }
+    list.innerHTML = "";
+    sessions.forEach(function (s) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "session-row";
+      b.innerHTML = '<span class="session-name"></span>'
+                  + '<span class="session-sub"></span>';
+      b.querySelector(".session-name").textContent =
+        s.chapter || s.course || s.id;
+      b.querySelector(".session-sub").textContent =
+        [s.session, s.opened, s.cards + " cards",
+         s.turns + " of yours"].filter(Boolean).join(" · ");
+      b.addEventListener("click", function () { showSession(s.id); });
+      list.appendChild(b);
+    });
+  }).catch(function () {
+    list.innerHTML = '<p class="name">could not read the archive.</p>';
+  });
+}
+
+function showSession(id) {
+  fetch("/archive/" + encodeURIComponent(id))
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (!d || d.ok === false) return;
+      document.getElementById("history").hidden = true;
+      reading = id;
+      seenIds = {};
+      firstPaint = true;
+      var bar = document.getElementById("reading");
+      bar.hidden = false;
+      document.getElementById("reading-what").textContent =
+        (d.state && (d.state.chapter || d.state.course)) || id;
+      render({ state: d.state || {}, cards: d.cards || [], turns: d.turns || [],
+               uploads: [], messages: [], archived: true });
+    })
+    .catch(function () { /* stay where we are */ });
+}
+
+function backToLesson() {
+  reading = null;
+  seenIds = {};
+  firstPaint = true;
+  document.getElementById("reading").hidden = true;
+  if (lastLive) render(lastLive);
+}
+
+/* ------------------------------------------------------------- the viewer */
+/* Built once, on first use, and closed by three separate gestures, because the
+   thing being fixed here is being stuck. */
+var viewer = null;
+
+function buildViewer() {
+  viewer = document.createElement("div");
+  viewer.id = "viewer";
+  viewer.hidden = true;
+  viewer.innerHTML = '<button id="viewer-close" type="button" title="close">✕</button>'
+                   + '<figure><img alt=""><figcaption></figcaption></figure>';
+  document.body.appendChild(viewer);
+  viewer.addEventListener("click", function (e) {
+    if (e.target === viewer || e.target.id === "viewer-close") closeViewer();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") closeViewer();
+  });
+}
+
+function openViewer(url, label) {
+  if (!viewer) buildViewer();
+  viewer.querySelector("img").src = url;
+  viewer.querySelector("figcaption").textContent = label || "";
+  viewer.hidden = false;
+  document.body.classList.add("viewing");
+  viewer.querySelector("#viewer-close").focus();
+}
+
+function closeViewer() {
+  if (!viewer || viewer.hidden) return;
+  viewer.hidden = true;
+  viewer.querySelector("img").src = "";
+  document.body.classList.remove("viewing");
 }
 
 /* ------------------------------------------------------------------ stream */
@@ -592,10 +768,20 @@ function connect() {
    answers. Moving the node keeps the component alive; the strokes are redrawn
    from data afterwards, so nothing is lost even if the bitmap is not. */
 var writer = null;
+var pinnedTo = null;
+/* Which question is open and which of my turns answers it, so Send knows
+   whether it is starting an answer or correcting one. */
+var answering = { question: null, turn: null };
+var loadedTurn = null;
+
+var SIGNAL_LABEL = { done: "ready to check", help: "needs help", confused: "confused" };
 
 function placeWriter(owed, questionNode) {
   els.writer.hidden = !owed;
   document.getElementById("drawbar").hidden = !owed;
+  /* The tool bar is fixed to the bottom of the window, so the page has to give
+     up the height it occupies or the last card sits underneath it. */
+  document.body.classList.toggle("tools-out", !!owed);
   if (!owed) return;
 
   if (questionNode && questionNode.nextSibling !== els.writer) {
@@ -610,18 +796,58 @@ function placeWriter(owed, questionNode) {
         root: document.getElementById("slate"),
         bar: document.getElementById("drawbar"),
         compact: true,
+        context: function () {
+          return { turn: answering.turn ? answering.turn.id : null,
+                   answers: answering.question };
+        },
         onSend: function () { toastSent(); },
       });
       window.__writerDebug = writer.debug;
+      restoreAnswer();
     });
   } else if (writer) {
     requestAnimationFrame(writer.relayout);
+    restoreAnswer();
   }
 }
 
+/* Put a previously sent answer back under the pen when the tutor has commented
+   on it, and clear the surface when a new question arrives so the next answer
+   does not start on top of the last one. */
+function restoreAnswer() {
+  if (!writer) return;
+  var id = answering.turn ? answering.turn.id + ":r" + answering.turn.rev : null;
+  if (id === loadedTurn) return;
+  if (!answering.turn) {
+    if (loadedTurn) writer.clear();
+    loadedTurn = null;
+    return;
+  }
+  var mark = id;
+  fetch(answering.turn.ink).then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (mark !== (answering.turn && answering.turn.id + ":r" + answering.turn.rev)) return;
+      writer.load(data);
+      loadedTurn = mark;
+    })
+    .catch(function () { /* offline: leave whatever is on the surface */ });
+}
+
+/* Confirm, and get out of the way. Closing the panel here is what made a
+   correction impossible: the ink was gone from under you the moment it went. */
+var hintWas = null, hintTimer = null;
+
 function toastSent() {
-  els.writer.hidden = true;
-  document.getElementById("drawbar").hidden = true;
+  var hint = document.getElementById("writer-hint");
+  if (!hint) return;
+  if (hintWas === null) hintWas = hint.textContent;
+  hint.textContent = "sent — keep writing, Send again to update it";
+  hint.classList.add("just-sent");
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(function () {
+    hint.textContent = hintWas;
+    hint.classList.remove("just-sent");
+  }, 2600);
 }
 
 /* ------------------------------------------------------------------ input */
@@ -634,22 +860,63 @@ function autosize() {
   els.say.style.height = Math.min(els.say.scrollHeight, 9 * 16) + "px";
 }
 
-function say() {
+function say(signal) {
   var text = els.say.value.trim();
-  if (!text) return;
+  if (!text && !signal) return;
   els.say.value = "";
   autosize();
-  fetch("/say", {
+  return fetch("/say", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text: text })
+    body: JSON.stringify({ text: text, signal: signal || null,
+                           answers: answering.question })
   }).then(function () {
     els.send.classList.add("sent");
     setTimeout(function () { els.send.classList.remove("sent"); }, 900);
   });
 }
 
-els.composer.addEventListener("submit", function (e) { e.preventDefault(); say(); });
+/* In a code course the answer is in the editor on the real machine, so the
+   board carries the three things worth saying about it. "Ready to check" is one
+   tap. The other two open the box, because "I need help" is only useful with a
+   sentence after it -- and that is the moment a keyboard should appear, not
+   before. */
+function paintComposer(codeMode, data) {
+  els.composer.hidden = !codeMode;
+  if (!codeMode) {
+    if (els.composerRow) els.composerRow.hidden = true;
+    return;
+  }
+  var last = (data.turns || []).filter(function (t) { return t.signal; }).pop();
+  Array.prototype.forEach.call(document.querySelectorAll(".sig"), function (b) {
+    b.classList.toggle("on", !!last && last.signal === b.dataset.signal);
+  });
+}
+
+function openComposer(signal) {
+  els.composerRow.hidden = false;
+  els.composerRow.dataset.signal = signal;
+  els.say.placeholder = signal === "confused"
+    ? "what is not making sense?" : "what is going wrong?";
+  els.say.focus();          /* the keyboard, at the moment it is wanted */
+}
+
+els.composer.addEventListener("submit", function (e) {
+  e.preventDefault();
+  say(els.composerRow.dataset.signal || null);
+  els.composerRow.hidden = true;
+  els.composerRow.dataset.signal = "";
+});
+
+Array.prototype.forEach.call(document.querySelectorAll(".sig"), function (b) {
+  b.addEventListener("click", function () {
+    var signal = b.dataset.signal;
+    /* "Ready to check" needs no sentence. The other two are useless without
+       one, so they open the box rather than sending a bare flag. */
+    if (signal === "done") { say("done"); els.composerRow.hidden = true; return; }
+    openComposer(signal);
+  });
+});
 els.say.addEventListener("input", autosize);
 els.say.addEventListener("keydown", function (e) {
   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); say(); }
@@ -774,6 +1041,11 @@ document.getElementById("btn-print").onclick = function () { window.print(); };
 document.getElementById("btn-reload").onclick = function () { location.reload(); };
 document.getElementById("btn-scratch").onclick = function () { els.scratch.hidden = !els.scratch.hidden; };
 document.getElementById("btn-scratch-close").onclick = function () { els.scratch.hidden = true; };
+document.getElementById("btn-history").onclick = openHistory;
+document.getElementById("btn-history-close").onclick = function () {
+  document.getElementById("history").hidden = true;
+};
+document.getElementById("reading-back").onclick = backToLesson;
 els.jump.onclick = function () {
   window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
   els.jump.hidden = true;

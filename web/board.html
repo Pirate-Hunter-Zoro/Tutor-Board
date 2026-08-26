@@ -23,6 +23,10 @@
 <!-- face is applied before anything paints -->
 <body data-mode="auto">
 
+<!-- One stack owns the top of the window. The banners below are part of it, not
+     separate things that also stick to zero -- two sticky elements at the same
+     offset overlap, and the one further down the document wins. -->
+<div id="chrome">
 <header id="bar">
   <div class="bar-left">
     <a id="btn-home" href="/" title="home">‹</a>
@@ -40,13 +44,11 @@
     <button id="btn-face" title="typeface">Aa</button>
     <button id="btn-theme" title="light / dark / auto">◐</button>
     <button id="btn-reload" title="reload the app">↻</button>
-    <button id="btn-scratch" title="scratch work">▤</button>
+    <button id="btn-history" title="past lessons" hidden>◷</button>
+    <button id="btn-scratch" title="photos and PDFs">▤</button>
     <button id="btn-print" title="print or save as PDF">⎙</button>
   </div>
 </header>
-
-<!-- The drawing tools live in the page chrome, not floating over the lesson. -->
-<div id="drawbar" hidden></div>
 
 <!-- End of session. Asked here, because the person answering is on an iPad. -->
 <div id="finish" class="finish" hidden>
@@ -65,6 +67,10 @@
   <span id="pushed-text"></span>
   <button id="pushed-close" type="button" title="dismiss">✕</button>
 </div>
+</div><!-- /#chrome -->
+
+<!-- The drawing tools, along the bottom, where the hand holding the pen is. -->
+<div id="drawbar" hidden></div>
 
 <main id="board">
   <div id="cards"></div>
@@ -76,6 +82,23 @@
 </main>
 
 <button id="jump" class="jump" hidden>↓ new</button>
+
+<!-- Past lessons. A chapter you come back to should still have your own working
+     in it; a transcript that only survives until the next lesson opens is not a
+     transcript. -->
+<aside id="history" hidden>
+  <div class="scratch-head">
+    <strong>Past lessons</strong>
+    <button id="btn-history-close">✕</button>
+  </div>
+  <div id="history-list"></div>
+  <div class="scratch-foot muted">Read only. The lesson you are in is on the board.</div>
+</aside>
+
+<div id="reading" class="reading" hidden>
+  <span id="reading-what"></span>
+  <button id="reading-back" type="button">back to the lesson</button>
+</div>
 
 <aside id="scratch" hidden>
   <div class="scratch-head">
@@ -101,11 +124,20 @@
   <div id="slate"></div>
 </section>
 
-<!-- Code: the useful things to say are sentences, not handwriting. -->
+<!-- Code: the work happens in the editor on the real machine. What the board is
+     for is the three things worth saying about it, and none of them is worth
+     typing on a tablet. The box only opens when there is something to explain. -->
 <form id="composer" autocomplete="off" hidden>
-  <a id="composer-slate" href="/slate" title="sketch something instead">✎</a>
-  <textarea id="say" rows="1" placeholder="say something — “look at what I just wrote”…"></textarea>
-  <button id="send" type="submit">send</button>
+  <div id="signals">
+    <button id="sig-done" type="button" class="sig primary" data-signal="done">Ready to check</button>
+    <button id="sig-help" type="button" class="sig" data-signal="help">I need help</button>
+    <button id="sig-confused" type="button" class="sig" data-signal="confused">I'm confused</button>
+  </div>
+  <div id="composer-row" hidden>
+    <a id="composer-slate" href="/slate" title="sketch something instead">✎</a>
+    <textarea id="say" rows="1" placeholder="what is going wrong?"></textarea>
+    <button id="send" type="submit">send</button>
+  </div>
 </form>
 
 <input id="file" type="file" multiple accept="image/*,application/pdf" hidden>

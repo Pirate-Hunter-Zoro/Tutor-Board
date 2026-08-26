@@ -57,8 +57,12 @@ class Repo:
         self.tikz = os.path.join(self.live, "tikzcache")
         self.archive = os.path.join(self.live, "archive")
         self.slate = os.path.join(self.live, "slate")
+        # What the student actually handed in, frozen at the moment they sent
+        # it. The slate is a working surface and gets written over; a transcript
+        # cannot be built out of a surface that changes underneath it.
+        self.answers = os.path.join(self.live, "answers")
         for d in (self.live, self.cards, self.inbox, self.uploads, self.tikz,
-                  self.archive, self.slate):
+                  self.archive, self.slate, self.answers):
             os.makedirs(d, exist_ok=True)
 
     @property
@@ -68,6 +72,10 @@ class Repo:
     @property
     def messages_path(self):
         return os.path.join(self.inbox, "messages.jsonl")
+
+    @property
+    def turns_path(self):
+        return os.path.join(self.live, "turns.jsonl")
 
     def state(self):
         try:
@@ -171,6 +179,152 @@ def load_messages(repo, limit=60):
     except OSError:
         pass
     return out[-limit:]
+
+
+# ---------------------------------------------------------------------------
+# turns -- the student's half of the transcript
+# ---------------------------------------------------------------------------
+# A lesson is a conversation, and half of it was previously being thrown into a
+# drawer: sent slate pages appeared as thumbnails at the bottom of the page with
+# no connection to the question they answered, and nothing the student wrote
+# survived the next lesson.
+#
+# A turn is one contribution, anchored to the card it answers, and versioned:
+# sending again after feedback supersedes the previous revision in place rather
+# than adding another thumbnail to a pile. The file is append-only -- the whole
+# history is on disk -- and only the newest revision of each turn is shown.
+
+def load_turns(repo, path=None):
+    """Newest revision of each turn, in the order the turns first appeared."""
+    order, latest = [], {}
+    try:
+        with open(path or repo.turns_path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                tid = rec.get("id")
+                if not tid:
+                    continue
+                if tid not in latest:
+                    order.append(tid)
+                    rec["t0"] = rec.get("t")
+                if rec.get("rev", 1) >= latest.get(tid, {}).get("rev", 0):
+                    # A revision keeps the original's place in the transcript.
+                    rec["t0"] = latest.get(tid, rec).get("t0", rec.get("t"))
+                    latest[tid] = rec
+    except OSError:
+        return []
+    return [latest[t] for t in order]
+
+
+def next_turn_id(repo):
+    n = 0
+    for rec in load_turns(repo):
+        try:
+            n = max(n, int(str(rec.get("id", "t0"))[1:]))
+        except ValueError:
+            pass
+    return "t%04d" % (n + 1)
+
+
+def turn_revision(repo, tid):
+    rev = 0
+    for rec in load_turns(repo):
+        if rec.get("id") == tid:
+            rev = rec.get("rev", 1)
+    return rev + 1
+
+
+def newest_question(repo):
+    """The card a turn sent now is answering."""
+    newest = None
+    try:
+        names = sorted(os.listdir(repo.cards))
+    except OSError:
+        return None
+    for name in names:
+        m = CARD_RE.match(name)
+        if not m:
+            continue
+        try:
+            with open(os.path.join(repo.cards, name), "r", encoding="utf-8") as fh:
+                meta, _ = parse_front_matter(fh.read())
+        except OSError:
+            continue
+        if (meta.get("kind") or "lesson").lower() == "question":
+            newest = m.group(1)
+    return newest
+
+
+def write_turn(repo, rec):
+    with open(repo.turns_path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(rec) + "\n")
+
+
+# ---------------------------------------------------------------------------
+# past lessons
+# ---------------------------------------------------------------------------
+def list_archive(repo):
+    """Every finished lesson, newest first, as something to pick from."""
+    out = []
+    try:
+        names = sorted(os.listdir(repo.archive), reverse=True)
+    except OSError:
+        return out
+    for name in names:
+        folder = os.path.join(repo.archive, name)
+        if not os.path.isdir(folder):
+            continue
+        st = {}
+        try:
+            with open(os.path.join(folder, "state.json"), "r", encoding="utf-8") as fh:
+                st = json.load(fh) or {}
+        except (OSError, ValueError):
+            pass
+        cards = [n for n in os.listdir(folder) if CARD_RE.match(n)]
+        turns = load_turns(repo, os.path.join(folder, "turns.jsonl"))
+        out.append({
+            "id": name,
+            "course": st.get("course") or "",
+            "chapter": st.get("chapter") or "",
+            "session": st.get("session") or "lecture",
+            "opened": st.get("opened") or "",
+            "finished": st.get("finished") or "",
+            "cards": len(cards),
+            "turns": len(turns),
+        })
+    return out
+
+
+def archived_session(repo, name):
+    """One past lesson, rendered the same way a live one is."""
+    folder = os.path.join(repo.archive, name)
+    st = {}
+    try:
+        with open(os.path.join(folder, "state.json"), "r", encoding="utf-8") as fh:
+            st = json.load(fh) or {}
+    except (OSError, ValueError):
+        pass
+    jobs = []
+    saved_cards, repo.cards = repo.cards, folder
+    try:
+        cards = load_cards(repo, jobs)
+    finally:
+        repo.cards = saved_cards
+    turns = load_turns(repo, os.path.join(folder, "turns.jsonl"))
+    # Their frozen ink lives inside the archived folder now, so the transcript
+    # keeps working after the live answers directory has moved on.
+    for t in turns:
+        for key in ("png", "ink"):
+            if t.get(key, "").startswith("/answers/"):
+                t[key] = "/archive/%s/answers/%s" % (name, t[key][len("/answers/"):])
+    return {"id": name, "state": st, "cards": cards, "turns": turns,
+            "archived": True}
 
 
 def read_slate_pages(repo):
@@ -412,6 +566,25 @@ def board_cli(repo, args, timeout=90):
         return 1, str(exc)
 
 
+def tutor_cli(args, timeout=30):
+    """Drive the launcher from inside the server, for the agent handover.
+
+    The assistant belongs to the course, not to this process and not to the
+    terminal anyone happens to have open, so switching course has to move it.
+    Short timeout deliberately: `tutor agent start` detaches and returns, and
+    `stop` only signals -- the wrap-up turn it triggers takes as long as it
+    takes and nobody is waiting on it.
+    """
+    cli = os.path.join(HERE, "bin", "tutor")
+    try:
+        p = subprocess.run([sys.executable, cli] + list(args),
+                           cwd=HERE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           timeout=timeout)
+        return p.returncode, p.stdout.decode("utf-8", "replace")
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return 1, str(exc)
+
+
 # ---------------------------------------------------------------------------
 # TikZ -> SVG worker
 # ---------------------------------------------------------------------------
@@ -560,11 +733,13 @@ class Hub:
         data = {
             "state": state,
             "cards": cards,
+            "turns": load_turns(self.repo),
             "messages": load_messages(self.repo),
             "uploads": load_uploads(self.repo),
             "slate": load_slate(self.repo),
             "push": load_push(self.repo),
             "agent": load_agent(self.repo),
+            "history": len(list_archive(self.repo)),
         }
         return data
 
@@ -765,6 +940,27 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/uploads/"):
             name = safe_filename(path[len("/uploads/"):])
             return self.send_file(os.path.join(repo.uploads, name), untrusted=True)
+        if path.startswith("/answers/"):
+            name = safe_filename(path[len("/answers/"):])
+            return self.send_file(os.path.join(repo.answers, name))
+        if path.startswith("/archive/"):
+            # A past lesson, read only. The transcript is the point of keeping
+            # them: a student coming back to a chapter should see what they
+            # wrote at the time, not an empty board.
+            rel = path[len("/archive/"):].strip("/")
+            if not rel:
+                return self.send_json({"sessions": list_archive(repo)})
+            name = safe_filename(rel.split("/")[0])
+            folder = os.path.join(repo.archive, name)
+            if not os.path.isdir(folder):
+                return self.send_json({"ok": False, "error": "no such session"}, status=404)
+            rest = rel.split("/")[1:]
+            if rest and rest[0] == "answers" and len(rest) > 1:
+                return self.send_file(os.path.join(folder, "answers",
+                                                   safe_filename(rest[1])))
+            return self.send_json(archived_session(repo, name))
+        if path == "/archive":
+            return self.send_json({"sessions": list_archive(repo)})
         if path == "/health":
             return self.send_json({"ok": True, "root": repo.root})
         return self.send_bytes(b"not found", "text/plain", status=404)
@@ -824,7 +1020,15 @@ class Handler(BaseHTTPRequestHandler):
             code, out = board_cli(target, ["start"])
             if code != 0:
                 return self.send_json({"ok": False, "error": out.strip()[-300:]}, status=500)
-            return self.send_json({"ok": True, "repo": match["repo"], "detail": out.strip()})
+            # The assistant follows the course. `agent start` asks whatever was
+            # listening elsewhere to write its handoff first, so nothing is lost
+            # by walking away from a lesson -- which is how sessions actually
+            # end. It detaches, so this request does not wait on a model.
+            acode, aout = tutor_cli(["agent", "start", match["repo"]])
+            return self.send_json({"ok": True, "repo": match["repo"],
+                                   "detail": out.strip(),
+                                   "agent": aout.strip() if acode == 0 else None,
+                                   "agent_error": None if acode == 0 else aout.strip()[-300:]})
 
         if path == "/slate/save":
             try:
@@ -851,17 +1055,41 @@ class Handler(BaseHTTPRequestHandler):
                     pass
 
             if payload.get("send"):
-                strokes = len(payload.get("strokes") or [])
+                strokes = payload.get("strokes") or []
+                # Revising an answer supersedes it; a new answer starts a turn.
+                tid = payload.get("turn") or next_turn_id(repo)
+                rev = turn_revision(repo, tid)
+                base = "%s-r%d" % (tid, rev)
+                # Frozen, because the slate page it came from will be written
+                # over. What was handed in has to stay what was handed in.
+                try:
+                    shutil.copyfile(stem + ".png", os.path.join(repo.answers, base + ".png"))
+                except OSError:
+                    pass
+                with open(os.path.join(repo.answers, base + ".json"), "w",
+                          encoding="utf-8") as fh:
+                    json.dump({"w": payload.get("w"), "h": payload.get("h"),
+                               "strokes": strokes}, fh)
                 record = {
+                    "id": tid, "rev": rev, "kind": "ink",
+                    "answers": payload.get("answers") or newest_question(repo),
                     "t": time.time(),
                     "iso": time.strftime("%Y-%m-%d %H:%M:%S"),
                     "from": "student",
-                    "text": "[slate] page %d, %d strokes" % (n, strokes),
-                    "slate": stem + ".png",
+                    "page": n, "strokes": len(strokes),
+                    "png": "/answers/" + base + ".png",
+                    "ink": "/answers/" + base + ".json",
                     "read": False,
                 }
+                write_turn(repo, record)
+                msg = dict(record)
+                msg["text"] = ("[slate] %s rev %d, %d strokes"
+                               % (tid, rev, len(strokes)))
+                msg["slate"] = os.path.join(repo.answers, base + ".png")
                 with open(repo.messages_path, "a", encoding="utf-8") as fh:
-                    fh.write(json.dumps(record) + "\n")
+                    fh.write(json.dumps(msg) + "\n")
+                self.server.hub.worker.dirty.set()
+                return self.send_json({"ok": True, "page": n, "turn": tid, "rev": rev})
             self.server.hub.worker.dirty.set()
             return self.send_json({"ok": True, "page": n})
 
@@ -871,19 +1099,33 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 return self.send_json({"ok": False, "error": "bad json"}, status=400)
             text = (payload.get("text") or "").strip()
-            if not text:
+            # A signal carries meaning without a sentence: in a code course the
+            # useful things to say are mostly "done", "stuck" and "confused",
+            # and making someone type those on a tablet is a tax.
+            signal = (payload.get("signal") or "").strip().lower() or None
+            if signal not in (None, "done", "help", "confused"):
+                return self.send_json({"ok": False, "error": "bad signal"}, status=400)
+            if not text and not signal:
                 return self.send_json({"ok": False, "error": "empty"}, status=400)
+
+            tid = payload.get("turn") or next_turn_id(repo)
+            rev = turn_revision(repo, tid)
             record = {
+                "id": tid, "rev": rev, "kind": "text",
+                "answers": payload.get("answers") or newest_question(repo),
                 "t": time.time(),
                 "iso": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "from": payload.get("from") or "student",
                 "text": text[:8000],
+                "signal": signal,
                 "read": False,
             }
+            write_turn(repo, record)
             with open(repo.messages_path, "a", encoding="utf-8") as fh:
-                fh.write(json.dumps(record) + "\n")
+                fh.write(json.dumps(dict(record, text=(
+                    ("[%s] " % signal if signal else "") + text))) + "\n")
             self.server.hub.worker.dirty.set()
-            return self.send_json({"ok": True})
+            return self.send_json({"ok": True, "turn": tid, "rev": rev})
 
         if path == "/upload":
             ctype = self.headers.get("Content-Type", "")

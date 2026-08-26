@@ -28,8 +28,10 @@ var AUTOSAVE_MS = 1200;
 var LIVE_IDLE_MS = 3000;
 var LIVE_MIN_GAP_MS = 15000;
 var UNDO_DEPTH = 60;
-var SMOOTH = 0.45;          /* how much of each new sample to trust */
-var RESAMPLE = 1.2;         /* logical units between rendered points */
+var SMOOTH = 0.30;          /* how much of each new sample to trust */
+var RESAMPLE = 0.8;         /* logical units between rendered points */
+var MIN_STEP = 0.5;         /* how far the pen must travel to record a point */
+var POLISH = 2;             /* smoothing passes over a finished stroke */
 
 var PAPERS = {
   black: { bg: "#101114", rule: "#23262c", ink: "#f2f4f7" },
@@ -90,6 +92,50 @@ function densify(pts) {
     for (var s = 1; s <= steps; s++) out.push(catmullRom(p0, p1, p2, p3, s / steps));
   }
   return out;
+}
+
+/* One-euro-style smoothing while the pen moves cannot remove tremor without
+   adding lag you can feel. So the live path stays responsive and the stroke is
+   polished once, on lift: a weighted three-point average over the interior,
+   which pulls out hand tremor while leaving the endpoints and the overall shape
+   exactly where they were put. Pressure is averaged with it, so the width stops
+   flickering along a line that was drawn at a steady weight. */
+function polish(pts, passes) {
+  if (pts.length < 4) return pts;
+  var cur = pts;
+  for (var pass = 0; pass < passes; pass++) {
+    var out = [cur[0]];
+    for (var i = 1; i < cur.length - 1; i++) {
+      var a = cur[i - 1], b = cur[i], c = cur[i + 1];
+      out.push([Math.round((a[0] + 2 * b[0] + c[0]) / 4 * 10) / 10,
+                Math.round((a[1] + 2 * b[1] + c[1]) / 4 * 10) / 10,
+                Math.round((a[2] + 2 * b[2] + c[2]) / 4 * 100) / 100]);
+    }
+    out.push(cur[cur.length - 1]);
+    cur = out;
+  }
+  return cur;
+}
+
+/* Light ink on dark paper is right on a screen at night and wrong in a file
+   whose only job is to be read by whatever agent opens it. The export is always
+   dark ink on white, whatever the screen is showing, so any stroke too pale to
+   survive that change is darkened until it does. Hue is kept -- a colour chosen
+   to mean something still means it -- and only the lightness moves. A near-grey
+   has no hue worth keeping and goes to near-black. */
+function forPaper(css) {
+  var m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(css || "").trim());
+  if (!m) return css;
+  var h = m[1].length === 3 ? m[1].replace(/./g, "$&$&") : m[1];
+  var r = parseInt(h.slice(0, 2), 16),
+      g = parseInt(h.slice(2, 4), 16),
+      b = parseInt(h.slice(4, 6), 16);
+  var lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  if (lum <= 0.45) return css;                    /* already reads on white */
+  if (Math.max(r, g, b) - Math.min(r, g, b) < 12) return "rgb(26,27,30)";
+  var target = 0.30 / Math.max(lum, 0.001);
+  var mix = function (v) { return Math.max(0, Math.min(255, Math.round(v * target))); };
+  return "rgb(" + [mix(r), mix(g), mix(b)].join(",") + ")";
 }
 
 function inPolygon(x, y, poly) {
@@ -178,12 +224,17 @@ function create(opts) {
 
   
 
-  var segEdit = seg(toolsCol);
+  var bMore = mk(toolsCol, "sl-more", '<span class="sl-i">' + ICON.more + '</span>'
+                                 + '<span class="sl-w">More</span>', "pages, zoom, paper");
+
+  /* Undo and redo live in the actions column, not the scrolling tool row. On a
+     narrow screen that row scrolls, with no scrollbar to say so, and the two
+     controls a person reaches for most were off the right-hand edge where
+     nothing suggested they existed. Same reasoning that pinned Send. */
+  var segEdit = seg(actsCol);
   var bUndo = mk(segEdit, "sl-t sl-icon-only", '<span class="sl-i">' + ICON.undo + '</span>', "undo");
   var bRedo = mk(segEdit, "sl-t sl-icon-only", '<span class="sl-i">' + ICON.redo + '</span>', "redo");
 
-  var bMore = mk(toolsCol, "sl-more", '<span class="sl-i">' + ICON.more + '</span>'
-                                 + '<span class="sl-w">More</span>', "pages, zoom, paper");
   var savedTag = el("span", "sl-saved", "saved");
   actsCol.appendChild(savedTag);
   var bSend = mk(actsCol, "sl-send", "Send", "hand this page to the tutor");
@@ -303,7 +354,11 @@ function create(opts) {
   }
 
   /* ------------------------------------------------------------ the view */
-  var view = { k: 1, fit: 1, ox: 0, oy: 0 };
+  /* `held` records that the zoom is the writer's, not the component's. Once it
+     is set, nothing but an explicit Fit, or turning to another page, is allowed
+     to refit -- the board re-renders on every server event, and a re-render
+     that throws away the zoom you just set makes the surface unusable. */
+  var view = { k: 1, fit: 1, ox: 0, oy: 0, held: false };
 
   /* Fit by WIDTH, never by area. Fitting the whole page on screen is what made
      a tall page shrink to something unwritable; the width is what has to match,
@@ -311,6 +366,7 @@ function create(opts) {
   function fitPage() {
     var p = page();
     if (!p || !wrap.clientWidth) return;
+    view.held = false;
     view.fit = wrap.clientWidth / p.w;
     view.k = view.fit;
     view.ox = 0;
@@ -337,6 +393,7 @@ function create(opts) {
 
   function setZoom(k, cx, cy) {
     k = Math.max(view.fit * 0.5, Math.min(view.fit * 8, k));
+    view.held = true;
     var r = sheet.getBoundingClientRect();
     if (cx === undefined) { cx = r.width / 2; cy = r.height / 2; }
     var lx = (cx - view.ox) / view.k, ly = (cy - view.oy) / view.k;
@@ -560,6 +617,7 @@ function create(opts) {
       if (ids.length === 1 && !drawing && !lasso && !dragging) {
         view.ox += ev.clientX - prev.x;
         view.oy += ev.clientY - prev.y;
+        view.held = true;
         clampView();
         invalidate();
         return;
@@ -594,7 +652,7 @@ function create(opts) {
       drawing._sy += (raw.y - drawing._sy) * SMOOTH;
       drawing._sp += (raw.p - drawing._sp) * 0.3;
       var last = drawing.pts[drawing.pts.length - 1];
-      if (Math.hypot(drawing._sx - last[0], drawing._sy - last[1]) < 0.7) continue;
+      if (Math.hypot(drawing._sx - last[0], drawing._sy - last[1]) < MIN_STEP) continue;
       drawing.pts.push([Math.round(drawing._sx * 10) / 10,
                         Math.round(drawing._sy * 10) / 10,
                         Math.round(drawing._sp * 100) / 100]);
@@ -628,6 +686,8 @@ function create(opts) {
     if (drawing !== "erasing" && drawing.pts.length) {
       snapshot();
       delete drawing._sx; delete drawing._sy; delete drawing._sp;
+      drawing.pts = polish(drawing.pts, POLISH);
+      drawing.dense = null;
       page().strokes.push(drawing);
     }
     drawing = null;
@@ -702,11 +762,27 @@ function create(opts) {
     var c = document.createElement("canvas");
     c.width = p.w; c.height = p.h;
     var g = c.getContext("2d");
-    /* What is exported is what you see. Inverting it would wreck a colour the
-       writer chose on purpose. */
-    paintPaper(g, p, 1);
-    p.strokes.forEach(function (s) { if (s.hl) paintStroke(g, s); });
-    p.strokes.forEach(function (s) { if (!s.hl) paintStroke(g, s); });
+    g.fillStyle = "#ffffff";
+    g.fillRect(0, 0, p.w, p.h);
+    if (tool.rule !== "plain") {
+      g.strokeStyle = "#eef1f4";
+      g.lineWidth = 1;
+      g.beginPath();
+      var step = Math.max(28, Math.round(p.w / 22));
+      for (var y = step; y < p.h; y += step) { g.moveTo(0, y); g.lineTo(p.w, y); }
+      if (tool.rule === "grid") {
+        for (var x = step; x < p.w; x += step) { g.moveTo(x, 0); g.lineTo(x, p.h); }
+      }
+      g.stroke();
+    }
+    var order = p.strokes.filter(function (s) { return s.hl; })
+                 .concat(p.strokes.filter(function (s) { return !s.hl; }));
+    order.forEach(function (s) {
+      var swapped = s.c;
+      s.c = forPaper(s.c);
+      paintStroke(g, s);
+      s.c = swapped;
+    });
     return c.toDataURL("image/png");
   }
 
@@ -728,20 +804,28 @@ function create(opts) {
   function save(send, quiet) {
     var p = page();
     savedTag.classList.add("busy");
+    var body = { page: current + 1, w: p.w, h: p.h,
+                 strokes: p.strokes.map(stripDense),
+                 png: toPNG(p), send: !!send, pages: pages.length };
+    /* Which turn this is, and which question it answers. The host decides --
+       the component knows about ink, not about a lesson. */
+    var ctx = opts.context ? opts.context() : null;
+    if (ctx) {
+      if (ctx.turn) body.turn = ctx.turn;
+      if (ctx.answers) body.answers = ctx.answers;
+    }
     return fetch("/slate/save", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ page: current + 1, w: p.w, h: p.h,
-                             strokes: p.strokes.map(stripDense),
-                             png: toPNG(p), send: !!send, pages: pages.length }),
-    }).then(function (r) { return r.json(); }).then(function () {
+      body: JSON.stringify(body),
+    }).then(function (r) { return r.json(); }).then(function (res) {
       dirty = false;
       savedTag.classList.remove("busy");
       savedTag.textContent = send ? "sent" : "saved";
       if (send) {
         lastLiveSend = Date.now();
-        if (!quiet) toast("page " + (current + 1) + " sent for review");
-        if (opts.onSend) opts.onSend();
+        if (!quiet) toast(res && res.rev > 1 ? "answer updated" : "sent for review");
+        if (opts.onSend) opts.onSend(res || {});
       }
     }).catch(function () {
       savedTag.classList.remove("busy");
@@ -908,7 +992,12 @@ function create(opts) {
     savedTag.textContent = "saved";
   }).catch(function () { /* offline is fine; the page still works */ });
 
-  api.relayout = function () { layout(); fitPage(); };
+  /* Re-measure the box, but keep a zoom the writer set on purpose. The board
+     calls this after every render, and every server event is a render. */
+  api.relayout = function () {
+    layout();
+    if (view.held) { clampView(); invalidate(); } else { fitPage(); }
+  };
   api.bar = barHost || bar;
   /* Enough of the innards for a test to prove that a stroke actually landed.
      Everything about this component is invisible to assertions otherwise. */
@@ -918,9 +1007,37 @@ function create(opts) {
              pages: pages.length, k: view.k };
   };
   api.save = save;
+  /* Put a previously sent answer back on the surface so it can be corrected.
+     Feedback on an answer you can no longer edit is feedback you cannot act on,
+     which was the whole complaint. Replaces the current page; the undo stack
+     keeps what was there. */
+  api.load = function (data) {
+    var p = page();
+    if (!p) return false;
+    snapshot();
+    p.strokes = (data && data.strokes) || [];
+    p.strokes.forEach(function (s) { s.dense = null; });
+    if (data && data.w) p.w = data.w;
+    if (data && data.h) p.h = data.h;
+    clearSelection();
+    invalidate();
+    fitPage();
+    return true;
+  };
+  api.clear = function () {
+    var p = page();
+    if (!p) return;
+    snapshot();
+    p.strokes = [];
+    clearSelection();
+    invalidate();
+  };
   api.root = root;
   return api;
 }
 
-window.Slate = { create: create };
+/* forPaper is exposed so the export rule can be asserted. There is no canvas
+   backend in the test environment, so the only way to prove the PNG is legible
+   is to prove the colour mapping is. */
+window.Slate = { create: create, forPaper: forPaper };
 })();
