@@ -30,8 +30,7 @@ repository and it carries the invariants that were learned the hard way. Then:
 ```
 board doctor          # is this machine equipped
 tutor where           # what is running, and where
-npm install jsdom     # once, for the two tests that need a real DOM
-for t in markdown macros hidden pages modes typeface interactive sizing; do node test/$t.js; done
+bash test/all.sh      # every suite; fetches jsdom itself the first time
 ```
 
 **Nothing survives a lost session on a cluster node.** Processes die with the allocation, so at the
@@ -959,7 +958,11 @@ node test/modes.js       that math mode has no text box and code mode does
 node test/typeface.js    that the reading face reaches prose and never the maths
 node test/interactive.js drives the real board in a real DOM and writes on it
 node test/sizing.js      that every screen size opens at natural writing size
-                         (both need `npm install jsdom`; they skip without it)
+
+bash test/all.sh         all of the above, in order. The two real-DOM suites need
+                         jsdom; this fetches it on first run and carries on
+                         without it if there is no network. A setup step someone
+                         has to remember is a setup step that does not happen.
 python3 tools/sync-macros.py --check   that TeX and KaTeX know the same commands
 ./install.sh             re-runs the environment check
 board doctor

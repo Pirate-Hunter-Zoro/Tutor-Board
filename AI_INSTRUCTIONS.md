@@ -103,10 +103,13 @@ Two things follow from that table and are worth stating as rules rather than his
 ## Before you commit
 
 ```
-node test/markdown.js
-node test/macros.js
+bash test/all.sh
 board doctor
 ```
+
+`test/all.sh` runs every suite and installs jsdom itself the first time, because two of them drive
+the pages in a real DOM and those are precisely the ones that caught what the stub DOM waved
+through. Do not add a suite that only a person who remembered a setup step will run.
 
 Then actually load the page and look at it. A test suite cannot tell you the type is too small or
 a lattice collided with a paragraph.

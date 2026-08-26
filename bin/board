@@ -1116,6 +1116,14 @@ def cmd_doctor(live, args):
         ok = ok and bool(found)
     print("katex:    %s" % ("vendored" if os.path.exists(
         os.path.join(TOOL, "web", "katex", "katex.min.js")) else "MISSING"))
+    node = _sh.which("node")
+    if node:
+        p = subprocess.run([node, "-e", "require('jsdom')"], cwd=TOOL,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print("tests:    %s" % ("all suites runnable" if p.returncode == 0 else
+                                "run `bash test/all.sh` — it fetches what it needs"))
+    else:
+        print("tests:    node not installed (the board does not need it)")
     cfg = read_config(live.root)
     print("repo:     %s" % live.root)
     print("course:   %s  (%s mode)" % (cfg["name"], cfg["mode"]))
