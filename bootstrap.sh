@@ -97,6 +97,24 @@ fi
 # --- tailnet identity -------------------------------------------------------
 if [ -n "$NAME" ]; then
   export BOARD_TAILNET_NAME="$NAME"
+  # Refuse to rename a machine that already answers to something on the tailnet,
+  # unless that is plainly what was meant. Renaming a live node moves the address
+  # every installed app points at.
+  EXISTING="$(python3 -c "
+import sys; sys.path.insert(0, '$HERE')
+import boardlib, os
+print(boardlib.tailnet_hostname() if os.path.exists(boardlib.TS_NAME_FILE) else '')
+" 2>/dev/null)"
+  if [ -n "$EXISTING" ] && [ "$EXISTING" != "$NAME" ]; then
+    warn "this machine already calls itself '$EXISTING' on the tailnet"
+    say  "        Renaming it to '$NAME' would move the address any installed app"
+    say  "        points at. If that is what you want:"
+    say  "          board vpn up --hostname $NAME"
+    NAME=""
+  fi
+fi
+
+if [ -n "$NAME" ]; then
   python3 -c "
 import sys; sys.path.insert(0, '$HERE')
 import boardlib; boardlib.set_tailnet_hostname('$NAME')

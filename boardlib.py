@@ -91,7 +91,12 @@ def _cmdline(pid):
 # ---------------------------------------------------------------------------
 # Tailscale
 # ---------------------------------------------------------------------------
-TS_DIR = os.path.join(HOME, ".local", "state", "tailscale")
+# BOARD_STATE_DIR exists so a test can be run without writing the real thing.
+# It is not a convenience: a bootstrap test once set this machine's tailnet name
+# to the name of a different machine, which silently moved the address the iPad
+# app was installed against. State that a test can reach is state a test will
+# eventually corrupt.
+TS_DIR = os.environ.get("BOARD_STATE_DIR") or os.path.join(HOME, ".local", "state", "tailscale")
 TS_SOCK = os.path.join(TS_DIR, "tailscaled.sock")
 
 # Where a system-managed Tailscale keeps its CLI when it is not simply on PATH.
