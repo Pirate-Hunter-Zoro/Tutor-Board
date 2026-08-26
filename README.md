@@ -22,6 +22,69 @@ which kind of subject it is and the board adapts.
 
 ---
 
+## Picking this up in a new session
+
+Read [`AI_INSTRUCTIONS.md`](./AI_INSTRUCTIONS.md) first — it is the contract for working on this
+repository and it carries the invariants that were learned the hard way. Then:
+
+```
+board doctor          # is this machine equipped
+tutor where           # what is running, and where
+npm install jsdom     # once, for the two tests that need a real DOM
+for t in markdown macros hidden pages modes typeface interactive sizing; do node test/$t.js; done
+```
+
+**Nothing survives a lost session on a cluster node.** Processes die with the allocation, so at the
+start of a new session expect to run, from a course directory:
+
+```
+board vpn up          # reconnects without a new login; state persists
+board start
+```
+
+`board vpn serve` re-points the HTTPS name if it has drifted. The tailnet name is deliberately
+`board` and not the machine's, so the address the iPad app is installed against does not move —
+`board vpn up --hostname` is the only thing that should ever change it.
+
+### Where this stands
+
+Working and exercised: the card stream and its live push; KaTeX with a shared macro vocabulary;
+TikZ compiled to cached SVG; the hub, with course discovery and switching; math and code modes;
+the writing surface, docked in the lesson with its tools in the page chrome; slate pages saved as
+strokes and as a PNG the assistant reads; the inbox and `board wait`; end-of-session commit and
+push with no assistant attribution; Tailscale in userspace mode with HTTPS; the installed iPad app.
+
+**Not verified, and only a person with the hardware can settle it:**
+
+- *How the ink feels.* Smoothing, pressure response and palm rejection are all tuned blind. The
+  knobs are `SMOOTH` and `RESAMPLE` at the top of `web/slate-core.js`.
+- *How it looks.* There is no browser on the machine this was written on. Every visual judgement
+  in here is inference.
+- *macOS.* The platform paths in `boardlib.py`, `bootstrap.sh` and the LaunchAgent are written from
+  documentation, not from a Mac.
+- *Headless mode.* `tutor headless` has never been run against a real agent end to end. The
+  `headless` recipes in the config are best guesses at each tool's non-interactive flags.
+
+### Things that broke, and must not break again
+
+Each of these cost a round trip to discover. They are all under test now; if a change makes one of
+these tests fail, the test is right.
+
+| What went wrong | Guarded by |
+|---|---|
+| The drop overlay was painted over the lesson permanently — `[hidden]` loses to any author rule that sets a `display` | `test/hidden.js` |
+| A pen stroke silently did nothing, because no page existed until `/slate/state` answered | `test/interactive.js` |
+| The writing surface was collapsed, so its canvas was 0×0 and touches fell through to the lesson | `test/interactive.js` |
+| Send scrolled off the end of the toolbar | `test/interactive.js` |
+| Everything opened zoomed out, so writing was too small on any small screen | `test/sizing.js` |
+| A subscript inside `$…$` was eaten by the markdown emphasis rules | `test/markdown.js` |
+| A macro worked in the prose but not inside a `tikz` fence | `tools/sync-macros.py --check` |
+| A bootstrap test renamed the live machine on the tailnet, moving the address the iPad app used | `BOARD_STATE_DIR`, and a guard in `bootstrap.sh` |
+
+The pattern in most of them: a stub that returns a plausible object for everything will report that
+a broken page loads fine. `test/interactive.js` and `test/sizing.js` use a real DOM for that
+reason, and are the ones to extend when something is wrong on a device.
+
 ## What it is not
 
 Not a chat client. The conversation still happens wherever the assistant is running — a terminal,

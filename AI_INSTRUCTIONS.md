@@ -84,6 +84,22 @@ Read `README.md` first.
   SDK, no plugin, no assumption about which assistant is driving. `board wait` is the wake-up
   primitive precisely because a blocking process exiting is something every agent understands.
 
+## Where the work is
+
+`README.md` has a "Picking this up in a new session" section: the restart procedure, what is
+verified, what is not, and a table of the defects that already happened with the test that guards
+each one. Read it before changing anything in `web/`.
+
+Two things follow from that table and are worth stating as rules rather than history:
+
+- **A stub DOM proves almost nothing about a page.** Two separate "the writing surface does not
+  work" reports passed every hand-rolled test at the time. Anything touching layout, sizing, or
+  pointer input gets a case in `test/interactive.js` or `test/sizing.js`, which use a real DOM.
+- **When the user says something does not work on the device, do not theorise.** Read the code
+  that draws it and measure. The drop overlay was blamed on caching and then on iOS resume
+  semantics before anyone read a two-line CSS rule; the writing surface was blamed on layout
+  before anyone checked that a page object existed.
+
 ## Before you commit
 
 ```
