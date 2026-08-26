@@ -24,6 +24,21 @@ which kind of subject it is and the board adapts.
 
 ## Picking this up in a new session
 
+> **Where this is right now, 26 August 2026.** The board has just been rebuilt around a
+> transcript, and none of it has been used in anger. The next thing that happens is the owner
+> working through **Galois Theory, chapters 1 and 2**, on the iPad, with a separate tutor in
+> `../Galois-Theory` — and coming back *here*, to this repository, in a different session, to
+> report what was wrong with the board while doing it.
+>
+> **So if you are reading this in a fresh session on Tutor-Board: your job is fixing the board,
+> from a person's account of using it.** Not teaching Galois theory — that is the other session's
+> job, in the other repository, and it does not know or care about this one.
+>
+> Everything below the line *"Where this stands"* is the honest state. In particular, five of the
+> seven defects found on the first day of real use were CSS that no test could have caught, and
+> the transcript, the docked tool bar and the history view have **still never been looked at in a
+> browser**. Expect the feedback to be visual. Read the CSS before theorising about the platform.
+
 Read [`AI_INSTRUCTIONS.md`](./AI_INSTRUCTIONS.md) first — it is the contract for working on this
 repository and it carries the invariants that were learned the hard way. Then:
 
@@ -344,6 +359,50 @@ conversation history does not cross a node, a vendor, or a week.
 
 `SIGTERM` is what starts the wrap-up, deliberately: the whole point is that it happens, so nothing
 kills the daemon outright. It takes as long as one turn takes, and nobody waits for it.
+
+### It does not matter where you run `tutor` from
+
+Courses are found by name under `courses_dir`, and the launcher changes into the course directory
+itself before doing anything. `tutor galois` from your home directory, from inside another course,
+or from `/tmp` all do the same thing. The only command that cares where it is run is `board`, which
+acts on the repository it is standing in — and the launcher never makes you run that.
+
+### Every session starts by catching up
+
+Before the board comes up and before an assistant is launched, the launcher runs a
+fast-forward-only `git pull` in the course. A handoff written on the Mac mini is worth nothing to a
+compute node that never fetched it, and the whole point of writing it down is that the work moves
+between machines.
+
+It is deliberately never fatal. No remote, no network, or a branch that has diverged: it says so in
+one line and the session starts anyway on what is on disk. Somebody holding an iPad cannot resolve
+a merge, and a session that refuses to start is worse than a session that starts a commit behind.
+
+### Not yet built: always-on, with the compute node preferred
+
+The intended shape, once there is a Mac mini at home to be the always-on host:
+
+- **The Mac mini holds the board by default.** It runs the headless daemon under its LaunchAgent
+  (`scripts/install-autostart.sh`), so the tailnet name always answers and the iPad app always has
+  something to open. Nothing to start, nothing to remember.
+- **A compute node takes over when there is one.** Starting work on a node claims the tailnet
+  identity, and the address the iPad is installed against now resolves there — nearer the data,
+  with the cluster's hardware.
+- **The Mac mini reclaims when the allocation ends.** The ownership record already carries the node
+  name and is already treated as stale when that node is no longer held; what does not exist yet is
+  anything that *watches* for that and takes the name back.
+
+Two things make this harder than it sounds, and both are why it is not written yet:
+
+1. **Only one machine may hold the tailnet identity at a time.** The node key is shared through the
+   home directory; two daemons clawing at it is the failure this is designed to avoid. A handover
+   has to be a handover, not a race.
+2. **A takeover has to be polite.** A compute node claiming the name while the Mac mini is mid-push
+   should ask it to finish, exactly as switching course asks the outgoing assistant to write its
+   handoff.
+
+None of it can be built blind. It needs the Mac mini to exist, and it needs to be tested with a
+real allocation ending under a real session.
 
 ### Why there is no registry
 

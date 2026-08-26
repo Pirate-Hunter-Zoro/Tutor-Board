@@ -15,6 +15,7 @@ died hours ago.
 import importlib.machinery
 import importlib.util
 import json
+import shutil
 import os
 import sys
 import tempfile
@@ -109,6 +110,71 @@ check("an unresolved agent refuses", code == 1 and "no agent resolved" in msg)
 code, msg = tutor.agent_stop(course)
 check("stopping something that is not there is not an error",
       code == 0 and "nothing was listening" in msg)
+
+# --- catching up with another machine ---------------------------------------
+# A handoff written on one machine is worth nothing to another that never
+# fetched it, so a session starts by pulling. It must never be fatal: someone
+# holding an iPad cannot resolve a merge.
+import subprocess  # noqa: E402
+
+
+def git(*args, **kw):
+    return subprocess.run(["git"] + list(args), stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL, **kw)
+
+
+check("a directory that is not a repository is left alone",
+      tutor.sync(tempfile.mkdtemp(prefix="tutor-plain-")) is None)
+
+sandbox = tempfile.mkdtemp(prefix="tutor-sync-")
+up = os.path.join(sandbox, "up")
+here = os.path.join(sandbox, "here")
+there = os.path.join(sandbox, "there")
+
+git("init", "-q", "--bare", up)
+git("symbolic-ref", "HEAD", "refs/heads/main", cwd=up)
+git("init", "-q", "-b", "main", here)
+for cfg in (("user.email", "t@t"), ("user.name", "T")):
+    git("config", cfg[0], cfg[1], cwd=here)
+with open(os.path.join(here, "HANDOFF.md"), "w", encoding="utf-8") as fh:
+    fh.write("first\n")
+git("add", "-A", cwd=here)
+git("commit", "-qm", "first", cwd=here)
+
+check("a repository with no remote is left alone", tutor.sync(here, quiet=True) is None)
+
+git("remote", "add", "origin", up, cwd=here)
+git("push", "-qu", "origin", "main", cwd=here)
+git("clone", "-q", up, there)
+for cfg in (("user.email", "t@t"), ("user.name", "T")):
+    git("config", cfg[0], cfg[1], cwd=there)
+with open(os.path.join(there, "HANDOFF.md"), "w", encoding="utf-8") as fh:
+    fh.write("what the other machine taught\n")
+git("commit", "-qam", "handoff from elsewhere", cwd=there)
+git("push", "-q", cwd=there)
+
+check("a session pulls what another machine pushed", tutor.sync(here, quiet=True) is True)
+with open(os.path.join(here, "HANDOFF.md"), encoding="utf-8") as fh:
+    check("and the handoff it wrote is the one now on disk",
+          fh.read().strip() == "what the other machine taught")
+
+# Diverged: the remote moved and so did this side. A pull cannot fast-forward,
+# and the session still has to start.
+with open(os.path.join(there, "HANDOFF.md"), "w", encoding="utf-8") as fh:
+    fh.write("elsewhere again\n")
+git("commit", "-qam", "elsewhere again", cwd=there)
+git("push", "-q", cwd=there)
+with open(os.path.join(here, "HANDOFF.md"), "w", encoding="utf-8") as fh:
+    fh.write("locally, at the same time\n")
+git("commit", "-qam", "local work", cwd=here)
+
+check("a diverged branch reports rather than throwing",
+      tutor.sync(here, quiet=True) is False)
+check("and it does not touch the local work",
+      open(os.path.join(here, "HANDOFF.md"), encoding="utf-8").read().strip()
+      == "locally, at the same time")
+
+shutil.rmtree(sandbox, ignore_errors=True)
 
 print()
 print("%d FAILURES" % len(fails) if fails else "the assistant follows the course")

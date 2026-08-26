@@ -337,6 +337,46 @@ def headless_stop(cfg, args):
     return 0
 
 
+def sync(root, quiet=False):
+    """Pull whatever another machine pushed, before the session starts.
+
+    The point of the handoff is that a course can be picked up somewhere else,
+    and a handoff written on the Mac mini is worth nothing to a compute node
+    that never fetched it. So every session begins by catching up.
+
+    Fast-forward only, and never fatal. A session that will not start because a
+    branch diverged is worse than a session that starts a commit behind and says
+    so -- the person is holding an iPad and cannot fix a merge from there.
+    """
+    if not os.path.isdir(os.path.join(root, ".git")):
+        return None
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_ASKPASS="/bin/false")
+    def git(*args, **kw):
+        return subprocess.run(["git"] + list(args), cwd=root, env=env,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              timeout=kw.get("timeout", 45))
+    try:
+        if git("remote", "get-url", "origin").returncode != 0:
+            return None
+        before = git("rev-parse", "HEAD").stdout.decode().strip()
+        p = git("pull", "--ff-only", timeout=60)
+        after = git("rev-parse", "HEAD").stdout.decode().strip()
+    except (OSError, subprocess.TimeoutExpired):
+        if not quiet:
+            print("  could not reach the remote; working with what is here")
+        return False
+    if p.returncode != 0:
+        out = p.stdout.decode("utf-8", "replace").strip().splitlines()
+        if not quiet:
+            print("  not synced: %s" % (out[-1] if out else "pull failed"))
+            print("  the session will start anyway, on what is here")
+        return False
+    if before != after and not quiet:
+        n = git("rev-list", "--count", "%s..%s" % (before, after)).stdout.decode().strip()
+        print("  pulled %s commit(s) from another machine" % n)
+    return True
+
+
 def agent_live(root):
     """The daemon recorded for this course, if it is really there.
 
@@ -374,6 +414,10 @@ def agent_start(cfg, course, agent_name, session=None):
         return 1, "no agent resolved for %s" % course["dir"]
     if not (cfg["agents"].get(agent_name) or {}).get("headless"):
         return 1, "'%s' has no headless recipe; add one in %s" % (agent_name, CONFIG)
+
+    # Catch up before the assistant reads anything -- including the HANDOFF.md
+    # another machine may have written at the end of the last session.
+    sync(root, quiet=True)
 
     os.makedirs(live_dir, exist_ok=True)
     cmd = [sys.executable, os.path.realpath(__file__), "headless", course["dir"],
@@ -671,6 +715,10 @@ def main(argv):
         return 1
     course = pick(found, args[0]) if args else choose(found)
 
+    # --- catch up ----------------------------------------------------------
+    print("\n%s" % (course.get("name") or course["dir"]))
+    sync(course["root"])
+
     # --- the board ---------------------------------------------------------
     code, out = board(course["root"], "start")
     if code != 0:
@@ -685,7 +733,7 @@ def main(argv):
     urls = "\n".join("  " + l.strip() for l in net.splitlines()
                      if l.strip().startswith("http"))
 
-    print("\n%s — %s" % (course.get("name") or course["dir"], course.get("mode") or "?"))
+    print("%s — %s" % (course.get("name") or course["dir"], course.get("mode") or "?"))
     print(net.rstrip())
 
     live = os.path.join(course["root"], "live")
