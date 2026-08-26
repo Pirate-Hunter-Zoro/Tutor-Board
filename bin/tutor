@@ -322,6 +322,11 @@ def headless_stop(cfg, args):
         except (OSError, ValueError):
             continue
         pid = st.get("pid")
+        # An interactive assistant is somebody's terminal. `headless --stop` is
+        # for daemons, and killing a session a person is sitting in front of is
+        # not what anyone typing it meant.
+        if st.get("mode") == "interactive":
+            continue
         if pid and st.get("host") == os.uname().nodename.split(".")[0]:
             try:
                 os.kill(pid, signal.SIGTERM)
@@ -389,13 +394,8 @@ def agent_live(root):
             st = json.load(fh)
     except (OSError, ValueError):
         return None
-    if st.get("host") != this_host() or not st.get("pid"):
-        return None
-    try:
-        os.kill(st["pid"], 0)
-    except OSError:
-        return None
-    return st
+    import boardlib
+    return st if boardlib.agent_is_attached(st, this_host()) else None
 
 
 def agent_start(cfg, course, agent_name, session=None):
@@ -641,8 +641,9 @@ def cmd_where(cfg, args):
         try:
             with open(os.path.join(live, "agent.json"), "r", encoding="utf-8") as fh:
                 st = json.load(fh)
-            fresh = time.time() - st.get("last_seen", 0) < 120
-            agent = ("%s %s" % (st.get("agent"), st.get("state"))) if fresh else "stale"
+            import boardlib
+            agent = ("%s %s" % (st.get("agent"), st.get("state"))) \
+                if boardlib.agent_is_attached(st, host) else "stale"
         except (OSError, ValueError):
             pass
         print("  %-24s board:%-10s agent:%s" % (c.get("name") or c["dir"], board_up, agent))
@@ -767,6 +768,14 @@ def main(argv):
         print("\n  then tell it:  %s" % opener)
 
     print("\nstarting %s in %s\n" % (name, course["dir"]))
+    # Say on the board that somebody is attached. `execvp` replaces this process
+    # with the assistant, so this pid is about to BE the assistant -- which is
+    # what makes the record checkable later without a heartbeat. An interactive
+    # session is idle whenever the person is thinking, and a heartbeat would call
+    # that dead; the process either exists or it does not.
+    agent_state(live, host=this_host(), agent=name, pid=os.getpid(),
+                mode="interactive", cmd=cmd[0], state="attached",
+                started=time.time(), turns=0, last_error=None)
     try:
         os.chdir(course["root"])
         os.execvp(cmd[0], cmd)          # hand the terminal over entirely

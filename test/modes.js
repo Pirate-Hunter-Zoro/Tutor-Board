@@ -27,7 +27,7 @@ function stub(tag) {
     classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
     hidden: false, disabled: false, value: '', textContent: '', innerHTML: '',
     children: [], files: [], scrollHeight: 20,
-    addEventListener() {}, appendChild() {}, removeChild() {},
+    addEventListener() {}, appendChild() {}, removeChild() {}, after() {},
     setPointerCapture() {}, releasePointerCapture() {}, remove() {}, type: '',
     querySelector: () => stub(), querySelectorAll: () => [],
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 900, height: 600 }),
@@ -92,7 +92,8 @@ function check(name, cond) {
 function paint(mode, cards, turns) {
   render({ state: { course: 'X', mode }, cards: cards || [], turns: turns || [],
            messages: [], uploads: [], slate: [] });
-  return { composer: registry.composer.hidden, answer: registry.writer.hidden };
+  return { composer: registry.composer.hidden, answer: registry.writer.hidden,
+           empty: registry.empty.hidden };
 }
 
 const question = [{ id: '0001', kind: 'question', title: 'Which subfield?', body: 'q', mtime: now }];
@@ -127,6 +128,43 @@ check('code: the box is there before anything is asked', r.composer === false);
 
 r = paint(undefined, question, []);
 check('missing mode falls back to maths, the stricter one', r.composer === true);
+
+// A prompt that cannot be declined is a prompt that gets answered badly to make
+// it go away. Skipping is a turn like any other -- it is in the transcript and it
+// wakes the tutor -- but unlike a sent answer it closes the block, because the
+// whole point of skipping is that the prompt goes.
+r = paint('math', question, [{ id: 't0009', rev: 1, kind: 'text', signal: 'skip',
+                               answers: '0001', t: now + 10, t0: now + 10 }]);
+check('math: skipping closes the answer block', r.answer === true);
+check('math: and does not conjure a text box', r.composer === true);
+
+// A skip belongs to the question it declined. The next question is a fresh ask.
+r = paint('math', question.concat([{ id: '0002', kind: 'question', title: 'Next',
+                                     body: 'q', mtime: now + 20 }]),
+          [{ id: 't0009', rev: 1, kind: 'text', signal: 'skip', answers: '0001',
+             t: now + 10, t0: now + 10 }]);
+check('math: a later question is still asked after a skip', r.answer === false);
+
+// The cold start. A maths board with no cards offers no question, so no answer is
+// owed, so the slate never opens -- and there is no text box either. Without a
+// way to say the first thing, the first turn of every session has to come from a
+// terminal, and the board's whole promise is that it does not.
+r = paint('math', [], []);
+check('math: an empty board still says it is empty', r.empty === false);
+check('math: and still has no text box', r.composer === true);
+check('math: the cold start is a button, not a composer',
+      ids.has('begin') && /id="begin"[\s\S]*?<\/button>/.test(html));
+check('math: the begin button lives in the empty state, so a card retires it',
+      /<div id="empty"[\s\S]*?id="begin"[\s\S]*?<\/div>/.test(html));
+
+// One card is enough to retire it: the empty state goes, and the button with it.
+r = paint('math', [{ id: '0001', kind: 'lesson', body: 'x', mtime: now }], []);
+check('math: a card retires the empty state', r.empty === true);
+
+// So does the ask itself, so the tutor is not woken four times.
+r = paint('math', [], [{ id: 't0001', rev: 1, kind: 'text', signal: 'begin',
+                         t: now, t0: now }]);
+check('math: having asked, the board is no longer empty', r.empty === true);
 
 console.log(fails ? '\n' + fails + ' FAILURES' : '\nall mode checks passed');
 process.exit(fails ? 1 : 0);

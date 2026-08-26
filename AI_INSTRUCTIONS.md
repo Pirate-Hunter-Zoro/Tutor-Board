@@ -71,6 +71,14 @@ Read `README.md` first.
   as the compute host, and its state lives in the shared home so the identity follows the user
   from node to node. The installed iPad app has one origin baked into it; changing that address
   breaks it silently.
+- **Two kinds of assistant, two ways of expiring.** A headless daemon has a heartbeat and is dead
+  after two minutes of silence. An interactive one is idle for exactly as long as the person in
+  front of it is thinking, so it is judged by whether its process still exists — `tutor` records
+  the pid before `execvp`, which is the pid the assistant then has. Applying the heartbeat rule to
+  both is why the board's indicator was dark in every ordinary session; applying the pid rule to a
+  daemon would believe a killed one whose record looked fresh. `boardlib.agent_is_attached` is the
+  single place that decides, and the server, `tutor where` and `agent_live` all ask it.
+  `headless --stop` skips interactive records: someone is sitting in front of that terminal.
 - **A pid on a shared filesystem proves nothing.** Every record that crosses `live/` carries the
   node name, and every liveness check compares it before trusting the pid.
 - **`hidden` must actually hide.** Both stylesheets carry
@@ -80,6 +88,47 @@ Read `README.md` first.
   lesson from the first version, and it was blamed on caching and then on iOS resume semantics
   before anyone checked a two-line rule. When the user says a fix did not land, verify what is
   actually being rendered before proposing a mechanism for why.
+- **The first turn must be possible from the device.** An empty board asks no question, so no
+  answer is owed, so nothing opens the slate — and in maths there is no box either. That made the
+  cold start a terminal job, which is the ceremony the launcher exists to remove. An empty board
+  therefore carries one button that sends a `begin` signal, and sending it makes the board
+  non-empty so the button retires itself. A signal has no sentence in it, so its inbox line carries
+  its own meaning: in a headless session that line is the prompt the assistant is woken with, and a
+  bare tag tells it nothing. `test/begin.py` drives the round trip. Do not answer this hole with a
+  composer.
+- **A writing prompt must be declinable.** Teaching is explain, then ask for an example — and a
+  prompt that cannot be refused is a prompt that gets answered badly to make it go away. The answer
+  block carries *skip this one* in its own header, so it dies with the block. A skip is a turn: in
+  the transcript, and it wakes the tutor, because the tutor has to carry on. Unlike a sent answer,
+  which keeps the block open so a mistake can be corrected in place, a skip closes it. What the
+  tutor is told is to carry on and not press the point; whether to work the exercise aloud anyway
+  is its judgement, not a rule. `test/modes.js` holds it.
+- **A homework sitting is bound to a problem set, and the set is discovered.** Two layouts exist —
+  `homework/hwNN/hwNN.tex` and `chapters/chNN-*/homework/chNN-homework.tex` — and neither is more
+  correct, so `homework.py` finds it from the session label and never hardcodes a shape. When it
+  cannot tell, it says so and stops: a wrong guess compiles the wrong document or files handwriting
+  into somebody else's problem. Problem labels are opaque strings, because one course numbers
+  problems 1, 2, 3 and the other 7.1, 7.2, 7.3.
+- **The board does not write LaTeX.** The assistant edits the `.tex` with its own tools, as it does
+  with every other file in the course. The tool owns only what is invisible from a tablet: which
+  set, which problems are still empty, whether the compile passed, and where a page of handwriting
+  is filed. Status is parsed from the `.tex` on every build rather than kept in a record of the
+  board's own — the file is the truth, and two sources of truth drift. Do not add a splice command
+  and do not mirror per-problem state into `live/`.
+- **A failed compile reaches the iPad with its reason.** `board hw build` records the outcome and
+  the tail of the log, and the board shows the LaTeX error itself. "The build failed" without the
+  reason is a message that sends somebody to a laptop, which is the thing this tool exists to
+  avoid.
+- **An unreachable board must say so.** Zero cards and a dead stream used to render identically —
+  "Nothing on the board yet" — so a board whose process had died read as a tutor who had not
+  written, and the only signal otherwise was a dot the size of a full stop. No payload plus a dead
+  stream states the fault where the lesson would be; a lesson already on screen stays readable
+  behind a banner, because discarding what someone is reading is the worse failure. `test/link.js`
+  guards both halves.
+- **Never aim the tailnet name at a board that is not answering here.** `live/.board.json` crosses
+  nodes on a shared home, so every command that re-points `tailscale serve` checks `alive()` first.
+  `board net` did not, and a stale record from an ended allocation was enough for a command that
+  reads like a diagnostic to park the iPad's one baked-in address on a dead port.
 - **No text box in math mode, ever.** Answering means writing on the slate. A composer there
   would quietly become the path of least resistance and undo the point of the thing. Code mode is
   the opposite and has one, because a sentence is the right unit for "look at what I just wrote".

@@ -16,6 +16,7 @@ import importlib.machinery
 import importlib.util
 import json
 import shutil
+import time
 import os
 import sys
 import tempfile
@@ -76,6 +77,7 @@ os.makedirs(live)
 
 
 def write_agent(**kw):
+    kw.setdefault("last_seen", time.time())
     with open(os.path.join(live, "agent.json"), "w", encoding="utf-8") as fh:
         json.dump(kw, fh)
 
@@ -92,6 +94,50 @@ write_agent(host=host, pid=os.getpid(), agent="claude", state="listening")
 st = tutor.agent_live(tmp)
 check("a record for a live process on this node is believed",
       bool(st) and st.get("agent") == "claude")
+
+# --- the two kinds of record expire differently ------------------------------
+# A headless daemon has a heartbeat, so silence means it died. An interactive
+# assistant is idle for exactly as long as the person in front of it is thinking,
+# and judging that by a heartbeat is why the board's indicator never once turned
+# green in an ordinary `tutor` session: nothing outside headless ever wrote one.
+
+write_agent(host=host, pid=os.getpid(), agent="claude", state="listening",
+            last_seen=time.time() - 600)
+check("a headless daemon that stopped heartbeating is not believed",
+      tutor.agent_live(tmp) is None)
+
+write_agent(host=host, pid=os.getpid(), agent="claude", state="attached",
+            mode="interactive", cmd=sys.executable, last_seen=time.time() - 6000)
+st = tutor.agent_live(tmp)
+check("an interactive assistant idle for an hour is still attached",
+      bool(st) and st.get("state") == "attached")
+
+write_agent(host=host, pid=999999, agent="claude", state="attached",
+            mode="interactive", cmd=sys.executable, last_seen=time.time())
+check("but one whose process is gone is not",
+      tutor.agent_live(tmp) is None)
+
+write_agent(host=host, pid=os.getpid(), agent="claude", state="attached",
+            mode="interactive", cmd="a-command-this-process-is-not")
+check("and a recycled pid running something else is not either",
+      tutor.agent_live(tmp) is None)
+
+# `headless --stop` is for daemons. Someone is sitting in front of an interactive
+# session, and killing it is not what anyone typing that meant. This one needs a
+# courses_dir of its own, because stopping walks every course it can find.
+box = tempfile.mkdtemp(prefix="tutor-courses-")
+boxed = os.path.join(box, "fake-course", "live")
+os.makedirs(boxed)
+with open(os.path.join(boxed, "agent.json"), "w", encoding="utf-8") as fh:
+    json.dump({"host": host, "pid": os.getpid(), "agent": "claude",
+               "state": "attached", "mode": "interactive", "cmd": sys.executable,
+               "last_seen": time.time()}, fh)
+tutor.headless_stop({"courses_dir": box, "agents": {}}, [])
+check("headless --stop leaves an interactive session alone",
+      os.path.exists(os.path.join(boxed, "agent.json")))
+shutil.rmtree(box, ignore_errors=True)
+
+write_agent(host=host, pid=os.getpid(), agent="claude", state="listening")
 
 # --- starting ----------------------------------------------------------------
 course = {"root": tmp, "dir": "fake-course", "name": "Fake"}

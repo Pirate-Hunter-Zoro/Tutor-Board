@@ -18,6 +18,14 @@ var els = {
   board: document.getElementById("board"),
   cards: document.getElementById("cards"),
   empty: document.getElementById("empty"),
+  begin: document.getElementById("begin"),
+  skip: document.getElementById("skip"),
+  offline: document.getElementById("offline"),
+  linkbad: document.getElementById("linkbad"),
+  hwbar: document.getElementById("hwbar"),
+  hwSet: document.getElementById("hw-set"),
+  hwCount: document.getElementById("hw-count"),
+  hwBuild: document.getElementById("hw-build"),
   jump: document.getElementById("jump"),
   scratch: document.getElementById("scratch"),
   scratchList: document.getElementById("scratch-list"),
@@ -466,9 +474,10 @@ function render(data) {
 
   els.cards.innerHTML = "";
   els.cards.appendChild(frag);
-  els.empty.hidden = items.length > 0;
+  els.empty.hidden = items.length > 0 || linkDead;
 
   paintSession(state, data.push, data.agent);
+  paintHomework(data.hw);
 
   var codeMode = (state.mode || "math") === "code";
   document.body.dataset.mode2 = state.mode || "math";
@@ -493,6 +502,16 @@ function render(data) {
   var owed = !codeMode && !!(lastQuestion && lastQuestion > lastSent);
   if (owed) pinnedTo = newestQ;
   owed = owed || (!codeMode && !!pinnedTo && pinnedTo === newestQ);
+
+  /* A sent answer keeps the block open, because the tutor's next move is usually
+     to point at a mistake in it. A declined one does the opposite: the whole
+     point of skipping is that the prompt goes away. */
+  if (newestQ && (data.turns || []).some(function (t) {
+        return t.signal === "skip" && t.answers === newestQ;
+      })) {
+    pinnedTo = null;
+    owed = false;
+  }
 
   /* Which answer the panel is editing. An ink turn already sent against the
      current question is the one to correct; anything else starts a new one. */
@@ -533,6 +552,55 @@ function render(data) {
    person who needs to know a push failed, is holding an iPad. */
 var pushDismissed = 0;
 
+/* A homework sitting produces a document, and the state of that document lives
+   in a .tex file nobody on an iPad can see. Which set, how much of it is written
+   up, and whether the last compile passed -- with the LaTeX error itself when it
+   did not, because "the build failed" without the reason is a message that
+   sends someone to a laptop. */
+function paintHomework(hw) {
+  if (!hw) { els.hwbar.hidden = true; return; }
+  els.hwbar.hidden = false;
+
+  if (!hw.name) {
+    els.hwSet.textContent = "homework";
+    els.hwCount.textContent = hw.ambiguous && hw.ambiguous.length
+      ? "which set? the tutor has not said" : "no problem set found";
+    els.hwBuild.textContent = "";
+    els.hwBuild.removeAttribute("data-ok");
+    return;
+  }
+
+  els.hwSet.textContent = hw.name;
+  if (!hw.total) {
+    els.hwCount.textContent = "no problems transcribed yet";
+  } else {
+    var left = hw.total - hw.written;
+    els.hwCount.textContent = hw.written + " of " + hw.total + " written up" +
+      (left ? " · " + left + " to go" : " · complete");
+  }
+
+  var b = hw.build;
+  if (!b) {
+    els.hwBuild.textContent = "not compiled yet";
+    els.hwBuild.removeAttribute("data-ok");
+    return;
+  }
+  els.hwBuild.dataset.ok = b.ok ? "yes" : "no";
+  els.hwBuild.textContent = b.ok
+    ? "compiled " + (b.iso || "").slice(11, 16)
+    : lastLine(b.detail || "") || "compile failed";
+}
+
+/* A LaTeX log ends with the thing that went wrong; the hundred lines above it
+   are font declarations. */
+function lastLine(text) {
+  var lines = text.split("\n").filter(function (l) { return l.trim(); });
+  for (var i = lines.length - 1; i >= 0; i--) {
+    if (/^!|error|Error|ERROR/.test(lines[i])) return lines[i].trim().slice(0, 160);
+  }
+  return lines.length ? lines[lines.length - 1].trim().slice(0, 160) : "";
+}
+
 function paintSession(state, push, agent) {
   /* Whether an assistant is attached, and whether it is thinking. Without this
      the page looks identical when nothing is listening at all. */
@@ -542,6 +610,10 @@ function paintSession(state, push, agent) {
     els.agent.textContent =
       agent.state === "working" ? (agent.agent || "assistant") + " is working"
     : agent.state === "listening" ? (agent.agent || "assistant") + " listening"
+      /* An interactive assistant is not listening to the board -- it is sitting
+         in a terminal waiting for its person. "Attached" is the true word, and
+         the useful one: somebody is on the other end. */
+    : agent.state === "attached" ? (agent.agent || "assistant") + " attached"
     : "assistant not responding";
   }
   var kind = state.session;
@@ -749,15 +821,34 @@ function closeViewer() {
 
 /* ------------------------------------------------------------------ stream */
 var source = null;
+var linkDead = false;
+var everGotData = false;
+
+/* An unreachable board used to be indistinguishable from an empty one: the shell
+   comes out of the service worker's cache, the payload never arrives, and the
+   page says "Nothing on the board yet" — which reads as "the tutor has not
+   written", not as "you are looking at nothing live". The only signal that the
+   link was down was a 0.55rem dot. So say it where the lesson would be. */
+function paintLink(dead) {
+  linkDead = dead;
+  els.dot.className = dead ? "dot dead" : "dot live";
+  els.dot.title = dead ? "not connected to the board" : "connected to the board";
+  /* Never seen a payload: the page has nothing true on it, so this replaces the
+     empty state. Seen one: keep the lesson readable and warn above it. */
+  els.offline.hidden = !(dead && !everGotData);
+  els.linkbad.hidden = !(dead && everGotData);
+  if (dead && !everGotData) els.empty.hidden = true;
+}
 
 function connect() {
   if (source) source.close();
   source = new EventSource("/events");
-  source.onopen = function () { els.dot.className = "dot live"; };
-  source.onerror = function () { els.dot.className = "dot dead"; };
+  source.onopen = function () { paintLink(false); };
+  source.onerror = function () { paintLink(true); };
   source.onmessage = function (ev) {
     if (!ev.data) return;
-    els.dot.className = "dot live";
+    everGotData = true;
+    paintLink(false);
     try { render(JSON.parse(ev.data)); } catch (e) { /* ignore a torn frame */ }
   };
 }
@@ -774,7 +865,8 @@ var pinnedTo = null;
 var answering = { question: null, turn: null };
 var loadedTurn = null;
 
-var SIGNAL_LABEL = { done: "ready to check", help: "needs help", confused: "confused" };
+var SIGNAL_LABEL = { done: "ready to check", help: "needs help", confused: "confused",
+                     begin: "asked the tutor to begin", skip: "skipped this one" };
 
 function placeWriter(owed, questionNode) {
   els.writer.hidden = !owed;
@@ -1039,6 +1131,34 @@ document.getElementById("btn-theme").onclick = function () {
 };
 document.getElementById("btn-print").onclick = function () { window.print(); };
 document.getElementById("btn-reload").onclick = function () { location.reload(); };
+/* Nothing live has ever arrived, so the shell itself may be a cached one --
+   reload rather than merely re-open the stream. */
+document.getElementById("offline-retry").onclick = function () { location.reload(); };
+document.getElementById("linkbad-retry").onclick = function () { connect(); };
+
+/* The first turn of a session, from the device. Sending it makes the board
+   non-empty, so the empty state (and this button with it) goes away on the next
+   frame -- but disable it immediately, because a tutor woken four times writes
+   four opening cards. */
+/* Declining the prompt is still a turn: it is in the transcript, and it wakes the
+   tutor the same way an answer does, because the tutor has to carry on. */
+els.skip.onclick = function () {
+  els.skip.disabled = true;
+  say("skip").then(function () {
+    els.skip.disabled = false;
+  }, function () {
+    els.skip.disabled = false;
+  });
+};
+
+els.begin.onclick = function () {
+  els.begin.disabled = true;
+  els.begin.textContent = "asked — waiting for the tutor";
+  say("begin").catch(function () {
+    els.begin.disabled = false;
+    els.begin.textContent = "ask the tutor to begin";
+  });
+};
 document.getElementById("btn-scratch").onclick = function () { els.scratch.hidden = !els.scratch.hidden; };
 document.getElementById("btn-scratch-close").onclick = function () { els.scratch.hidden = true; };
 document.getElementById("btn-history").onclick = openHistory;

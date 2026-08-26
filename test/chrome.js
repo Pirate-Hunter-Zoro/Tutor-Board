@@ -48,12 +48,12 @@ draw ? ok('#drawbar has a rule') : fail('#drawbar has no rule at all');
 // One stack, not three things racing for the same offset. The end-of-session
 // question and the push result used to stick to top:0 a layer below the header,
 // which posted both of them underneath it.
-/<div id="chrome">[\s\S]*<header id="bar">[\s\S]*id="finish"[\s\S]*id="pushed"[\s\S]*<\/div>/
+/<div id="chrome">[\s\S]*<header id="bar">[\s\S]*id="finish"[\s\S]*id="pushed"[\s\S]*id="hwbar"[\s\S]*id="linkbad"[\s\S]*<\/div>/
   .test(HTML)
   ? ok('the banners are inside the chrome stack, under the bar')
   : fail('the banners are not part of the chrome stack');
 
-['.finish, .pushed', '#bar'].forEach((sel) => {
+['.finish, .pushed, .linkbad, .hwbar', '#bar'].forEach((sel) => {
   const b = block(sel);
   if (b === null) return fail(sel + ' has no rule');
   decl(b, 'position') === null || decl(b, 'top') === null

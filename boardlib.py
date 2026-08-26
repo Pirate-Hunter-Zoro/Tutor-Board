@@ -12,6 +12,7 @@ Standard library only, like everything else.
 import glob
 import os
 import shutil
+import time
 
 HOME = os.path.expanduser("~")
 
@@ -69,6 +70,54 @@ def board_is_running(pid, root):
     if args is None:
         return True          # cannot tell; the pid is alive, so believe it
     return "serve.py" in args and os.path.abspath(root) in args
+
+
+def pid_alive(pid, needle=None):
+    """Is this pid alive here, and does it still look like what was recorded?
+
+    Pids are recycled, so a bare signal-0 check will eventually report a
+    stranger's process as ours. Where the command line can be read, the recorded
+    command has to still be in it.
+    """
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), 0)
+    except (OSError, TypeError, ValueError):
+        return False
+    if not needle:
+        return True
+    args = _cmdline(pid)
+    if args is None:
+        return True          # cannot tell; the pid is alive, so believe it
+    return os.path.basename(str(needle)) in args
+
+
+def agent_is_attached(record, host):
+    """Is the assistant this record describes still there?
+
+    Two kinds of record, and they expire for different reasons. A headless daemon
+    writes a heartbeat as it works, so two minutes of silence means it died. An
+    interactive assistant sits idle for exactly as long as the person in front of
+    it is thinking, and a heartbeat there would call a perfectly healthy session
+    dead the moment somebody went to make tea -- so the process itself is the
+    answer, and its pid is what gets checked.
+
+    Either way the host is compared first: the home directory is shared across
+    compute nodes, and a pid from a node whose allocation has ended is very
+    likely alive here and belonging to a stranger.
+    """
+    if not record:
+        return False
+    if record.get("host") and record["host"] != host:
+        return False
+    if record.get("mode") == "interactive":
+        return pid_alive(record.get("pid"), record.get("cmd"))
+    # A daemon has to satisfy both: a heartbeat can be fresh from a process that
+    # has since been killed, and a pid can be alive and belong to a stranger.
+    if record.get("pid") and not pid_alive(record["pid"]):
+        return False
+    return (time.time() - record.get("last_seen", 0)) <= 120
 
 
 def _cmdline(pid):

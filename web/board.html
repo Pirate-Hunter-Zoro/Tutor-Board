@@ -67,6 +67,22 @@
   <span id="pushed-text"></span>
   <button id="pushed-close" type="button" title="dismiss">✕</button>
 </div>
+
+<!-- A homework sitting is producing a document, and the state of that document --
+     which problems are still empty, whether the last compile passed -- is not
+     visible anywhere on an iPad unless the board says so. -->
+<div id="hwbar" class="hwbar" hidden>
+  <span id="hw-set"></span>
+  <span id="hw-count" class="muted"></span>
+  <span id="hw-build"></span>
+</div>
+
+<!-- A lesson already on screen when the link drops stays readable, but it must
+     stop looking current. A red dot the size of a full stop did not carry it. -->
+<div id="linkbad" class="linkbad" hidden>
+  <span>Not connected — what is on the board may be out of date.</span>
+  <button id="linkbad-retry" type="button">reconnect</button>
+</div>
 </div><!-- /#chrome -->
 
 <!-- The drawing tools, along the bottom, where the hand holding the pen is. -->
@@ -78,6 +94,23 @@
     <p>Nothing on the board yet.</p>
     <p class="muted">The tutor writes here. It appears the moment it is written.</p>
     <p class="muted">Your working goes on the <a href="/slate">slate</a>.</p>
+    <!-- The cold start. With no card there is no question, so no answer is owed,
+         so nothing opens the slate -- and in maths there is no text box either.
+         Without this the first turn of every session has to come from a
+         terminal, which is the one thing the launcher exists to abolish. -->
+    <button id="begin" class="begin" type="button">ask the tutor to begin</button>
+  </div>
+  <!-- An unreachable board and an empty one look identical unless one of them
+       says so. This is the difference between "the tutor has not written yet"
+       and "nothing you are looking at is live", and reading the first when the
+       second is true wastes a whole sitting. -->
+  <div id="offline" class="empty offline" hidden>
+    <p><strong>Not connected to the board.</strong></p>
+    <p class="muted">This is the link, not the lesson — nothing you have written is lost.
+      The board's own process is not answering.</p>
+    <p class="muted">On a cluster node that usually means its allocation ended and the
+      board has to be started again.</p>
+    <button id="offline-retry" type="button">try again</button>
   </div>
 </main>
 
@@ -120,6 +153,10 @@
   <div id="writer-head">
     <span id="writer-label">Your answer</span>
     <span id="writer-hint">write below, then Send</span>
+    <!-- Not every prompt is worth writing out, and a prompt that cannot be
+         declined is a prompt that gets answered badly to make it go away. It
+         lives in this header so it dies with the block it belongs to. -->
+    <button id="skip" type="button">skip this one</button>
   </div>
   <div id="slate"></div>
 </section>

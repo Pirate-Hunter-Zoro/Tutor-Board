@@ -100,6 +100,11 @@ these tests fail, the test is right.
 | A subscript inside `$…$` was eaten by the markdown emphasis rules | `test/markdown.js` |
 | A macro worked in the prose but not inside a `tikz` fence | `tools/sync-macros.py --check` |
 | A bootstrap test renamed the live machine on the tailnet, moving the address the iPad app used | `BOARD_STATE_DIR`, and a guard in `bootstrap.sh` |
+| A board whose node had died read as a tutor who had not written yet — same words, and a dot the size of a full stop for a difference | `test/link.js` |
+| `board net` re-pointed the HTTPS name at a dead port, trusting a stale record from another node | `alive()` in `cmd_net` |
+| An empty maths board could not be answered, asked, or prodded from the iPad at all: the first turn needed a terminal | `test/begin.py` |
+| A writing prompt could not be declined, so an unwanted exercise had to be answered badly to clear it | `test/modes.js` |
+| The "is a tutor attached" dot could never go green outside headless: only the daemon ever wrote `agent.json`, and a heartbeat is the wrong test for a session that is idle whenever its person is thinking | `test/agents.py`, `test/begin.py` |
 
 The pattern in most of them: a stub that returns a plausible object for everything will report that
 a broken page loads fine. `test/interactive.js` and `test/sizing.js` use a real DOM for that
@@ -128,6 +133,38 @@ order and the earlier ones did not know the later ones were coming.
 card puts a *Write your answer* button on the board, which opens the slate with that question
 pinned at the top, and **review** sends the page. Nothing has to be typed anywhere, in the app or
 in a terminal.
+
+### The first turn
+
+An empty board is the one place that rule left a hole. With no card there is no question, so no
+answer is owed, so nothing opens the slate — and in mathematics there is no box to type in either.
+The board was a dead end until somebody went to a terminal and prompted the assistant, which is
+exactly the ceremony `tutor` exists to abolish.
+
+So an empty board carries one button, **ask the tutor to begin**. It sends a `begin` signal — the
+same mechanism as code mode's *ready to check*, not a composer — which lands in the inbox as an
+ordinary unread message and so wakes `board wait` like anything else. Sending it makes the board
+non-empty, which retires the button; a tutor woken four times writes four opening cards.
+
+Because a signal has no sentence in it, the inbox line carries its own meaning rather than a bare
+tag: a headless assistant is woken with *there is nothing on the board yet and they are waiting,
+open the session and write the first card*. `test/begin.py` drives that whole round trip.
+
+### Declining a prompt
+
+Teaching goes: explain, then ask for an example or a worked exercise. Not every one of those is
+worth writing out, and **a prompt that cannot be declined is a prompt that gets answered badly to
+make it go away**. So the answer block carries **skip this one** in its header, where it dies with
+the block it belongs to.
+
+Skipping is a turn like any other — it is in the transcript, and it wakes the tutor, because the
+tutor has to carry on. Unlike a sent answer, which keeps the block open so a mistake can be
+corrected in place, a skip closes it: the whole point is that the prompt goes away. The next
+question is a fresh ask, unaffected.
+
+What the tutor is told is *they are not writing this one out; do not re-ask it and do not press
+them on it, carry on with the lesson*. Whether to work the exercise aloud anyway is the tutor's
+judgement, not a rule.
 
 The drop zone predates the slate: before there was anywhere to write, the only way to get
 handwriting to the assistant was to photograph it and drop the photo on the page. It survives
@@ -265,8 +302,19 @@ this machine: mac-mini
 ```
 
 On the board itself, a dot beside the course name says whether an assistant is attached: green and
-*listening*, amber and pulsing while it is *working*, red when the heartbeat has gone stale. The
-heartbeat expires after two minutes, so a daemon that crashed stops claiming to be there.
+*attached* or *listening*, amber and pulsing while it is *working*, red when it has gone.
+
+**How that expires depends on which kind it is, and getting this wrong is why the indicator was
+dark in every ordinary session for a while.** A headless daemon writes a heartbeat as it works, so
+two minutes of silence means it died. An interactive assistant is idle for exactly as long as the
+person in front of it is thinking, and a heartbeat there would call a perfectly healthy session
+dead the moment somebody went to make tea — so it is judged by whether its process is still
+running. `tutor` records the pid before handing the terminal over, which is the same pid the
+assistant then has.
+
+Either way the host is compared first, and a recycled pid running something else does not count:
+the home directory is shared across compute nodes, so a record from an ended allocation is very
+likely alive here and belonging to a stranger.
 
 Liveness is checked against the process, not just the pid — a record on a shared filesystem may
 have been written by another machine, and a pid on its own can be a stranger's.
@@ -612,6 +660,59 @@ retype their own proof teaches nothing.
 
 The kind shows as a badge on the board, so there is never a question about which sitting this is.
 
+### A homework sitting is bound to a problem set
+
+The teaching loop is the same as a lecture's — a card states the problem, the answer block takes
+the working, the tutor reviews it. What is different is that a homework sitting is *producing a
+document*, and the state of that document lives in a `.tex` file nobody holding an iPad can see.
+
+So the sitting is bound to a set, and the board carries a strip saying which one, how much of it is
+written up, and whether the last compile passed:
+
+```
+board open "Galois Theory" "Ch 7 homework" --homework          discovers the set
+board open "Probability" "Homework 4" --homework --set hw04    or says which
+```
+
+```
+board hw                  which set, and what is still empty
+board hw list             every problem set in this repository
+board hw use ch07         say which one, when the label was not enough
+board hw build            compile it; the result appears on the board
+board hw file 7.2         file a sent page into the set's handwritten/
+```
+
+```
+hw04  homework/hw04/hw04.tex
+  1      written up
+  2      EMPTY
+  3      statement not transcribed
+  1 of 3 written up
+```
+
+**The board does not write LaTeX and must not.** The assistant edits the `.tex` with its own tools,
+as it does with every other file in the course; what the tool owns is the part that is otherwise
+invisible from a tablet. `board hw build` records the outcome, and a failed compile puts the actual
+LaTeX error on the board the way a failed push does — "the build failed" without the reason is a
+message that sends somebody to a laptop.
+
+Two layouts exist across the courses here and neither is more correct, so the set is **discovered,
+not assumed** — the same principle as course discovery:
+
+| | |
+|---|---|
+| `homework/hw04/hw04.tex` | numbered by assignment (Probability) |
+| `chapters/ch07-*/homework/ch07-homework.tex` | numbered by chapter (Galois) |
+
+The session's own label usually settles it: *Homework 4* finds `hw04`, *Ch 7 — splitting fields*
+finds `ch07`. When it cannot — twenty chapter sets and nothing to choose between them — it says so
+and stops rather than guessing, because a wrong guess compiles the wrong document or files
+handwriting into somebody else's problem. `board hw use` pins it for the sitting.
+
+Problem labels are opaque strings, not numbers, because one course numbers problems 1, 2, 3 and the
+other numbers them 7.1, 7.2, 7.3. `test/homework.py` covers both layouts, all three per-problem
+states, and the discovery rules.
+
 ### Saving and pushing
 
 ```
@@ -686,6 +787,9 @@ board inbox                      # what the student sent back, with file paths
 board slate                      # just the pages written on the iPad
 board wait --timeout 300         # block until the student sends something
 board export --build             # the whole lesson as a typeset PDF
+board hw                         # this sitting's problem set: what is still empty
+board hw build                   # compile it; the result lands on the board
+board hw file 7.2                # file a sent page into the set's handwritten/
 board vpn up|status|serve|down   # the Tailscale link
 board doctor                     # is this machine equipped
 board stop
@@ -871,6 +975,8 @@ wrapper.
 ```
 bin/board          the command line
 serve.py           the server: watches cards, pushes SSE, compiles TikZ, takes uploads and ink
+boardlib.py        the handful of things that differ between machines
+homework.py        where a course keeps its problem sets, and how much of one is done
 web/               the hub   — home.html, home.css, home.js
                    the board — board.html, board.css, board.js, macros.js, vendored KaTeX
                    the slate — slate.html, slate.css, slate.js
@@ -1191,6 +1297,9 @@ node test/modes.js       that math mode has no text box and code mode does
 node test/typeface.js    that the reading face reaches prose and never the maths
 node test/interactive.js drives the real board in a real DOM and writes on it
 node test/sizing.js      that every screen size opens at natural writing size
+node test/link.js        that an unreachable board says so instead of looking empty
+python3 test/begin.py    that the first turn of a session can come from the device
+python3 test/homework.py that a sitting finds its problem set, in either layout
 
 bash test/all.sh         all of the above, in order. The two real-DOM suites need
                          jsdom; this fetches it on first run and carries on

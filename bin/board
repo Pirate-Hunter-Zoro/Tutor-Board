@@ -18,6 +18,11 @@ The assistant runs these. The student never does.
     board wait [--timeout N]           block until the student sends something
     board archive                      file the current lesson away
     board export [--build]             turn the lesson into a .tex (and compile it)
+    board hw [status]                  this sitting's problem set: what is still empty
+    board hw list                      every problem set in this repository
+    board hw use <name>                say which set this sitting is (hw04, ch07)
+    board hw build                     compile it; the result appears on the board
+    board hw file <label> [--turn tNN]  file a sent page into the set's handwritten/
     board net                          every URL the board answers on
     board vpn up [--hostname N]        the Tailscale link (name defaults to 'board')
     board vpn status|serve|down, for devices off this network
@@ -28,9 +33,11 @@ The assistant runs these. The student never does.
 Card kinds: lesson, question, correct, wrong, review, note, recap.
 """
 
+import glob
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -39,6 +46,7 @@ import time
 TOOL = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, TOOL)
 import boardlib
+import homework
 SERVE = os.path.join(TOOL, "serve.py")
 KINDS = ("lesson", "question", "correct", "wrong", "review", "note", "recap")
 
@@ -283,22 +291,40 @@ def cmd_open(live, args):
     the assistant's to do once the mathematics is agreed.
     """
     session = None
+    which = None
     rest = []
-    for a in args:
+    skip_next = False
+    for i, a in enumerate(args):
+        if skip_next:
+            skip_next = False
+            continue
         if a == "--lecture":
             session = "lecture"
         elif a == "--homework":
             session = "homework"
+        elif a == "--set":
+            which = args[i + 1] if i + 1 < len(args) else None
+            skip_next = True
         else:
             rest.append(a)
     course = rest[0] if len(rest) > 0 else None
     chapter = rest[1] if len(rest) > 1 else None
     cmd_archive(live, [])
     live.set_state(course=course, chapter=chapter, session=session or "lecture",
-                   finished=None, opened=time.strftime("%Y-%m-%d %H:%M"))
+                   finished=None, hw=None, opened=time.strftime("%Y-%m-%d %H:%M"))
     print("%s open: %s / %s" % (session or "lecture", course or "-", chapter or "-"))
     if session == "homework":
         print("  you write the mathematics; the write-up and the compile are mine")
+        # Bind the sitting to a problem set now, so nothing later has to guess.
+        if which:
+            cmd_hw(live, ["use", which])
+        else:
+            st = homework.status(live.root, live.state())
+            if st and st["name"]:
+                live.set_state(hw=st["rel"])
+                print("  set: %s  (%s)" % (st["name"], st["rel"]))
+            elif st and st["ambiguous"]:
+                print("  which set? board hw use <name>, or reopen with --set")
     return 0
 
 
@@ -406,6 +432,168 @@ def cmd_write(live, args):
         fh.write(head + body.rstrip() + "\n")
     print(path)
     return 0
+
+
+def read_turns(live):
+    """Every turn, newest revision last. The file is append-only by design."""
+    out = []
+    try:
+        with open(live.path("turns.jsonl"), "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line:
+                    try:
+                        out.append(json.loads(line))
+                    except ValueError:
+                        pass
+    except OSError:
+        pass
+    return out
+
+
+# ---------------------------------------------------------------------------
+# homework: a problem set is a file in the course, and the board tracks it
+# ---------------------------------------------------------------------------
+def cmd_hw(live, args):
+    """Which problem set this sitting is, how much of it is written up, compile it.
+
+    The board does not write LaTeX and must not: the assistant edits the .tex
+    with its own tools, as it does with every other file in the course. What the
+    tool owns is the part a person on an iPad cannot see otherwise -- which set,
+    which problems are still empty, whether the last compile passed, and where a
+    page of handwriting should be filed.
+    """
+    sub = args[0] if args else "status"
+    rest = args[1:]
+    state = live.state()
+
+    if sub == "use":
+        if not rest:
+            print("usage: board hw use <name or path>   (board hw --list to see them)",
+                  file=sys.stderr)
+            return 1
+        want = rest[0]
+        for s in homework.sets(live.root):
+            if want in (s["name"], s["rel"]) or os.path.abspath(want) == s["tex"]:
+                live.set_state(hw=s["rel"])
+                print("this sitting is %s  (%s)" % (s["name"], s["rel"]))
+                return 0
+        print("no problem set called %r in this repository" % want, file=sys.stderr)
+        return 1
+
+    if sub in ("--list", "list"):
+        every = homework.sets(live.root)
+        if not every:
+            print("this repository has no problem sets")
+            return 1
+        for s in every:
+            print("  %-8s %s" % (s["name"], s["rel"]))
+        return 0
+
+    st = homework.status(live.root, state)
+    if st is None:
+        print("this repository has no problem sets")
+        return 1
+    if not st["name"]:
+        print("cannot tell which set this sitting is. Pin one:")
+        print("  board hw use %s" % (st["ambiguous"][0] if st["ambiguous"] else "<name>"))
+        print("%d to choose from; board hw list shows them all" % len(st["ambiguous"]))
+        return 1
+
+    if sub == "status":
+        print("%s  %s" % (st["name"], st["rel"]))
+        if not st["problems"]:
+            print("  no problems transcribed yet")
+        for p in st["problems"]:
+            if not p["stated"]:
+                mark = "statement not transcribed"
+            elif p["written"]:
+                mark = "written up"
+            elif p["region"]:
+                mark = "EMPTY"
+            else:
+                mark = "no solution region"
+            print("  %-6s %s" % (p["label"], mark))
+        print("  %d of %d written up" % (st["written"], st["total"]))
+        rec = read_hw_build(live)
+        if rec:
+            print("  last build: %s at %s" % ("ok" if rec["ok"] else "FAILED", rec["iso"]))
+        return 0
+
+    if sub == "build":
+        tex = os.path.join(live.root, st["rel"])
+        script = os.path.join(live.root, "scripts", "build.sh")
+        if os.path.exists(script):
+            p = subprocess.run(["bash", script, tex], cwd=live.root,
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            out = p.stdout.decode("utf-8", "replace").strip()
+            code = p.returncode
+        else:
+            out = compile_tex(live, tex)
+            code = 0 if os.path.exists(os.path.splitext(tex)[0] + ".pdf") else 1
+        print(out)
+        pdf = os.path.splitext(tex)[0] + ".pdf"
+        if not os.path.exists(pdf):
+            found = glob.glob(os.path.join(os.path.dirname(tex), "build", "*.pdf"))
+            pdf = found[0] if found else None
+        record = {"ok": code == 0, "at": time.time(),
+                  "iso": time.strftime("%Y-%m-%d %H:%M:%S"),
+                  "set": st["name"],
+                  "pdf": os.path.relpath(pdf, live.root) if pdf else None,
+                  # The whole tail, because a LaTeX error is only useful in
+                  # context and the person reading it is not at this terminal.
+                  "detail": out[-1600:]}
+        with open(live.path("hw.json"), "w", encoding="utf-8") as fh:
+            json.dump(record, fh, indent=2)
+        if pdf:
+            print(pdf)
+        return code
+
+    if sub == "file":
+        if not rest:
+            print("usage: board hw file <problem label> [--turn tNNNN]", file=sys.stderr)
+            return 1
+        label = rest[0]
+        turns = [t for t in read_turns(live) if t.get("png")]
+        want = _flag_value(rest, "--turn")
+        if want:
+            turns = [t for t in turns if t.get("id") == want]
+        if not turns:
+            print("no sent handwriting to file", file=sys.stderr)
+            return 1
+        turn = turns[-1]
+        src = os.path.join(live.dir, turn["png"].lstrip("/"))
+        if not os.path.exists(src):
+            src = os.path.join(live.answers, os.path.basename(turn["png"]))
+        if not os.path.exists(src):
+            print("the page for %s is not on disk: %s" % (turn["id"], turn["png"]),
+                  file=sys.stderr)
+            return 1
+        dest_dir = os.path.join(st["dir"], "handwritten")
+        os.makedirs(dest_dir, exist_ok=True)
+        safe = re.sub(r"[^A-Za-z0-9._-]", "-", label)
+        dest = os.path.join(dest_dir, "%s-%s.png" % (st["name"], safe))
+        shutil.copyfile(src, dest)
+        print(os.path.relpath(dest, live.root))
+        return 0
+
+    print("unknown: board hw %s  (status, list, use, build, file)" % sub, file=sys.stderr)
+    return 1
+
+
+def _flag_value(args, name):
+    for i, a in enumerate(args):
+        if a == name and i + 1 < len(args):
+            return args[i + 1]
+    return None
+
+
+def read_hw_build(live):
+    try:
+        with open(live.path("hw.json"), "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
 
 
 def read_messages(live):
@@ -998,7 +1186,20 @@ def cmd_net(live, args):
         print("board is down; run: board start")
         return 1
     port = info["port"]
-    ts_repoint(port)
+    # Only ever aim the HTTPS name at a board that is answering *here*. The record
+    # crosses nodes on a shared home, so a stale one from an ended allocation used
+    # to be taken at face value -- and `board net`, which reads like a diagnostic,
+    # would hijack the address the iPad has installed and park it on a dead port.
+    if alive(info):
+        ts_repoint(port)
+    else:
+        where = info.get("node")
+        if where and where != this_node():
+            print("the record says the board is on %s, not here; leaving the tailnet"
+                  " name where it is." % where)
+        else:
+            print("the record is stale — nothing is answering on port %d here."
+                  " Not touching the tailnet name; run: board start" % port)
 
     print("on this machine")
     print("  http://127.0.0.1:%d/" % port)
@@ -1214,6 +1415,7 @@ COMMANDS = {
     "doctor": cmd_doctor, "slate": cmd_slate, "wait": cmd_wait,
     "net": cmd_net, "vpn": cmd_vpn, "init": cmd_init, "eyes": cmd_eyes,
     "finish": cmd_finish, "push": cmd_push, "history": cmd_history,
+    "hw": cmd_hw,
 }
 
 

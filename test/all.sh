@@ -35,7 +35,7 @@ if ! node -e "require('jsdom')" >/dev/null 2>&1; then
   echo
 fi
 
-SUITES="markdown macros hidden chrome pages modes typeface export interactive sizing"
+SUITES="markdown macros hidden chrome pages modes typeface export interactive sizing link"
 fails=0
 skipped=0
 
@@ -58,6 +58,24 @@ done
 
 printf '%-12s ' "transcript"
 if out="$(python3 test/transcript.py 2>&1)"; then
+  printf '%s\n' "$out" | tail -1
+else
+  fails=$((fails + 1))
+  echo "FAILED"
+  printf '%s\n' "$out" | grep '^FAIL' | sed 's/^/             /'
+fi
+
+printf '%-12s ' "begin"
+if out="$(python3 test/begin.py 2>&1)"; then
+  printf '%s\n' "$out" | tail -1
+else
+  fails=$((fails + 1))
+  echo "FAILED"
+  printf '%s\n' "$out" | grep '^FAIL' | sed 's/^/             /'
+fi
+
+printf '%-12s ' "homework"
+if out="$(python3 test/homework.py 2>&1)"; then
   printf '%s\n' "$out" | tail -1
 else
   fails=$((fails + 1))

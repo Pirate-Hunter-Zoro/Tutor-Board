@@ -32,6 +32,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 import boardlib
+import homework
 WEB = os.path.join(HERE, "web")
 
 # Python's table predates these; without them fonts go out as octet-stream and
@@ -240,6 +241,20 @@ def turn_revision(repo, tid):
     return rev + 1
 
 
+# A signal is a tap, not a sentence, so it has to carry its own meaning into the
+# inbox -- see /say. "begin" is the one that has to be unmistakable, because it
+# arrives at a board with nothing on it and an assistant with no other context.
+SIGNAL_SENSE = {
+    "begin": "there is nothing on the board yet and they are waiting. "
+             "Open the session and write the first card.",
+    "skip": "they are not writing this one out. Do not re-ask it and do not press "
+            "them on it; carry on with the lesson.",
+    "done": "their work is ready for you to check.",
+    "help": "they are stuck and want help.",
+    "confused": "something is not making sense to them.",
+}
+
+
 def newest_question(repo):
     """The card a turn sent now is answering."""
     newest = None
@@ -364,18 +379,46 @@ def load_slate(repo, limit=40):
 
 
 def load_agent(repo):
-    """Is a headless assistant attached, and is it working or waiting?
+    """Is an assistant attached, and is it working or waiting?
 
-    A daemon nobody can see is worse than no daemon. The heartbeat goes stale in
-    two minutes, so a crashed one stops claiming to be listening.
+    An assistant nobody can see is worse than none. How that is decided depends
+    on which kind it is: a headless daemon has a heartbeat and goes stale after
+    two minutes of silence, while an interactive one is idle for as long as the
+    person is thinking and is judged by whether its process is still there.
+    Applying the heartbeat rule to both is why this indicator never once turned
+    green in an ordinary `tutor` session.
     """
     try:
         with open(os.path.join(repo.live, "agent.json"), "r", encoding="utf-8") as fh:
             st = json.load(fh)
     except (OSError, ValueError):
         return None
-    if time.time() - st.get("last_seen", 0) > 120:
+    if not boardlib.agent_is_attached(st, socket.gethostname().split(".")[0]):
         st["state"] = "stale"
+    return st
+
+
+def load_hw(repo):
+    """This sitting's problem set, and how much of it is written up.
+
+    Parsed from the .tex on every build so the board tells the truth as the
+    assistant fills it in, with the last compile's outcome bolted on from
+    `live/hw.json` -- a failed compile has to reach the person holding the iPad
+    the same way a failed push does.
+    """
+    try:
+        st = homework.status(repo.root, repo.state())
+    except Exception:
+        return None
+    if not st:
+        return None
+    st["ambiguous"] = st.get("ambiguous", [])[:8]
+    st.pop("dir", None)          # an absolute path on this machine is no use to a browser
+    try:
+        with open(os.path.join(repo.live, "hw.json"), "r", encoding="utf-8") as fh:
+            st["build"] = json.load(fh)
+    except (OSError, ValueError):
+        st["build"] = None
     return st
 
 
@@ -741,6 +784,11 @@ class Hub:
             "agent": load_agent(self.repo),
             "history": len(list_archive(self.repo)),
         }
+        # Only in a homework sitting, and read from the .tex itself rather than
+        # from a record the board keeps: the file is the truth, the assistant
+        # edits it directly, and two sources of truth drift.
+        if state.get("session") == "homework":
+            data["hw"] = load_hw(self.repo)
         return data
 
     def poll_loop(self):
@@ -1102,8 +1150,13 @@ class Handler(BaseHTTPRequestHandler):
             # A signal carries meaning without a sentence: in a code course the
             # useful things to say are mostly "done", "stuck" and "confused",
             # and making someone type those on a tablet is a tax.
+            # "begin" is the cold start. On an empty maths board there is no
+            # question, so no answer is owed, so the slate never opens and there
+            # is no text box either -- which left the iPad with no way to say
+            # the first thing of a session. This is that, and it is a signal
+            # rather than a composer on purpose.
             signal = (payload.get("signal") or "").strip().lower() or None
-            if signal not in (None, "done", "help", "confused"):
+            if signal not in (None, "done", "help", "confused", "begin", "skip"):
                 return self.send_json({"ok": False, "error": "bad signal"}, status=400)
             if not text and not signal:
                 return self.send_json({"ok": False, "error": "empty"}, status=400)
@@ -1121,9 +1174,15 @@ class Handler(BaseHTTPRequestHandler):
                 "read": False,
             }
             write_turn(repo, record)
+            # What lands in the inbox is what `board wait` prints, and in a
+            # headless session that string IS the prompt the assistant is woken
+            # with. A bare "[begin]" tells it nothing, so a signal sent without a
+            # sentence carries its own.
+            line = ("[%s] " % signal if signal else "") + text
+            if signal and not text:
+                line += SIGNAL_SENSE.get(signal, "")
             with open(repo.messages_path, "a", encoding="utf-8") as fh:
-                fh.write(json.dumps(dict(record, text=(
-                    ("[%s] " % signal if signal else "") + text))) + "\n")
+                fh.write(json.dumps(dict(record, text=line)) + "\n")
             self.server.hub.worker.dirty.set()
             return self.send_json({"ok": True, "turn": tid, "rev": rev})
 
