@@ -449,11 +449,7 @@ function render(data) {
     if (c.kind === "question" && c.mtime > lastQuestion) lastQuestion = c.mtime;
   });
   (data.messages || []).forEach(function (m) { if (m.t > lastSent) lastSent = m.t; });
-  var owed = !codeMode && !!(lastQuestion && lastQuestion > lastSent);
-  els.writer.hidden = !owed;
-  if (owed) mountWriter();
-  document.body.classList.toggle("writer-open",
-    owed && els.writer.dataset.open === "1");
+  showWriter(!codeMode && !!(lastQuestion && lastQuestion > lastSent));
   typeset(els.cards);
   renderScratch(data.uploads || [], data.slate || []);
 
@@ -586,62 +582,52 @@ function connect() {
   };
 }
 
-/* ------------------------------------------------------- the writing drawer */
-/* Mounted lazily: there is no reason to build a canvas until an answer is
-   actually owed, and building it while hidden gives it a zero-sized wrap. */
+/* ------------------------------------------------------- the writing panel */
+/* Mounted the first time an answer is owed, and only then -- building a canvas
+   inside a hidden, zero-height box gives it no size, which is exactly how the
+   first version ended up with nothing under the user's finger. */
 var writer = null;
 
-function mountWriter() {
-  if (writer || !window.Slate) return;
-  writer = window.Slate.create({
-    root: document.getElementById("slate"),
-    compact: true,
-    onSend: function () { setOpen(false); },
-  });
+function showWriter(owed) {
+  var wasHidden = els.writer.hidden;
+  els.writer.hidden = !owed;
+  document.body.classList.toggle("writer-open", owed);
+  if (!owed) return;
+
+  if (!writer && window.Slate) {
+    /* Wait a frame so the panel has real dimensions before the canvas sizes
+       itself to them. */
+    requestAnimationFrame(function () {
+      writer = window.Slate.create({
+        root: document.getElementById("slate"),
+        compact: true,
+        onSend: function () { setHidden(true); },
+      });
+    });
+  } else if (writer && wasHidden) {
+    requestAnimationFrame(writer.relayout);
+  }
+
+  /* Bring the question into the strip above the panel, so the thing being
+     answered and the place to answer it are on screen together. */
+  if (wasHidden) {
+    requestAnimationFrame(function () {
+      var q = els.cards.querySelector('.card[data-kind="question"]:last-of-type')
+           || els.cards.lastElementChild;
+      if (q) q.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
+  }
 }
 
-function setOpen(open) {
-  els.writer.dataset.open = open ? "1" : "0";
-  document.body.classList.toggle("writer-open", open);
-  try { localStorage.setItem("board.writer", open ? "1" : "0"); } catch (e) {}
-  if (open && writer) setTimeout(writer.relayout, 240);
+function setHidden(hide) {
+  els.writer.dataset.hidden = hide ? "1" : "0";
+  document.body.classList.toggle("writer-hidden", hide);
+  if (!hide && writer) requestAnimationFrame(writer.relayout);
 }
 
-(function () {
-  var grip = document.getElementById("writer-grip");
-  var toggle = document.getElementById("writer-toggle");
-  var drag = null;
-
-  toggle.addEventListener("click", function () {
-    if (drag && drag.moved) return;
-    setOpen(els.writer.dataset.open !== "1");
-  });
-
-  grip.addEventListener("pointerdown", function (ev) {
-    drag = { y: ev.clientY, h: els.writer.getBoundingClientRect().height, moved: false };
-    grip.setPointerCapture(ev.pointerId);
-    els.writer.classList.add("dragging");
-  });
-  grip.addEventListener("pointermove", function (ev) {
-    if (!drag) return;
-    var dy = drag.y - ev.clientY;
-    if (Math.abs(dy) > 4) drag.moved = true;
-    var h = Math.max(3.1 * 16, Math.min(window.innerHeight * 0.9, drag.h + dy));
-    els.writer.style.setProperty("--writer-h", h + "px");
-    if (h > 6 * 16) {
-      els.writer.dataset.open = "1";
-      document.body.classList.add("writer-open");
-    }
-  });
-  grip.addEventListener("pointerup", function () {
-    if (!drag) return;
-    els.writer.classList.remove("dragging");
-    var open = els.writer.getBoundingClientRect().height > 6 * 16;
-    setOpen(open);
-    drag = null;
-    if (writer) writer.relayout();
-  });
-})();
+document.getElementById("writer-hide").onclick = function () {
+  setHidden(els.writer.dataset.hidden !== "1");
+};
 
 /* ------------------------------------------------------------------ input */
 /* What comes back from the board depends on the mode. In a mathematics course

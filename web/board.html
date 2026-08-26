@@ -84,12 +84,12 @@
 
 <!-- Maths: answering means writing, and the writing happens here, under the
      question, so what you are answering stays on screen. -->
-<section id="writer" hidden data-open="0">
-  <div id="writer-grip" title="drag to resize">
-    <button id="writer-toggle" type="button">
-      <span class="grip-bar"></span>
-      <span id="writer-label">✎ Write your answer</span>
-    </button>
+<!-- Maths: answering means writing, and the writing happens here, opened for
+     you the moment an answer is owed. Nothing to drag, nothing to find. -->
+<section id="writer" hidden>
+  <div id="writer-head">
+    <span id="writer-label">✎ Your answer</span>
+    <button id="writer-hide" type="button" title="hide while you read">hide</button>
   </div>
   <div id="slate"></div>
 </section>

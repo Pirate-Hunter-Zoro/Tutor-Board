@@ -1,19 +1,19 @@
 /* ==========================================================================
    slate.css -- the writing surface, wherever it is mounted.
 
-   The same rules serve the drawer docked under the lesson and the full-screen
-   page, because it is the same component. Paper is dark by default: chalk on
-   slate, which is easier on the eyes for a long sitting than a white page with
-   the brightness of a torch.
+   Calm, dark, and quiet: this sits under a lesson for an hour at a time, so the
+   controls should recede and the paper should be the only thing with presence.
+   One row of controls, everything rare behind a ⋯, and exactly one filled
+   button on the screen -- Send -- because that is the only irreversible one.
    ========================================================================== */
 
 :root {
-  --chrome:   #17181c;
-  --chrome-2: #212429;
-  --chrome-3: #33373f;
-  --on-chrome:#e8e5df;
-  --dim:      #9d988f;
-  --accent:   #7fd1ff;
+  --sl-bg:     #15161a;
+  --sl-panel:  #1c1e23;
+  --sl-line:   #2c2f37;
+  --sl-ink:    #e9e7e2;
+  --sl-dim:    #8b8f98;
+  --sl-accent: #7fd1ff;
 }
 
 * { box-sizing: border-box; }
@@ -21,11 +21,10 @@
 
 /* ---------- the standalone page ---------- */
 html { height: 100%; }
-body.slate-page,
-body:has(> #slate) {
+body {
   margin: 0; height: 100%; height: 100dvh;
   display: flex; flex-direction: column;
-  background: var(--chrome); color: var(--on-chrome);
+  background: var(--sl-bg); color: var(--sl-ink);
   font-family: var(--ui);
   overscroll-behavior: none;
   -webkit-user-select: none; user-select: none;
@@ -33,18 +32,16 @@ body:has(> #slate) {
 }
 body > #back {
   flex: none; align-self: flex-start;
-  padding: calc(.5rem + env(safe-area-inset-top)) .9rem .4rem;
-  color: var(--dim); text-decoration: none; font-size: .85rem;
+  padding: calc(.5rem + env(safe-area-inset-top)) .9rem .3rem;
+  color: var(--sl-dim); text-decoration: none; font-size: .85rem;
 }
 body > #prompt {
-  flex: none;
-  display: flex; align-items: baseline; gap: .5rem;
-  padding: .35rem .9rem .5rem;
-  font-size: .78rem; color: var(--dim);
+  flex: none; display: flex; align-items: baseline; gap: .5rem;
+  padding: .2rem .9rem .5rem; font-size: .8rem; color: var(--sl-dim);
 }
 body > #prompt .kind {
-  font-size: .62rem; letter-spacing: .12em; text-transform: uppercase;
-  color: var(--accent); font-weight: 700; flex: none;
+  font-size: .6rem; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--sl-accent); font-weight: 700; flex: none;
 }
 body > #slate { flex: 1 1 auto; min-height: 0; }
 
@@ -52,119 +49,179 @@ body > #slate { flex: 1 1 auto; min-height: 0; }
 .slate-root {
   display: flex; flex-direction: column;
   height: 100%; min-height: 0;
-  background: var(--chrome);
-  color: var(--on-chrome);
+  background: var(--sl-bg); color: var(--sl-ink);
   font-family: var(--ui);
+  /* Nothing inside here should ever scroll the page behind it. */
+  touch-action: none;
+  overscroll-behavior: contain;
 }
 
-.slate-bar {
+/* ---------- the one row ---------- */
+.sl-bar {
   flex: none;
-  display: flex; align-items: center; gap: .5rem;
-  padding: .4rem .5rem;
-  border-bottom: 1px solid var(--chrome-3);
-  font-size: .8rem;
+  display: flex; align-items: center; gap: .45rem;
+  padding: .5rem .6rem;
+  background: var(--sl-panel);
+  border-bottom: 1px solid var(--sl-line);
   min-width: 0;
 }
+.sl-space { flex: 1 1 auto; min-width: .25rem; }
 
-/* Tools scroll when they do not fit. Actions never do — a Send button you have
-   to scroll sideways to find is a Send button that does not exist. */
-.slate-tools {
-  flex: 1 1 auto; min-width: 0;
-  display: flex; align-items: center; gap: .5rem;
-  overflow-x: auto; -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
+/* segmented groups: joined, so related tools read as one control */
+.sl-seg {
+  display: flex; flex: none;
+  background: #23262c;
+  border-radius: .6rem;
+  padding: .15rem;
+  gap: .1rem;
 }
-.slate-tools::-webkit-scrollbar { display: none; }
-
-.slate-actions {
-  flex: none;
-  display: flex; align-items: center; gap: .4rem;
-  padding-left: .5rem;
-  border-left: 1px solid var(--chrome-3);
+.sl-seg button {
+  border: 0; background: none; color: var(--sl-dim);
+  border-radius: .45rem; cursor: pointer;
+  width: 2.3rem; height: 2.3rem;
+  display: grid; place-items: center; padding: 0;
+  transition: background .12s, color .12s;
 }
+.sl-seg button:hover { color: var(--sl-ink); }
+.sl-seg button.sel { background: #363a44; color: #fff; }
+.sl-seg button:disabled { opacity: .3; }
 
-.slate-group { display: flex; align-items: center; gap: .2rem; flex: none; }
+.sl-t svg { width: 20px; height: 20px; fill: none; stroke: currentColor;
+            stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.sl-t svg ellipse, .sl-t svg circle[r="1.7"] { fill: currentColor; stroke: none; }
+.sl-t svg ellipse { fill: none; stroke: currentColor; }
 
-.slate-root button,
-.slate-root .s-ink,
-.s-full {
-  font: inherit; line-height: 1; color: var(--on-chrome);
-  background: var(--chrome-2); border: 1px solid var(--chrome-3);
-  border-radius: .45rem; padding: .5rem .6rem; cursor: pointer;
-  min-width: 2.3rem; min-height: 2.3rem;
-  display: inline-flex; align-items: center; justify-content: center;
-  text-decoration: none; flex: none;
-}
-.slate-root button:active { background: var(--chrome-3); }
-.slate-root button.sel, .slate-root button.on { border-color: var(--accent); color: var(--accent); }
-.slate-root button:disabled { opacity: .35; }
-.slate-root button.danger { color: #ff9c9c; border-color: #6a3333; }
-
-.s-tag {
-  font-variant-numeric: tabular-nums; color: var(--dim);
-  min-width: 3rem; text-align: center; flex: none; font-size: .75rem;
-}
+.sl-n i { display: block; border-radius: 50%; background: currentColor; }
 
 /* ---------- ink ---------- */
-.s-ink { background: var(--c) !important; width: 2.3rem; padding: 0; }
-.s-ink.sel { box-shadow: 0 0 0 2px var(--accent); }
-.s-custom { position: relative; overflow: hidden; }
-.s-custom input[type="color"] {
-  position: absolute; inset: -25%;
-  width: 150%; height: 150%;
-  border: 0; padding: 0; background: none; cursor: pointer;
-  opacity: 0;
+.sl-inks { display: flex; align-items: center; gap: .3rem; flex: none; }
+.sl-ink {
+  width: 1.65rem; height: 1.65rem; padding: 0;
+  border-radius: 50%; cursor: pointer;
+  border: 2px solid transparent;
+  background: var(--c);
+  box-shadow: 0 0 0 1px #0006 inset;
+  transition: transform .12s;
 }
-.s-custom::after {
-  content: "◒"; color: #0006; font-size: 1rem; pointer-events: none;
+.sl-ink:hover { transform: scale(1.08); }
+.sl-ink.sel { border-color: var(--sl-accent); transform: scale(1.12); }
+.sl-custom { position: relative; overflow: hidden; display: inline-block; }
+.sl-custom input[type="color"] {
+  position: absolute; inset: -30%; width: 160%; height: 160%;
+  opacity: 0; border: 0; padding: 0; cursor: pointer;
 }
+.sl-custom::after {
+  content: ""; position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(#ff8f8f, #ffd166, #8ce99a, #7fd1ff, #c792ea, #ff8f8f);
+  opacity: .0; pointer-events: none;
+}
+.sl-custom:not(.sel)::after { opacity: .85; }
 
-/* ---------- send ---------- */
-.s-saved {
-  color: var(--dim); font-size: .72rem; white-space: nowrap;
-  min-width: 3rem; text-align: right;
+/* ---------- more, status, send ---------- */
+.sl-more {
+  flex: none; width: 2.5rem; height: 2.5rem; padding: 0;
+  border: 1px solid var(--sl-line); border-radius: .6rem;
+  background: none; color: var(--sl-dim); cursor: pointer;
+  display: grid; place-items: center;
 }
-.s-saved.busy { color: var(--accent); }
-.slate-root .s-send {
-  background: var(--accent); color: #10131a; border-color: var(--accent);
-  font-weight: 700; padding: .5rem 1rem; min-width: 4.2rem;
-}
-.slate-root .s-send:active { filter: brightness(.92); }
+.sl-more.on { color: var(--sl-accent); border-color: var(--sl-accent); }
+.sl-more svg { width: 20px; height: 20px; fill: currentColor; }
 
-/* ---------- selection bar ---------- */
-.slate-selbar {
+.sl-saved {
+  flex: none; font-size: .68rem; color: var(--sl-dim);
+  min-width: 2.6rem; text-align: right; white-space: nowrap;
+}
+.sl-saved.busy { color: var(--sl-accent); }
+
+.sl-send {
+  flex: none; cursor: pointer;
+  border: 0; border-radius: .6rem;
+  background: var(--sl-accent); color: #0d1117;
+  font: inherit; font-weight: 750; font-size: .92rem;
+  padding: 0 1.15rem; height: 2.5rem;
+  letter-spacing: .01em;
+}
+.sl-send:active { filter: brightness(.9); }
+
+/* ---------- the overflow sheet ---------- */
+.sl-menu {
   flex: none;
-  display: flex; align-items: center; gap: .3rem;
-  overflow-x: auto; scrollbar-width: none;
-  padding: .4rem .6rem;
-  background: var(--chrome-2);
-  border-bottom: 1px solid var(--accent);
-  font-size: .78rem;
+  padding: .6rem .7rem;
+  background: var(--sl-panel);
+  border-bottom: 1px solid var(--sl-line);
+  display: flex; flex-direction: column; gap: .45rem;
 }
-.slate-selbar::-webkit-scrollbar { display: none; }
+.sl-row { display: flex; align-items: center; gap: .6rem; }
+.sl-label {
+  flex: none; width: 4rem; font-size: .72rem; color: var(--sl-dim);
+  letter-spacing: .08em; text-transform: uppercase;
+}
+.sl-rowbox { display: flex; align-items: center; gap: .3rem; flex-wrap: wrap; }
+.sl-rowbox .sl-t {
+  width: 2.1rem; height: 2.1rem; border: 1px solid var(--sl-line);
+  border-radius: .45rem; background: none; color: var(--sl-ink);
+  display: grid; place-items: center; cursor: pointer; padding: 0;
+}
+.sl-tag {
+  font-variant-numeric: tabular-nums; color: var(--sl-dim);
+  min-width: 3rem; text-align: center; font-size: .78rem;
+}
+.sl-chip {
+  border: 1px solid var(--sl-line); border-radius: 999px;
+  background: none; color: var(--sl-dim); cursor: pointer;
+  font: inherit; font-size: .78rem; padding: .35rem .75rem;
+  text-decoration: none; line-height: 1.5;
+}
+.sl-chip.sel { border-color: var(--sl-accent); color: var(--sl-accent); }
+.sl-chip.danger { color: #ff9c9c; border-color: #6a3333; }
+.sl-paper-black::before, .sl-paper-white::before, .sl-paper-cream::before {
+  content: ""; display: inline-block; width: .6rem; height: .6rem;
+  border-radius: 50%; margin-right: .35rem; vertical-align: -1px;
+  border: 1px solid #0006;
+}
+.sl-paper-black::before { background: #101114; }
+.sl-paper-white::before { background: #fdfdfb; }
+.sl-paper-cream::before { background: #f7f1e3; }
+
+/* ---------- selection ---------- */
+.sl-selbar {
+  flex: none; display: flex; align-items: center; gap: .35rem;
+  overflow-x: auto; scrollbar-width: none;
+  padding: .5rem .7rem;
+  background: #1a2028;
+  border-bottom: 1px solid var(--sl-accent);
+}
+.sl-selbar::-webkit-scrollbar { display: none; }
 
 /* ---------- the sheet ---------- */
-.slate-wrap {
+.sl-wrap {
   position: relative;
   flex: 1 1 auto; min-height: 0;
   overflow: hidden;
-  padding-bottom: env(safe-area-inset-bottom);
+  /* The whole surface opts out of browser gestures, not just the canvas --
+     otherwise a touch that starts a millimetre off the canvas scrolls the
+     lesson behind it instead of drawing. */
+  touch-action: none;
+  overscroll-behavior: contain;
 }
-.slate-sheet {
-  touch-action: none;            /* the pen draws; it does not scroll the page */
-  display: block; width: 100%; height: 100%;
-  cursor: crosshair;
-}
-.slate-root[data-tool="lasso"] .slate-sheet { cursor: cell; }
-.slate-root[data-tool="erase"] .slate-sheet { cursor: not-allowed; }
+.sl-sheet { display: block; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+.slate-root[data-tool="lasso"] .sl-sheet { cursor: cell; }
+.slate-root[data-tool="erase"] .sl-sheet { cursor: not-allowed; }
 
 /* ---------- toast ---------- */
-.slate-toast {
+.sl-toast {
   position: absolute; left: 50%; transform: translateX(-50%);
   bottom: calc(1rem + env(safe-area-inset-bottom));
-  background: var(--chrome-2); border: 1px solid var(--chrome-3);
-  color: var(--on-chrome); border-radius: 999px;
+  background: #23262c; border: 1px solid var(--sl-line);
+  color: var(--sl-ink); border-radius: 999px;
   padding: .45rem 1rem; font-size: .8rem;
-  box-shadow: 0 4px 18px rgba(0,0,0,.5);
+  box-shadow: 0 6px 22px rgba(0,0,0,.55);
   z-index: 5; pointer-events: none;
+}
+
+/* Narrow screens: let the row wrap rather than hide anything. */
+@media (max-width: 30rem) {
+  .sl-bar { flex-wrap: wrap; }
+  .sl-space { display: none; }
+  .sl-send { margin-left: auto; }
 }

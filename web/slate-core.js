@@ -37,6 +37,18 @@ var RULE_ORDER = ["plain", "grid", "lines"];
 var PALETTE_DARK = ["#f2f4f7", "#ffd166", "#7fd1ff", "#8ce99a", "#ff8f8f"];
 var PALETTE_LIGHT = ["#16171a", "#a86a12", "#1a56b0", "#1f5c34", "#9a2020"];
 
+var ICON = {
+  pen:   '<svg viewBox="0 0 24 24"><path d="M3 21l3.6-.9 11-11a2.1 2.1 0 0 0-3-3l-11 11L3 21z"/></svg>',
+  hl:    '<svg viewBox="0 0 24 24"><path d="M4 19h16v2H4z"/><path d="M6 15l8.5-8.5a2 2 0 0 1 3 3L9 18H6v-3z"/></svg>',
+  erase: '<svg viewBox="0 0 24 24"><path d="M4 15l7-7 6 6-4 4H7z"/><path d="M3 20h18v1.6H3z"/></svg>',
+  lasso: '<svg viewBox="0 0 24 24"><ellipse cx="12" cy="9.5" rx="8" ry="5.5"/><path d="M8 15c0 2 1 4 1 5"/></svg>',
+  undo:  '<svg viewBox="0 0 24 24"><path d="M4 9h9a5 5 0 0 1 0 10h-3"/><path d="M8 5L4 9l4 4"/></svg>',
+  redo:  '<svg viewBox="0 0 24 24"><path d="M20 9h-9a5 5 0 0 0 0 10h3"/><path d="M16 5l4 4-4 4"/></svg>',
+  more:  '<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>',
+  prev:  '<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>',
+  next:  '<svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>',
+};
+
 function el(tag, cls, html) {
   var e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -102,100 +114,126 @@ function create(opts) {
   var touches = {}, pinch = null;
 
   /* ------------------------------------------------------------ the DOM */
+  /* One row, no horizontal scrolling, and everything that matters reachable
+     without a decision: what to write with, what colour, and Send. Everything
+     rarely touched -- pages, zoom, paper -- lives behind the ⋯ so the row stays
+     calm. */
   root.classList.add("slate-root");
   root.innerHTML = "";
 
-  var bar = el("div", "slate-bar");
-  var tools = el("div", "slate-tools");
-  var actions = el("div", "slate-actions");
+  var bar = el("div", "sl-bar");
 
-  function group() { var g = el("div", "slate-group"); tools.appendChild(g); return g; }
-  function btn(parent, cls, label, title) {
-    var b = el("button", cls, label);
+  function seg(parent) { var g = el("div", "sl-seg"); parent.appendChild(g); return g; }
+  function mk(parent, cls, html, title) {
+    var b = el("button", cls, html);
     b.type = "button";
     if (title) b.title = title;
     parent.appendChild(b);
     return b;
   }
 
-  var gModes = group();
-  var bPen = btn(gModes, "s-mode sel", "✎", "pen");
-  var bHl = btn(gModes, "s-mode", "▬", "highlighter");
-  var bEr = btn(gModes, "s-mode", "◧", "eraser");
-  var bLa = btn(gModes, "s-mode", "✂", "select — loop around anything");
+  var segTools = seg(bar);
+  var bPen = mk(segTools, "sl-t sel", ICON.pen, "pen");
+  var bHl = mk(segTools, "sl-t", ICON.hl, "highlighter");
+  var bEr = mk(segTools, "sl-t", ICON.erase, "eraser");
+  var bLa = mk(segTools, "sl-t", ICON.lasso, "select");
 
-  var gNibs = group();
+  var segNibs = seg(bar);
   var nibs = [1.6, 2.8, 5.0].map(function (w, i) {
-    var b = btn(gNibs, "s-nib" + (i === 1 ? " sel" : ""), ["·", "•", "●"][i], w + "");
+    var b = mk(segNibs, "sl-n" + (i === 1 ? " sel" : ""),
+               '<i style="width:' + (3 + i * 4) + 'px;height:' + (3 + i * 4) + 'px"></i>',
+               ["fine", "medium", "broad"][i]);
     b.dataset.w = w;
     return b;
   });
 
-  var gInks = group();
+  var gInks = el("div", "sl-inks");
+  bar.appendChild(gInks);
   var inkButtons = [];
-  var custom = el("label", "s-ink s-custom");
+  var custom = el("label", "sl-ink sl-custom");
+  custom.title = "any colour";
   var customInput = el("input");
   customInput.type = "color";
   customInput.value = "#c792ea";
-  custom.title = "any colour you like";
   custom.appendChild(customInput);
 
-  var gEdit = group();
-  var bUndo = btn(gEdit, "", "↶", "undo");
-  var bRedo = btn(gEdit, "", "↷", "redo");
+  bar.appendChild(el("div", "sl-space"));
 
-  var gView = group();
-  var bZoomOut = btn(gView, "", "−", "zoom out");
-  var zoomTag = el("span", "s-tag", "100%");
-  gView.appendChild(zoomTag);
-  var bZoomIn = btn(gView, "", "+", "zoom in");
-  var bFit = btn(gView, "", "⤢", "fit the page");
+  var segEdit = seg(bar);
+  var bUndo = mk(segEdit, "sl-t", ICON.undo, "undo");
+  var bRedo = mk(segEdit, "sl-t", ICON.redo, "redo");
 
-  var gPage = group();
-  var bPrev = btn(gPage, "", "‹", "previous page");
-  var pageTag = el("span", "s-tag", "1/1");
-  gPage.appendChild(pageTag);
-  var bNext = btn(gPage, "", "›", "next page");
-  var bAdd = btn(gPage, "", "+", "new page");
-  var bTaller = btn(gPage, "", "↕", "make this page taller");
+  var bMore = mk(bar, "sl-more", ICON.more, "more");
+  var savedTag = el("span", "sl-saved", "saved");
+  bar.appendChild(savedTag);
+  var bSend = mk(bar, "sl-send", "Send", "hand this page to the tutor");
 
-  var gPaper = group();
-  var bPaper = btn(gPaper, "", "paper", "paper colour");
-  var bRule = btn(gPaper, "", "plain", "ruling");
-  var bLive = btn(gPaper, "", "live", "let the tutor see each page as you pause");
-
-  var savedTag = el("span", "s-saved", "saved");
-  var bSend = el("button", "s-send", "Send");
-  bSend.type = "button";
-  bSend.title = "hand this page to the tutor";
-  actions.appendChild(savedTag);
-  if (compact) {
-    var bFull = el("a", "s-full", "⤢");
-    bFull.href = "/slate";
-    bFull.title = "full screen";
-    actions.appendChild(bFull);
+  /* --- the overflow sheet --- */
+  var menu = el("div", "sl-menu");
+  menu.hidden = true;
+  function menuRow(label) {
+    var r = el("div", "sl-row");
+    r.appendChild(el("span", "sl-label", label));
+    var box = el("div", "sl-rowbox");
+    r.appendChild(box);
+    menu.appendChild(r);
+    return box;
   }
-  actions.appendChild(bSend);
+  var rPages = menuRow("Page");
+  var bPrev = mk(rPages, "sl-t", ICON.prev, "previous");
+  var pageTag = el("span", "sl-tag", "1/1");
+  rPages.appendChild(pageTag);
+  var bNext = mk(rPages, "sl-t", ICON.next, "next");
+  var bAdd = mk(rPages, "sl-t", "+", "new page");
+  var bTaller = mk(rPages, "sl-t", "↕", "taller");
 
-  bar.appendChild(tools);
-  bar.appendChild(actions);
+  var rZoom = menuRow("Zoom");
+  var bZoomOut = mk(rZoom, "sl-t", "−", "out");
+  var zoomTag = el("span", "sl-tag", "100%");
+  rZoom.appendChild(zoomTag);
+  var bZoomIn = mk(rZoom, "sl-t", "+", "in");
+  var bFit = mk(rZoom, "sl-t", "⤢", "fit");
 
-  var selbar = el("div", "slate-selbar");
+  var rPaper = menuRow("Paper");
+  var paperBtns = PAPER_ORDER.map(function (name) {
+    var b = mk(rPaper, "sl-chip sl-paper-" + name + (name === tool.paper ? " sel" : ""), name, name);
+    b.dataset.paper = name;
+    return b;
+  });
+
+  var rRule = menuRow("Ruling");
+  var ruleBtns = RULE_ORDER.map(function (name) {
+    var b = mk(rRule, "sl-chip" + (name === tool.rule ? " sel" : ""), name, name);
+    b.dataset.rule = name;
+    return b;
+  });
+
+  var rLive = menuRow("Live");
+  var bLive = mk(rLive, "sl-chip", "off", "let the tutor see each page as you pause");
+  if (compact) {
+    var rFull = menuRow("Room");
+    var aFull = el("a", "sl-chip", "full screen");
+    aFull.href = "/slate";
+    rFull.appendChild(aFull);
+  }
+
+  var selbar = el("div", "sl-selbar");
   selbar.hidden = true;
-  [["cut", "✂ cut"], ["copy", "copy"], ["paste", "paste"], ["duplicate", "duplicate"],
-   ["colour", "recolour"], ["delete", "delete"], ["done", "done"]].forEach(function (a) {
-    var b = btn(selbar, a[0] === "delete" ? "danger" : "", a[1], a[1]);
+  [["cut", "Cut"], ["copy", "Copy"], ["paste", "Paste"], ["duplicate", "Duplicate"],
+   ["colour", "Recolour"], ["delete", "Delete"], ["done", "Done"]].forEach(function (a) {
+    var b = mk(selbar, "sl-chip" + (a[0] === "delete" ? " danger" : ""), a[1], a[1]);
     b.dataset.act = a[0];
   });
 
-  var wrap = el("div", "slate-wrap");
-  var sheet = el("canvas", "slate-sheet");
+  var wrap = el("div", "sl-wrap");
+  var sheet = el("canvas", "sl-sheet");
   wrap.appendChild(sheet);
 
-  var toastEl = el("div", "slate-toast");
+  var toastEl = el("div", "sl-toast");
   toastEl.hidden = true;
 
   root.appendChild(bar);
+  root.appendChild(menu);
   root.appendChild(selbar);
   root.appendChild(wrap);
   root.appendChild(toastEl);
@@ -666,13 +704,16 @@ function create(opts) {
 
   /* -------------------------------------------------------------- chrome */
   function renderPalette() {
-    var list = PAPERS[tool.paper].bg === PAPERS.black.bg ? PALETTE_DARK : PALETTE_LIGHT;
+    var list = tool.paper === "black" ? PALETTE_DARK : PALETTE_LIGHT;
     gInks.innerHTML = "";
-    inkButtons = list.map(function (col, i) {
-      var b = btn(gInks, "s-ink" + (col === tool.color ? " sel" : ""), "", col);
+    inkButtons = list.map(function (col) {
+      var b = el("button", "sl-ink" + (col === tool.color ? " sel" : ""));
+      b.type = "button";
+      b.title = col;
       b.style.setProperty("--c", col);
       b.dataset.c = col;
       b.onclick = function () { pickInk(col, b); };
+      gInks.appendChild(b);
       return b;
     });
     gInks.appendChild(custom);
@@ -709,28 +750,46 @@ function create(opts) {
   nibs.forEach(function (b) {
     b.onclick = function () { tool.width = parseFloat(b.dataset.w); selectOne(nibs, b); };
   });
+
+  bMore.onclick = function () {
+    menu.hidden = !menu.hidden;
+    bMore.classList.toggle("on", !menu.hidden);
+    if (!menu.hidden) setTimeout(function () { api.relayout(); }, 0);
+  };
+
   bUndo.onclick = function () { restoreFrom(undoStack, redoStack); };
   bRedo.onclick = function () { restoreFrom(redoStack, undoStack); };
   bZoomIn.onclick = function () { setZoom(view.k * 1.25); };
   bZoomOut.onclick = function () { setZoom(view.k / 1.25); };
   bFit.onclick = fitPage;
-  bPaper.onclick = function () {
-    tool.paper = PAPER_ORDER[(PAPER_ORDER.indexOf(tool.paper) + 1) % PAPER_ORDER.length];
-    bPaper.textContent = tool.paper;
-    root.dataset.paper = tool.paper;
-    renderPalette();
-    invalidate();
-    markDirty();
-  };
-  bRule.onclick = function () {
-    tool.rule = RULE_ORDER[(RULE_ORDER.indexOf(tool.rule) + 1) % RULE_ORDER.length];
-    bRule.textContent = tool.rule;
-    invalidate();
-    markDirty();
-  };
+
+  paperBtns.forEach(function (b) {
+    b.onclick = function () {
+      tool.paper = b.dataset.paper;
+      selectOne(paperBtns, b);
+      root.dataset.paper = tool.paper;
+      renderPalette();
+      /* Keep the ink visible: a colour chosen for slate is invisible on white. */
+      var list = tool.paper === "black" ? PALETTE_DARK : PALETTE_LIGHT;
+      if (PALETTE_DARK.concat(PALETTE_LIGHT).indexOf(tool.color) !== -1) {
+        pickInk(list[0], inkButtons[0]);
+      }
+      invalidate();
+      markDirty();
+    };
+  });
+  ruleBtns.forEach(function (b) {
+    b.onclick = function () {
+      tool.rule = b.dataset.rule;
+      selectOne(ruleBtns, b);
+      invalidate();
+      markDirty();
+    };
+  });
   bLive.onclick = function () {
     tool.live = !tool.live;
-    bLive.classList.toggle("on", tool.live);
+    bLive.textContent = tool.live ? "on" : "off";
+    bLive.classList.toggle("sel", tool.live);
     toast(tool.live ? "the tutor sees each page as you pause" : "sending only when you tap Send");
   };
   bTaller.onclick = function () {
@@ -756,8 +815,6 @@ function create(opts) {
   /* ---------------------------------------------------------------- boot */
   root.dataset.tool = "pen";
   root.dataset.paper = tool.paper;
-  bPaper.textContent = tool.paper;
-  bRule.textContent = tool.rule;
   renderPalette();
 
   var ro = window.ResizeObserver ? new ResizeObserver(function () {

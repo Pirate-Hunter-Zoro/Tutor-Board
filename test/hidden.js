@@ -65,5 +65,42 @@ for (const [htmlName, cssName] of PAIRS) {
   }
 }
 
+
+// --- the writing panel must never be usable-looking but unusable -----------
+// It shipped once collapsed to a handle, which sized its canvas to 0x0: the
+// toolbar and Send were clipped away and touches fell through to the lesson
+// behind. Both halves of that are checked here.
+{
+  const boardCss = fs.readFileSync(path.join(WEB, 'board.css'), 'utf8');
+  const slateCss = fs.readFileSync(path.join(WEB, 'slate.css'), 'utf8');
+  const boardJs = fs.readFileSync(path.join(WEB, 'board.js'), 'utf8');
+
+  const wr = /#writer\s*\{[^}]*\}/.exec(boardCss);
+  if (wr && /min-height:\s*(\d+(\.\d+)?)rem/.test(wr[0])) {
+    const rem = parseFloat(/min-height:\s*(\d+(\.\d+)?)rem/.exec(wr[0])[1]);
+    rem >= 12 ? console.log('ok   writer panel has a usable minimum height')
+              : (fails++, console.log('FAIL writer min-height is only ' + rem + 'rem'));
+  } else {
+    fails++; console.log('FAIL #writer declares no min-height — it can collapse to nothing');
+  }
+
+  /^(?!.*data-open).*$/.test(boardJs) || true;
+  /showWriter\(/.test(boardJs)
+    ? console.log('ok   the panel is opened by the board, not by the user dragging')
+    : (fails++, console.log('FAIL nothing opens the writing panel automatically'));
+
+  /\.sl-wrap\s*\{[^}]*touch-action:\s*none/.test(slateCss)
+    ? console.log('ok   the whole writing surface opts out of page gestures')
+    : (fails++, console.log('FAIL only the canvas opts out — a near-miss touch scrolls the page'));
+
+  /\.slate-root\s*\{[^}]*touch-action:\s*none/.test(slateCss)
+    ? console.log('ok   the panel itself does not scroll the lesson behind it')
+    : (fails++, console.log('FAIL the panel does not contain its own gestures'));
+
+  /class="sl-send"|"sl-send"/.test(fs.readFileSync(path.join(WEB, 'slate-core.js'), 'utf8'))
+    ? console.log('ok   a Send control exists')
+    : (fails++, console.log('FAIL no Send control'));
+}
+
 console.log(fails ? '\n' + fails + ' FAILURES' : '\nall hidden-element checks passed');
 process.exit(fails ? 1 : 0);

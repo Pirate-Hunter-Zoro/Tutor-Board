@@ -290,46 +290,53 @@ body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180de
   border: 0; background: none; font: inherit; color: var(--ink-3);
 }
 
-/* ---------- the writing drawer ---------- */
-/* Docked under the lesson rather than on its own page, so the question being
-   answered stays on screen while it is answered. */
+/* ---------- the writing panel ---------- */
+/* Docked at the bottom and open by default whenever an answer is owed. It is
+   not a drawer to be discovered: a question appears, the place to answer it
+   appears with it, already the right size. */
 #writer {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
   display: flex; flex-direction: column;
-  height: 3.1rem;                       /* collapsed: just the handle */
-  background: #17181c;
-  border-top: 1px solid #33373f;
-  box-shadow: 0 -8px 28px rgba(0,0,0,.28);
-  transition: height .22s cubic-bezier(.2,.7,.3,1);
+  height: var(--writer-h, 56vh);
+  min-height: 18rem;
+  background: #15161a;
+  border-top: 1px solid #2c2f37;
+  border-radius: .9rem .9rem 0 0;
+  box-shadow: 0 -10px 34px rgba(0,0,0,.32);
+  overflow: hidden;
+  animation: writer-in .26s cubic-bezier(.2,.75,.3,1) both;
 }
-#writer[data-open="1"] { height: var(--writer-h, 58vh); }
-#writer.dragging { transition: none; }
+@keyframes writer-in { from { transform: translateY(18px); opacity: 0; } }
 
-#writer-grip {
-  flex: none; height: 3.1rem;
-  display: flex; align-items: center; justify-content: center;
-  touch-action: none;
+#writer[data-hidden="1"] {
+  height: 2.6rem; min-height: 0;
+  animation: none;
 }
-#writer-toggle {
-  display: flex; flex-direction: column; align-items: center; gap: .3rem;
-  width: 100%; height: 100%;
-  border: 0; background: none; cursor: grab;
-  font-family: var(--ui); font-size: .9rem; font-weight: 650;
-  color: #e8e5df;
+#writer[data-hidden="1"] #slate { display: none; }
+
+#writer-head {
+  flex: none; height: 2.6rem;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 .9rem;
+  background: #1c1e23;
+  border-bottom: 1px solid #2c2f37;
+  font-family: var(--ui); font-size: .82rem; font-weight: 650;
+  color: #e9e7e2;
 }
-#writer-toggle:active { cursor: grabbing; }
-.grip-bar {
-  width: 2.6rem; height: .25rem; border-radius: 999px;
-  background: #4a4f59;
+#writer-hide {
+  border: 1px solid #2c2f37; border-radius: 999px;
+  background: none; color: #8b8f98; cursor: pointer;
+  font: inherit; font-size: .72rem; padding: .25rem .7rem;
 }
-#writer[data-open="1"] #writer-label { display: none; }
-#writer[data-open="1"] #writer-grip { height: 1.4rem; }
-#writer[data-open="1"] #writer-toggle { justify-content: center; }
+#writer[data-hidden="1"] #writer-hide::after { content: "show"; }
+#writer[data-hidden="1"] #writer-hide { font-size: 0; }
+#writer[data-hidden="1"] #writer-hide::after { font-size: .72rem; }
 
 #writer #slate { flex: 1 1 auto; min-height: 0; }
 
-/* The lesson needs room to scroll clear of the drawer. */
-body.writer-open #board { padding-bottom: calc(var(--writer-h, 58vh) + 2rem); }
+/* The lesson scrolls clear of the panel, and the question sits just above it. */
+body.writer-open #board { padding-bottom: calc(var(--writer-h, 56vh) + 1.5rem); }
+body.writer-open.writer-hidden #board { padding-bottom: 5rem; }
 
 #btn-clip {
   cursor: pointer; user-select: none;
@@ -338,7 +345,8 @@ body.writer-open #board { padding-bottom: calc(var(--writer-h, 58vh) + 2rem); }
 }
 #btn-clip:hover { background: var(--paper-2); color: var(--ink); }
 
-.jump { bottom: 4.2rem; }
+.jump { bottom: calc(var(--writer-h, 56vh) + 1rem); }
+body:not(.writer-open) .jump { bottom: 1.5rem; }
 
 /* ---------- scratch drawer ---------- */
 #scratch {
