@@ -18,7 +18,12 @@
 (function () {
 "use strict";
 
-var LOGICAL_W = 1600;
+/* A page is created at the size of the surface showing it, so one logical unit
+   is one CSS pixel and 100% zoom is already the right size to write at. The old
+   fixed 1600-wide page had to be scaled down to fit, which made everything small
+   and forced people to zoom -- and zooming a handwriting surface is miserable.
+   Pages written elsewhere are scaled to fit the width on arrival. */
+
 var AUTOSAVE_MS = 1200;
 var LIVE_IDLE_MS = 3000;
 var LIVE_MIN_GAP_MS = 15000;
@@ -109,7 +114,7 @@ function create(opts) {
   var pages = [];
   var current = 0;
   var undoStack = [], redoStack = [], clipboard = [];
-  var tool = { mode: "pen", color: PALETTE_DARK[0], width: 2.8,
+  var tool = { mode: "pen", color: PALETTE_DARK[0], width: 3.2,
                paper: "black", rule: "plain", live: false };
   var drawing = null, lasso = null, sel = null, dragging = null;
   var penSeen = false, dirty = false, lastLiveSend = 0;
@@ -125,6 +130,10 @@ function create(opts) {
   root.innerHTML = "";
 
   var bar = el("div", "sl-bar");
+  var toolsCol = el("div", "sl-tools");
+  var actsCol = el("div", "sl-acts");
+  bar.appendChild(toolsCol);
+  bar.appendChild(actsCol);
 
   function seg(parent) { var g = el("div", "sl-seg"); parent.appendChild(g); return g; }
   function mk(parent, cls, html, title) {
@@ -135,7 +144,7 @@ function create(opts) {
     return b;
   }
 
-  var segTools = seg(bar);
+  var segTools = seg(toolsCol);
   function tool_(icon, label, title) {
     return mk(segTools, "sl-t",
               '<span class="sl-i">' + icon + '</span><span class="sl-w">' + label + '</span>',
@@ -147,8 +156,8 @@ function create(opts) {
   var bLa = tool_(ICON.lasso, "Select", "loop around something to move or cut it");
   bPen.classList.add("sel");
 
-  var segNibs = seg(bar);
-  var nibs = [1.6, 2.8, 5.0].map(function (w, i) {
+  var segNibs = seg(toolsCol);
+  var nibs = [1.8, 3.2, 6.0].map(function (w, i) {
     var b = mk(segNibs, "sl-n" + (i === 1 ? " sel" : ""),
                '<i style="width:' + (4 + i * 5) + 'px;height:' + (4 + i * 5) + 'px"></i>'
                + '<span class="sl-w">' + ["Fine", "Medium", "Broad"][i] + '</span>',
@@ -158,7 +167,7 @@ function create(opts) {
   });
 
   var gInks = el("div", "sl-inks");
-  bar.appendChild(gInks);
+  toolsCol.appendChild(gInks);
   var inkButtons = [];
   var custom = el("label", "sl-ink sl-custom");
   custom.title = "any colour";
@@ -167,17 +176,17 @@ function create(opts) {
   customInput.value = "#c792ea";
   custom.appendChild(customInput);
 
-  bar.appendChild(el("div", "sl-space"));
+  
 
-  var segEdit = seg(bar);
+  var segEdit = seg(toolsCol);
   var bUndo = mk(segEdit, "sl-t sl-icon-only", '<span class="sl-i">' + ICON.undo + '</span>', "undo");
   var bRedo = mk(segEdit, "sl-t sl-icon-only", '<span class="sl-i">' + ICON.redo + '</span>', "redo");
 
-  var bMore = mk(bar, "sl-more", '<span class="sl-i">' + ICON.more + '</span>'
+  var bMore = mk(toolsCol, "sl-more", '<span class="sl-i">' + ICON.more + '</span>'
                                  + '<span class="sl-w">More</span>', "pages, zoom, paper");
   var savedTag = el("span", "sl-saved", "saved");
-  bar.appendChild(savedTag);
-  var bSend = mk(bar, "sl-send", "Send", "hand this page to the tutor");
+  actsCol.appendChild(savedTag);
+  var bSend = mk(actsCol, "sl-send", "Send", "hand this page to the tutor");
 
   /* --- the overflow sheet --- */
   var menu = el("div", "sl-menu");
@@ -267,8 +276,15 @@ function create(opts) {
   function page() { return pages[current]; }
 
   function blankPage() {
-    var aspect = Math.min(1.9, Math.max(0.5, wrap.clientHeight / Math.max(1, wrap.clientWidth)));
-    return { w: LOGICAL_W, h: Math.round(LOGICAL_W * aspect), strokes: [] };
+    /* Exactly the surface it will be drawn on: no clamping, because clamping is
+       what forces a scale factor, and a scale factor is what makes people zoom.
+       A page from another device is a different size and simply scales to fit
+       the width on arrival, like a photograph of a page would. */
+    return {
+      w: Math.round(wrap.clientWidth || 900),
+      h: Math.round(wrap.clientHeight || 520),
+      strokes: [],
+    };
   }
 
   function snapshot() {
@@ -289,14 +305,19 @@ function create(opts) {
   /* ------------------------------------------------------------ the view */
   var view = { k: 1, fit: 1, ox: 0, oy: 0 };
 
+  /* Fit by WIDTH, never by area. Fitting the whole page on screen is what made
+     a tall page shrink to something unwritable; the width is what has to match,
+     and the height is simply scrolled. */
   function fitPage() {
     var p = page();
     if (!p || !wrap.clientWidth) return;
-    view.fit = Math.min((wrap.clientWidth - 12) / p.w, (wrap.clientHeight - 12) / p.h);
+    view.fit = wrap.clientWidth / p.w;
     view.k = view.fit;
-    var w = p.w * view.k, h = p.h * view.k;
-    view.ox = (wrap.clientWidth - w) / 2;
-    view.oy = (wrap.clientHeight - h) / 2;
+    view.ox = 0;
+    /* A page shorter than the surface is centred; a taller one starts at the
+       top, where the writing begins. */
+    var h = p.h * view.k;
+    view.oy = h < wrap.clientHeight ? (wrap.clientHeight - h) / 2 : 0;
     clampView();
     invalidate();
   }
@@ -305,8 +326,13 @@ function create(opts) {
     var p = page();
     if (!p) return;
     var m = 60;
-    view.ox = Math.min(wrap.clientWidth - m, Math.max(m - p.w * view.k, view.ox));
-    view.oy = Math.min(wrap.clientHeight - m, Math.max(m - p.h * view.k, view.oy));
+    var w = p.w * view.k, h = p.h * view.k;
+    /* Horizontally: never leave a gap when the page is at or wider than the
+       surface, so the writing area always fills the width. */
+    view.ox = w <= wrap.clientWidth ? (wrap.clientWidth - w) / 2
+            : Math.min(0, Math.max(wrap.clientWidth - w, view.ox));
+    view.oy = h <= wrap.clientHeight ? (wrap.clientHeight - h) / 2
+            : Math.min(0, Math.max(wrap.clientHeight - h, view.oy));
   }
 
   function setZoom(k, cx, cy) {
@@ -361,8 +387,9 @@ function create(opts) {
     c.strokeStyle = skin.rule;
     c.lineWidth = 1 / scale;
     c.beginPath();
-    for (var y = 50; y < p.h; y += 50) { c.moveTo(0, y); c.lineTo(p.w, y); }
-    if (tool.rule === "grid") for (var x = 50; x < p.w; x += 50) { c.moveTo(x, 0); c.lineTo(x, p.h); }
+    var step = Math.max(28, Math.round(p.w / 22));
+    for (var y = step; y < p.h; y += step) { c.moveTo(0, y); c.lineTo(p.w, y); }
+    if (tool.rule === "grid") for (var x = step; x < p.w; x += step) { c.moveTo(x, 0); c.lineTo(x, p.h); }
     c.stroke();
   }
 
@@ -825,7 +852,7 @@ function create(opts) {
   };
   bTaller.onclick = function () {
     snapshot();
-    page().h += Math.round(LOGICAL_W * 0.5);
+    page().h += Math.round(wrap.clientHeight / view.k * 0.75);
     markDirty();
     fitPage();
   };

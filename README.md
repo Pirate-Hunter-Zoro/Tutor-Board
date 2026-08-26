@@ -494,6 +494,13 @@ stop drawing, which is the whole of palm rejection.
 cream; `plain` cycles unruled, grid and lines. The ink palette follows the paper, so the default
 colour is always one you can see, and the last swatch is a colour picker for anything you like.
 
+**A fresh page is exactly the size of the surface showing it**, so one logical unit is one CSS
+pixel and 100% is already the right size to write at — on a phone, an iPad or a large display.
+Zoom exists for when you want it, not because the page arrived the wrong size. The earlier design
+used a fixed 1600-unit page scaled to fit, which made writing small on a small screen and left
+zooming as the only remedy; `test/sizing.js` sweeps seven screen shapes and fails if any of them
+opens at anything but 100%.
+
 Ink smoothness is deliberate work, not a default. Raw pointer samples are jittery and unevenly
 spaced, and drawing them directly is what produces a granular, faceted line. Instead each sample
 is blended into the last, a Catmull-Rom curve is run through the result, that curve is resampled
@@ -888,7 +895,8 @@ node test/pages.js       every page's script runs against its own markup
 node test/modes.js       that math mode has no text box and code mode does
 node test/typeface.js    that the reading face reaches prose and never the maths
 node test/interactive.js drives the real board in a real DOM and writes on it
-                         (needs `npm install jsdom`; skips without it)
+node test/sizing.js      that every screen size opens at natural writing size
+                         (both need `npm install jsdom`; they skip without it)
 python3 tools/sync-macros.py --check   that TeX and KaTeX know the same commands
 ./install.sh             re-runs the environment check
 board doctor

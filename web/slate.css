@@ -62,16 +62,36 @@ body > #slate { flex: 1 1 auto; min-height: 0; }
    paper. */
 .slate-root.sl-bare { border-radius: 0; }
 
-/* ---------- the one row ---------- */
+/* ---------- the control row ---------- */
+/* A grid, not a flex row, so Send cannot be pushed off the end. Column one
+   holds the tools and is allowed to shrink and scroll inside itself; column two
+   holds the actions and is sized to its content. Whatever the screen width,
+   Send is on it. */
 .sl-bar {
-  flex: none;
-  display: flex; align-items: center; gap: .45rem;
-  padding: .5rem .6rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: .5rem;
+  padding: .45rem .6rem;
+  padding-right: max(.6rem, env(safe-area-inset-right));
+  padding-left: max(.6rem, env(safe-area-inset-left));
   background: var(--sl-panel);
   border-bottom: 1px solid var(--sl-line);
-  min-width: 0;
 }
-.sl-space { flex: 1 1 auto; min-width: .25rem; }
+.sl-tools {
+  min-width: 0;
+  display: flex; align-items: center; gap: .45rem;
+  overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: none;
+  padding-bottom: 1px;
+}
+.sl-tools::-webkit-scrollbar { display: none; }
+.sl-acts {
+  display: flex; align-items: center; gap: .5rem;
+  padding-left: .55rem;
+  border-left: 1px solid var(--sl-line);
+}
+.sl-space { display: none; }
 
 /* Segmented groups: joined, so related tools read as one control. Every tool
    carries its name -- an icon alone was not legible, and a control you cannot

@@ -121,6 +121,17 @@ setTimeout(() => setTimeout(() => {
     ? ok('a pen stroke lands, with the network still unanswered')
     : fail('a pen stroke produced nothing (' + before + ' -> ' + after + ')');
 
+  // Send must be in a column that cannot be squeezed away, not merely present.
+  const bar = chrome.querySelector('.sl-bar');
+  const acts = chrome.querySelector('.sl-acts');
+  bar && acts && acts.querySelector('.sl-send')
+    ? ok('Send sits in the fixed column, not in the scrolling tools')
+    : fail('Send is in the scrolling area and can be pushed off screen');
+  chrome.querySelector('.sl-tools') && chrome.querySelector('.sl-tools').contains(
+    chrome.querySelector('.sl-more'))
+    ? ok('the tools scroll inside their own column')
+    : fail('the tools are not confined to their column');
+
   done();
 }, 60), 60);
 
