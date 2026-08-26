@@ -98,6 +98,12 @@ try:
     check("and carries its meaning, because a tap has no sentence in it",
           "nothing on the board" in text and "first card" in text)
     check("the line is not just the tag", len(text.strip()) > len("[begin]") + 8)
+    # Where to begin, not merely that somebody is waiting. The first real cold
+    # start opened a course at chapter four because nothing said otherwise.
+    check("with no chapter set it says so, and says not to guess",
+          "no chapter label" in text and "guess" in text)
+    check("a course that is not a book is not given a fictional chapter one",
+          "follows a book" not in text)
 
     # An unread message is what wakes `board wait`.
     check("it arrives unread", lines and lines[0].get("read") is False)
@@ -113,6 +119,38 @@ try:
         lines = [json.loads(l) for l in fh if l.strip()]
     check("a signal with no sentence always carries its meaning",
           "ready for you to check" in lines[-1].get("text", ""))
+
+    # A course that follows a book says so on disk, and the cold start names its
+    # actual first chapter rather than telling the assistant to work it out. This
+    # is the defect: "the floor of the subject" and "the start of the book" are
+    # not the same place, and a tutor left to choose picked chapter four.
+    with open(os.path.join(tmp, "chapters.tsv"), "w", encoding="utf-8") as fh:
+        fh.write("# num\tfrom\tto\tslug\ttitle\n")
+        fh.write("01\t1\t20\tch01-groups\tGroups, fields and vector spaces\n")
+        fh.write("02\t21\t40\tch02-zorn\tThe axiom of choice\n")
+        fh.write("04\t61\t80\tch04-ext\tField extensions\n")
+    post("/say", {"signal": "begin"})
+    with open(repo.messages_path, "r", encoding="utf-8") as fh:
+        lines = [json.loads(l) for l in fh if l.strip()]
+    text = lines[-1].get("text", "")
+    check("a book course is told which chapter is first, by name",
+          "Groups, fields and vector spaces" in text)
+    check("and how many there are, so it knows it is a course not a topic",
+          "3 chapters" in text)
+    check("and is told not to open at the foundation of the subject instead",
+          "where the book starts" in text)
+    check("chapter four does not get named as the opening",
+          "Field extensions" not in text)
+
+    # A labelled sitting names its own starting point.
+    with open(repo.state_path, "w", encoding="utf-8") as fh:
+        json.dump({"course": "Test Course", "session": "lecture",
+                   "chapter": "Ch 1 — groups, fields and vector spaces"}, fh)
+    post("/say", {"signal": "begin"})
+    with open(repo.messages_path, "r", encoding="utf-8") as fh:
+        lines = [json.loads(l) for l in fh if l.strip()]
+    check("a labelled sitting tells the assistant where to start",
+          "Ch 1" in lines[-1].get("text", "") and "Start there" in lines[-1].get("text", ""))
 
     # Declining a prompt is a turn like any other: recorded, and carrying enough
     # for the tutor to know not to press the point.

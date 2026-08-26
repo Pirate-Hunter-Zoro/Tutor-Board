@@ -119,6 +119,17 @@ Read `README.md` first.
   the tail of the log, and the board shows the LaTeX error itself. "The build failed" without the
   reason is a message that sends somebody to a laptop, which is the thing this tool exists to
   avoid.
+- **The theme has to reach the whole window.** The viewport's background comes from `<html>` and
+  only falls through to `<body>` when `<html>` paints none of its own — and the dark palette is
+  defined on `body[data-mode="dark"]`, so an `<html>` painting `var(--paper)` resolves it from
+  `:root` and is always the light value. That put a cream band under every page shorter than the
+  screen. Leave `<html>` unpainted, give `<body>` the colour and a `min-height`. `test/theme.js`
+  guards it, and fails on the old CSS.
+- **A board with nothing attached must not look like a board with a tutor.** The assistant chip is
+  never hidden: no record reads "no tutor attached", and the empty state says so beside the button
+  it is inviting a tap on. Somebody asked the tutor to begin, saw the *connection* dot go green,
+  and waited on a session nobody had started. Two indicators in one bar means both have to say what
+  they mean.
 - **An unreachable board must say so.** Zero cards and a dead stream used to render identically —
   "Nothing on the board yet" — so a board whose process had died read as a tutor who had not
   written, and the only signal otherwise was a dot the size of a full stop. No payload plus a dead

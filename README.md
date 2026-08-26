@@ -104,6 +104,8 @@ these tests fail, the test is right.
 | `board net` re-pointed the HTTPS name at a dead port, trusting a stale record from another node | `alive()` in `cmd_net` |
 | An empty maths board could not be answered, asked, or prodded from the iPad at all: the first turn needed a terminal | `test/begin.py` |
 | A writing prompt could not be declined, so an unwanted exercise had to be answered badly to clear it | `test/modes.js` |
+| In dark mode a cream band filled the bottom of the screen: `<html>` painted `var(--paper)`, which resolves from `:root` and is therefore always the light value, while the dark palette is scoped to `<body>` | `test/theme.js` |
+| A board with no assistant attached looked exactly like one with an assistant: the chip simply hid itself, so a tap went into an inbox nobody was reading | `test/link.js` |
 | The "is a tutor attached" dot could never go green outside headless: only the daemon ever wrote `agent.json`, and a heartbeat is the wrong test for a session that is idle whenever its person is thinking | `test/agents.py`, `test/begin.py` |
 
 The pattern in most of them: a stub that returns a plausible object for everything will report that
@@ -1298,6 +1300,7 @@ node test/typeface.js    that the reading face reaches prose and never the maths
 node test/interactive.js drives the real board in a real DOM and writes on it
 node test/sizing.js      that every screen size opens at natural writing size
 node test/link.js        that an unreachable board says so instead of looking empty
+node test/theme.js       that the dark theme reaches the whole window, not just the content
 python3 test/begin.py    that the first turn of a session can come from the device
 python3 test/homework.py that a sitting finds its problem set, in either layout
 

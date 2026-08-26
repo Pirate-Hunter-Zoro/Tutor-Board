@@ -18,7 +18,9 @@ var els = {
   board: document.getElementById("board"),
   cards: document.getElementById("cards"),
   empty: document.getElementById("empty"),
+  emptyLead: document.getElementById("empty-lead"),
   begin: document.getElementById("begin"),
+  noTutor: document.getElementById("no-tutor"),
   skip: document.getElementById("skip"),
   offline: document.getElementById("offline"),
   linkbad: document.getElementById("linkbad"),
@@ -474,7 +476,25 @@ function render(data) {
 
   els.cards.innerHTML = "";
   els.cards.appendChild(frag);
-  els.empty.hidden = items.length > 0 || linkDead;
+
+  /* The way out stays open until the tutor has actually said something. Keyed on
+     CARDS, not on the transcript: asking makes the transcript non-empty, so
+     keying on that retired the only control on the page the moment it was used
+     -- and if nothing was listening, there was no way to ask again and no text
+     box in maths to ask with. A board the tutor has never written on is still a
+     board waiting to start. */
+  var started = (data.cards || []).length > 0;
+  els.empty.hidden = started || linkDead;
+  /* Leave the just-tapped label alone for a moment, or the payload the tap
+     itself provokes overwrites it before it has been read. Only the label --
+     everything else on the page still renders. */
+  if (!started && Date.now() - sentAt > 4000) {
+    var asked = (data.turns || []).some(function (t) { return t.signal === "begin"; });
+    els.emptyLead.textContent = asked ? "The tutor has not written anything yet."
+                                      : "Nothing on the board yet.";
+    els.begin.textContent = asked ? "ask again" : "ask the tutor to begin";
+    els.begin.disabled = false;
+  }
 
   paintSession(state, data.push, data.agent);
   paintHomework(data.hw);
@@ -604,8 +624,20 @@ function lastLine(text) {
 function paintSession(state, push, agent) {
   /* Whether an assistant is attached, and whether it is thinking. Without this
      the page looks identical when nothing is listening at all. */
-  els.agent.hidden = !agent;
-  if (agent) {
+  /* Never hidden. A blank space where this belongs reads as "fine", and it is
+     the opposite of fine: it means anything sent goes into an inbox nobody is
+     reading. Somebody tapped "ask the tutor to begin", got a green connection
+     dot, and waited on a session that did not exist. */
+  els.agent.hidden = false;
+  attached = !!agent && agent.state !== "stale";
+  /* And say it where somebody about to tap is actually looking, not only in the
+     chrome. An empty board with nothing attached is a dead end, and the person
+     holding the iPad cannot be expected to infer that from a missing chip. */
+  els.noTutor.hidden = attached;
+  if (!agent) {
+    els.agent.dataset.state = "none";
+    els.agent.textContent = "no tutor attached";
+  } else {
     els.agent.dataset.state = agent.state || "stale";
     els.agent.textContent =
       agent.state === "working" ? (agent.agent || "assistant") + " is working"
@@ -823,6 +855,8 @@ function closeViewer() {
 var source = null;
 var linkDead = false;
 var everGotData = false;
+var attached = false;      /* is there a tutor on the other end at all */
+var sentAt = 0;            /* when begin was last tapped, so its label survives a frame */
 
 /* An unreachable board used to be indistinguishable from an empty one: the shell
    comes out of the service worker's cache, the payload never arrives, and the
@@ -1153,7 +1187,12 @@ els.skip.onclick = function () {
 
 els.begin.onclick = function () {
   els.begin.disabled = true;
-  els.begin.textContent = "asked — waiting for the tutor";
+  /* Do not claim it is being waited on when nothing is there to wait. The turn
+     is still sent -- the inbox keeps it, and whoever attaches next reads it --
+     but "waiting for the tutor" when no tutor exists is the board lying. */
+  els.begin.textContent = attached ? "asked — waiting for the tutor"
+                                   : "sent, but no tutor is attached to read it";
+  sentAt = Date.now();
   say("begin").catch(function () {
     els.begin.disabled = false;
     els.begin.textContent = "ask the tutor to begin";

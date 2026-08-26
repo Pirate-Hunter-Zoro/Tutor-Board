@@ -289,6 +289,13 @@ HEADLESS_PROMPT = (
     "You are running headless: there is no terminal and nobody will read stdout. "
     "The student is on the board. Read live/BRIEF.md and AI_INSTRUCTIONS.md if you "
     "have not already.\n\n"
+    # Assume nothing carried over. A turn may be a fresh process with no memory
+    # of the last one -- an agent's own history does not survive a node, a
+    # vendor, or a `-p` invocation -- so the lesson so far has to be read off
+    # disk, where it is, rather than recalled.
+    "Do not assume you remember this session. The lesson so far is on disk: read "
+    "the cards already in live/cards/ in order, and HANDOFF.md at the root if it "
+    "exists, so you continue the lesson instead of restarting it.\n\n"
     "They just sent this:\n\n%s\n\n"
     "Run `board inbox` for the full detail including any file paths, open anything "
     "they sent, and reply by writing ONE new card into live/cards/. Do not write "

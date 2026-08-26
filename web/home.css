@@ -35,15 +35,21 @@ body[data-mode="dark"], body[data-mode="auto"].sys-dark {
 /* The `hidden` attribute has to actually hide things -- see board.css. */
 [hidden] { display: none !important; }
 
+/* See the note in board.css: the dark palette lives on `body[data-mode="dark"]`,
+   so an <html> that paints `var(--paper)` always resolves the light value from
+   `:root` and shows a cream band below any page shorter than the screen. */
+html { background: none; }
+
 html, body {
   margin: 0; padding: 0;
-  background: var(--paper);
   color: var(--ink);
   font-family: var(--prose);
   line-height: var(--prose-leading);
   letter-spacing: var(--prose-tracking);
   -webkit-text-size-adjust: 100%;
 }
+
+body { background: var(--paper); min-height: 100vh; min-height: 100dvh; }
 
 /* ---------- bar ---------- */
 #bar {

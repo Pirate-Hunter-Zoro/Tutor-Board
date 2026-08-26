@@ -33,6 +33,7 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 import boardlib
 import homework
+import syllabus
 WEB = os.path.join(HERE, "web")
 
 # Python's table predates these; without them fonts go out as octet-stream and
@@ -253,6 +254,40 @@ SIGNAL_SENSE = {
     "help": "they are stuck and want help.",
     "confused": "something is not making sense to them.",
 }
+
+
+def session_sense(repo):
+    """What this sitting is, in a sentence an assistant can act on.
+
+    `board open` takes a label -- "Ch 1 -- groups, fields and vector spaces" --
+    and it is the only thing on the board that says where a cold start should
+    start. If nobody set one, say that too, and say where to look instead: a
+    course orders itself somewhere, and guessing is how a course gets opened in
+    the middle.
+    """
+    st = repo.state()
+    kind = st.get("session") or "lecture"
+    chapter = (st.get("chapter") or "").strip()
+    if chapter:
+        return ("This sitting is labelled %r and it is a %s. Start there."
+                % (chapter, kind))
+    # A course that follows a book says so on disk. Naming its actual first
+    # chapter beats telling an assistant to work it out, which is what produced
+    # a Galois course opened at field extensions -- chapter four.
+    first = syllabus.opening(repo.root)
+    if first:
+        every = syllabus.chapters(repo.root)
+        return ("This sitting is a %s and carries no chapter label. This course "
+                "follows a book and orders itself in %d chapters; the first is "
+                "%s. Open there unless HANDOFF.md says otherwise, and name the "
+                "chapter you are opening in your first card. Do not start from "
+                "whatever you consider the foundation of the subject -- start "
+                "where the book starts."
+                % (kind, len(every), syllabus.label(first)))
+    return ("This sitting is a %s and carries no chapter label, so nothing here "
+            "says where to start. Do not guess from the subject: begin at the "
+            "beginning of the course as the repository itself orders it, and say "
+            "in your first card which chapter you are opening." % kind)
 
 
 def newest_question(repo):
@@ -1181,6 +1216,12 @@ class Handler(BaseHTTPRequestHandler):
             line = ("[%s] " % signal if signal else "") + text
             if signal and not text:
                 line += SIGNAL_SENSE.get(signal, "")
+            if signal == "begin":
+                # Where to begin, not merely that they are waiting. Without this
+                # the assistant has a blank board, no handoff, and a signal that
+                # says nothing -- so it guesses, and the first guess opened a
+                # course at chapter four.
+                line += " " + session_sense(repo)
             with open(repo.messages_path, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(dict(record, text=line)) + "\n")
             self.server.hub.worker.dirty.set()

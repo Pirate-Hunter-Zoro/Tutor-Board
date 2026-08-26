@@ -161,10 +161,14 @@ check('math: the begin button lives in the empty state, so a card retires it',
 r = paint('math', [{ id: '0001', kind: 'lesson', body: 'x', mtime: now }], []);
 check('math: a card retires the empty state', r.empty === true);
 
-// So does the ask itself, so the tutor is not woken four times.
+// But asking does NOT retire it. The way out stays open until the tutor has
+// actually written something: keying this on the transcript rather than on the
+// cards removed the only control on the page the moment it was used, and if
+// nothing was listening there was then no way to ask again and no text box in
+// maths to ask with.
 r = paint('math', [], [{ id: 't0001', rev: 1, kind: 'text', signal: 'begin',
                          t: now, t0: now }]);
-check('math: having asked, the board is no longer empty', r.empty === true);
+check('math: having asked with no answer, the way out is still there', r.empty === false);
 
 console.log(fails ? '\n' + fails + ' FAILURES' : '\nall mode checks passed');
 process.exit(fails ? 1 : 0);

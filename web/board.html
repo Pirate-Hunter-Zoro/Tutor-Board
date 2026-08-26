@@ -91,7 +91,7 @@
 <main id="board">
   <div id="cards"></div>
   <div id="empty" class="empty">
-    <p>Nothing on the board yet.</p>
+    <p id="empty-lead">Nothing on the board yet.</p>
     <p class="muted">The tutor writes here. It appears the moment it is written.</p>
     <p class="muted">Your working goes on the <a href="/slate">slate</a>.</p>
     <!-- The cold start. With no card there is no question, so no answer is owed,
@@ -99,6 +99,12 @@
          Without this the first turn of every session has to come from a
          terminal, which is the one thing the launcher exists to abolish. -->
     <button id="begin" class="begin" type="button">ask the tutor to begin</button>
+    <!-- The board being reachable and a tutor being attached are two different
+         things, and the connection dot going green says only the first. Somebody
+         asked the tutor to begin, saw green, and waited on a session nobody had
+         started. -->
+    <p id="no-tutor" class="no-tutor" hidden>No tutor is attached to this course.
+      Anything sent waits in the inbox until one is.</p>
   </div>
   <!-- An unreachable board and an empty one look identical unless one of them
        says so. This is the difference between "the tutor has not written yet"

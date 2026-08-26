@@ -116,6 +116,39 @@ if (es) {
   if (/A first card/.test(painted)) ok('a card renders');
   else fail('the card never rendered, so the rest of this proves nothing');
 
+  // 5. Reachable and attended are two different things, and the connection dot
+  //    going green says only the first. Somebody tapped "ask the tutor to begin"
+  //    on a live board with nothing attached, saw green, and waited.
+  es.onopen();
+  var noTutor = doc.getElementById('no-tutor');
+  var agentChip = doc.getElementById('agent');
+  var live = { state: { course: 'Galois Theory', session: 'lecture', mode: 'math' },
+               cards: [], turns: [], messages: [], uploads: [], slate: [],
+               push: null, agent: null };
+  es.onmessage({ data: JSON.stringify(live) });
+  if (!agentChip.hidden && /no tutor/i.test(agentChip.textContent))
+    ok('nothing attached: the chrome says so rather than going blank');
+  else fail('a board with no tutor attached looks identical to one with a tutor');
+  if (!noTutor.hidden) ok('and it is said where somebody about to tap is looking');
+  else fail('the empty state invites a tap without saying nobody will read it');
+
+  es.onmessage({ data: JSON.stringify(Object.assign({}, live, {
+    agent: { agent: 'claude', state: 'attached', mode: 'interactive' } })) });
+  if (noTutor.hidden) ok('and withdrawn the moment one attaches');
+  else fail('the warning stayed up with a tutor attached');
+  if (/attached/.test(agentChip.textContent)) ok('an interactive tutor reads as attached');
+  else fail('an interactive tutor is not reported: ' + agentChip.textContent);
+
+  es.onmessage({ data: JSON.stringify(Object.assign({}, live, {
+    agent: { agent: 'claude', state: 'stale', mode: 'interactive' } })) });
+  if (!noTutor.hidden) ok('a tutor whose process has gone counts as none');
+  else fail('a stale tutor still reads as attended');
+
+  es.onmessage({ data: JSON.stringify(Object.assign({}, live, {
+    cards: [{ n: 1, slug: 'first', kind: 'lesson', title: 'A first card',
+              html: '<p>text</p>', mtime: Date.now() / 1000 }],
+    agent: { agent: 'claude', state: 'attached', mode: 'interactive' } })) });
+
   es.onerror();
   if (!linkbad.hidden) ok('link lost with a lesson up: the board says it may be out of date');
   else fail('the lesson silently went stale');
