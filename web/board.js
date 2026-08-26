@@ -449,7 +449,11 @@ function render(data) {
     if (c.kind === "question" && c.mtime > lastQuestion) lastQuestion = c.mtime;
   });
   (data.messages || []).forEach(function (m) { if (m.t > lastSent) lastSent = m.t; });
-  showWriter(!codeMode && !!(lastQuestion && lastQuestion > lastSent));
+  var owed = !codeMode && !!(lastQuestion && lastQuestion > lastSent);
+  var qNode = null;
+  var nodes = els.cards.querySelectorAll('.card[data-kind="question"]');
+  if (nodes.length) qNode = nodes[nodes.length - 1];
+  placeWriter(owed, qNode);
   typeset(els.cards);
   renderScratch(data.uploads || [], data.slate || []);
 
@@ -582,52 +586,43 @@ function connect() {
   };
 }
 
-/* ------------------------------------------------------- the writing panel */
-/* Mounted the first time an answer is owed, and only then -- building a canvas
-   inside a hidden, zero-height box gives it no size, which is exactly how the
-   first version ended up with nothing under the user's finger. */
+/* ------------------------------------------------------- the answer block */
+/* The board is part of the lesson, not something laid over it: after each
+   render it is moved into the card flow directly beneath the question it
+   answers. Moving the node keeps the component alive; the strokes are redrawn
+   from data afterwards, so nothing is lost even if the bitmap is not. */
 var writer = null;
 
-function showWriter(owed) {
-  var wasHidden = els.writer.hidden;
+function placeWriter(owed, questionNode) {
   els.writer.hidden = !owed;
-  document.body.classList.toggle("writer-open", owed);
+  document.getElementById("drawbar").hidden = !owed;
   if (!owed) return;
 
+  if (questionNode && questionNode.nextSibling !== els.writer) {
+    questionNode.parentNode.insertBefore(els.writer, questionNode.nextSibling);
+  } else if (!questionNode && els.writer.parentNode !== els.cards) {
+    els.cards.appendChild(els.writer);
+  }
+
   if (!writer && window.Slate) {
-    /* Wait a frame so the panel has real dimensions before the canvas sizes
-       itself to them. */
     requestAnimationFrame(function () {
       writer = window.Slate.create({
         root: document.getElementById("slate"),
+        bar: document.getElementById("drawbar"),
         compact: true,
-        onSend: function () { setHidden(true); },
+        onSend: function () { toastSent(); },
       });
+      window.__writerDebug = writer.debug;
     });
-  } else if (writer && wasHidden) {
+  } else if (writer) {
     requestAnimationFrame(writer.relayout);
   }
-
-  /* Bring the question into the strip above the panel, so the thing being
-     answered and the place to answer it are on screen together. */
-  if (wasHidden) {
-    requestAnimationFrame(function () {
-      var q = els.cards.querySelector('.card[data-kind="question"]:last-of-type')
-           || els.cards.lastElementChild;
-      if (q) q.scrollIntoView({ block: "start", behavior: "smooth" });
-    });
-  }
 }
 
-function setHidden(hide) {
-  els.writer.dataset.hidden = hide ? "1" : "0";
-  document.body.classList.toggle("writer-hidden", hide);
-  if (!hide && writer) requestAnimationFrame(writer.relayout);
+function toastSent() {
+  els.writer.hidden = true;
+  document.getElementById("drawbar").hidden = true;
 }
-
-document.getElementById("writer-hide").onclick = function () {
-  setHidden(els.writer.dataset.hidden !== "1");
-};
 
 /* ------------------------------------------------------------------ input */
 /* What comes back from the board depends on the mode. In a mathematics course

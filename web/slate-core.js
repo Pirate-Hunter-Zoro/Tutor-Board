@@ -101,6 +101,9 @@ function create(opts) {
   opts = opts || {};
   var root = opts.root;
   var compact = !!opts.compact;
+  /* Where the controls go. On the board that is the page's own chrome bar, so
+     they read as part of the app rather than as a widget dropped on top of it. */
+  var barHost = opts.bar || null;
 
   var api = {};
   var pages = [];
@@ -133,15 +136,22 @@ function create(opts) {
   }
 
   var segTools = seg(bar);
-  var bPen = mk(segTools, "sl-t sel", ICON.pen, "pen");
-  var bHl = mk(segTools, "sl-t", ICON.hl, "highlighter");
-  var bEr = mk(segTools, "sl-t", ICON.erase, "eraser");
-  var bLa = mk(segTools, "sl-t", ICON.lasso, "select");
+  function tool_(icon, label, title) {
+    return mk(segTools, "sl-t",
+              '<span class="sl-i">' + icon + '</span><span class="sl-w">' + label + '</span>',
+              title);
+  }
+  var bPen = tool_(ICON.pen, "Pen", "write");
+  var bHl = tool_(ICON.hl, "Marker", "highlighter");
+  var bEr = tool_(ICON.erase, "Erase", "rub out a stroke");
+  var bLa = tool_(ICON.lasso, "Select", "loop around something to move or cut it");
+  bPen.classList.add("sel");
 
   var segNibs = seg(bar);
   var nibs = [1.6, 2.8, 5.0].map(function (w, i) {
     var b = mk(segNibs, "sl-n" + (i === 1 ? " sel" : ""),
-               '<i style="width:' + (3 + i * 4) + 'px;height:' + (3 + i * 4) + 'px"></i>',
+               '<i style="width:' + (4 + i * 5) + 'px;height:' + (4 + i * 5) + 'px"></i>'
+               + '<span class="sl-w">' + ["Fine", "Medium", "Broad"][i] + '</span>',
                ["fine", "medium", "broad"][i]);
     b.dataset.w = w;
     return b;
@@ -160,10 +170,11 @@ function create(opts) {
   bar.appendChild(el("div", "sl-space"));
 
   var segEdit = seg(bar);
-  var bUndo = mk(segEdit, "sl-t", ICON.undo, "undo");
-  var bRedo = mk(segEdit, "sl-t", ICON.redo, "redo");
+  var bUndo = mk(segEdit, "sl-t sl-icon-only", '<span class="sl-i">' + ICON.undo + '</span>', "undo");
+  var bRedo = mk(segEdit, "sl-t sl-icon-only", '<span class="sl-i">' + ICON.redo + '</span>', "redo");
 
-  var bMore = mk(bar, "sl-more", ICON.more, "more");
+  var bMore = mk(bar, "sl-more", '<span class="sl-i">' + ICON.more + '</span>'
+                                 + '<span class="sl-w">More</span>', "pages, zoom, paper");
   var savedTag = el("span", "sl-saved", "saved");
   bar.appendChild(savedTag);
   var bSend = mk(bar, "sl-send", "Send", "hand this page to the tutor");
@@ -180,10 +191,10 @@ function create(opts) {
     return box;
   }
   var rPages = menuRow("Page");
-  var bPrev = mk(rPages, "sl-t", ICON.prev, "previous");
+  var bPrev = mk(rPages, "sl-t sl-icon-only", '<span class="sl-i">' + ICON.prev + '</span>', "previous");
   var pageTag = el("span", "sl-tag", "1/1");
   rPages.appendChild(pageTag);
-  var bNext = mk(rPages, "sl-t", ICON.next, "next");
+  var bNext = mk(rPages, "sl-t sl-icon-only", '<span class="sl-i">' + ICON.next + '</span>', "next");
   var bAdd = mk(rPages, "sl-t", "+", "new page");
   var bTaller = mk(rPages, "sl-t", "↕", "taller");
 
@@ -232,9 +243,18 @@ function create(opts) {
   var toastEl = el("div", "sl-toast");
   toastEl.hidden = true;
 
-  root.appendChild(bar);
-  root.appendChild(menu);
-  root.appendChild(selbar);
+  if (barHost) {
+    barHost.innerHTML = "";
+    barHost.appendChild(bar);
+    barHost.appendChild(menu);
+    barHost.appendChild(selbar);
+    barHost.hidden = false;
+    root.classList.add("sl-bare");
+  } else {
+    root.appendChild(bar);
+    root.appendChild(menu);
+    root.appendChild(selbar);
+  }
   root.appendChild(wrap);
   root.appendChild(toastEl);
 
@@ -271,6 +291,7 @@ function create(opts) {
 
   function fitPage() {
     var p = page();
+    if (!p || !wrap.clientWidth) return;
     view.fit = Math.min((wrap.clientWidth - 12) / p.w, (wrap.clientHeight - 12) / p.h);
     view.k = view.fit;
     var w = p.w * view.k, h = p.h * view.k;
@@ -281,7 +302,9 @@ function create(opts) {
   }
 
   function clampView() {
-    var p = page(), m = 60;
+    var p = page();
+    if (!p) return;
+    var m = 60;
     view.ox = Math.min(wrap.clientWidth - m, Math.max(m - p.w * view.k, view.ox));
     view.oy = Math.min(wrap.clientHeight - m, Math.max(m - p.h * view.k, view.oy));
   }
@@ -302,7 +325,15 @@ function create(opts) {
 
   function layout() {
     var w = wrap.clientWidth, h = wrap.clientHeight;
-    if (!w || !h) return;
+    if (!w || !h) {
+      /* Mounted before the box had a size. Try again on the next frame rather
+         than leaving a 300x150 default canvas nobody can draw on. */
+      if (!layout.retry) {
+        layout.retry = true;
+        requestAnimationFrame(function () { layout.retry = false; layout(); fitPage(); });
+      }
+      return;
+    }
     sheet.style.width = w + "px";
     sheet.style.height = h + "px";
     sheet.width = Math.round(w * dpr());
@@ -825,18 +856,40 @@ function create(opts) {
   window.addEventListener("resize", function () { layout(); fitPage(); });
   window.addEventListener("beforeunload", function () { if (dirty) save(false); });
 
+  /* Usable immediately. The old order was to wait for /slate/state before
+     creating the first page, which meant that until the network answered there
+     was no page, no sized canvas, and every stroke threw on its way out --
+     silently, because a pointer handler that throws just does nothing. A slow
+     link or a failed request was indistinguishable from a surface that does not
+     work. */
+  pages = [blankPage()];
+  current = 0;
+  layout();
+  fitPage();
+
   fetch("/slate/state").then(function (r) { return r.json(); }).then(function (d) {
-    pages = (d.pages || []).filter(function (p) { return p && p.w && p.h; });
-    if (!pages.length) pages = [blankPage()];
-    current = pages.length - 1;
-    layout(); fitPage();
+    var saved = (d.pages || []).filter(function (p) { return p && p.w && p.h; });
+    if (!saved.length) return;
+    /* Only adopt saved pages if nothing has been drawn in the meantime --
+       whatever is under the pen wins over whatever the server remembered. */
+    if (pages.length === 1 && !pages[0].strokes.length) {
+      pages = saved;
+      current = pages.length - 1;
+      layout();
+      fitPage();
+    }
     savedTag.textContent = "saved";
-  }).catch(function () {
-    pages = [blankPage()];
-    layout(); fitPage();
-  });
+  }).catch(function () { /* offline is fine; the page still works */ });
 
   api.relayout = function () { layout(); fitPage(); };
+  api.bar = barHost || bar;
+  /* Enough of the innards for a test to prove that a stroke actually landed.
+     Everything about this component is invisible to assertions otherwise. */
+  api.debug = function () {
+    return { strokes: page() ? page().strokes.length : -1,
+             drawing: !!drawing, w: sheet.width, h: sheet.height,
+             pages: pages.length, k: view.k };
+  };
   api.save = save;
   api.root = root;
   return api;

@@ -66,40 +66,47 @@ for (const [htmlName, cssName] of PAIRS) {
 }
 
 
-// --- the writing panel must never be usable-looking but unusable -----------
+// --- the answer block must never be usable-looking but unusable -----------
 // It shipped once collapsed to a handle, which sized its canvas to 0x0: the
-// toolbar and Send were clipped away and touches fell through to the lesson
-// behind. Both halves of that are checked here.
+// controls were clipped away and touches fell through to the lesson behind.
+// It then shipped depending on a network round trip before it had a page at
+// all, so a slow link produced a surface that silently swallowed every stroke.
 {
   const boardCss = fs.readFileSync(path.join(WEB, 'board.css'), 'utf8');
   const slateCss = fs.readFileSync(path.join(WEB, 'slate.css'), 'utf8');
   const boardJs = fs.readFileSync(path.join(WEB, 'board.js'), 'utf8');
+  const coreJs = fs.readFileSync(path.join(WEB, 'slate-core.js'), 'utf8');
 
-  const wr = /#writer\s*\{[^}]*\}/.exec(boardCss);
-  if (wr && /min-height:\s*(\d+(\.\d+)?)rem/.test(wr[0])) {
-    const rem = parseFloat(/min-height:\s*(\d+(\.\d+)?)rem/.exec(wr[0])[1]);
-    rem >= 12 ? console.log('ok   writer panel has a usable minimum height')
-              : (fails++, console.log('FAIL writer min-height is only ' + rem + 'rem'));
-  } else {
-    fails++; console.log('FAIL #writer declares no min-height — it can collapse to nothing');
-  }
+  // A definite, generous height that does not depend on anyone dragging.
+  /#writer\s+#slate\s*\{[^}]*height:\s*clamp\(\s*(\d+(?:\.\d+)?)rem/.test(boardCss)
+    ? (parseFloat(/#writer\s+#slate\s*\{[^}]*height:\s*clamp\(\s*(\d+(?:\.\d+)?)rem/.exec(boardCss)[1]) >= 18
+        ? console.log('ok   the answer block has a usable minimum height')
+        : (fails++, console.log('FAIL the answer block can be too short to write in')))
+    : (fails++, console.log('FAIL the answer block has no definite height'));
 
-  /^(?!.*data-open).*$/.test(boardJs) || true;
-  /showWriter\(/.test(boardJs)
-    ? console.log('ok   the panel is opened by the board, not by the user dragging')
-    : (fails++, console.log('FAIL nothing opens the writing panel automatically'));
+  /placeWriter\(/.test(boardJs)
+    ? console.log('ok   the block is placed by the board, not found by the user')
+    : (fails++, console.log('FAIL nothing places the answer block automatically'));
+
+  /insertBefore\(els\.writer/.test(boardJs)
+    ? console.log('ok   it is moved into the lesson flow under its question')
+    : (fails++, console.log('FAIL the block is not put into the card flow'));
+
+  // Usable before the network answers.
+  /pages = \[blankPage\(\)\];\s*\n\s*current = 0;\s*\n\s*layout\(\);/.test(coreJs)
+    ? console.log('ok   there is a page to draw on before any fetch resolves')
+    : (fails++, console.log('FAIL the surface waits on the network before it can be drawn on'));
 
   /\.sl-wrap\s*\{[^}]*touch-action:\s*none/.test(slateCss)
     ? console.log('ok   the whole writing surface opts out of page gestures')
     : (fails++, console.log('FAIL only the canvas opts out — a near-miss touch scrolls the page'));
 
-  /\.slate-root\s*\{[^}]*touch-action:\s*none/.test(slateCss)
-    ? console.log('ok   the panel itself does not scroll the lesson behind it')
-    : (fails++, console.log('FAIL the panel does not contain its own gestures'));
-
-  /class="sl-send"|"sl-send"/.test(fs.readFileSync(path.join(WEB, 'slate-core.js'), 'utf8'))
-    ? console.log('ok   a Send control exists')
-    : (fails++, console.log('FAIL no Send control'));
+  // Every control says what it is.
+  ['Pen', 'Marker', 'Erase', 'Select', 'Send'].forEach(function (w) {
+    coreJs.indexOf('"' + w + '"') !== -1 || coreJs.indexOf('>' + w + '<') !== -1
+      ? console.log('ok   labelled control: ' + w)
+      : (fails++, console.log('FAIL no label for ' + w));
+  });
 }
 
 console.log(fails ? '\n' + fails + ' FAILURES' : '\nall hidden-element checks passed');

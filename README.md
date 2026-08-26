@@ -478,10 +478,14 @@ after that is instant. Blank lines inside a fence are stripped, because a blank 
 
 ## The slate — writing by hand
 
-The writing surface is **docked under the lesson**, not on a separate page. A question raises a
-drawer at the bottom of the board; drag its handle to the height you want, and the card you are
-answering stays on screen while you answer it. `/slate` is the same component full-screen, for a
-derivation that wants the whole page.
+The writing surface is **part of the lesson**, not a panel over it. A question puts an answer
+block into the card flow directly beneath itself, always the same generous size, and the drawing
+tools appear in the page's own chrome bar beside the type-size and theme buttons — they belong to
+the app rather than floating on top of it. Nothing to drag, nothing to discover, nothing covered. `/slate` is the same component full-screen, for a derivation that wants the whole page.
+
+Every control is named — Pen, Marker, Erase, Select — because an icon alone was not legible, and a
+control you cannot identify is worse than no control. Labels drop on narrow screens in the order
+that costs least: nib sizes first, the four tools last.
 
 Strokes are captured as pointer events with pressure. Once a pen has been seen, finger touches
 stop drawing, which is the whole of palm rejection.
@@ -883,6 +887,8 @@ node test/hidden.js      that `hidden` elements are actually hidden
 node test/pages.js       every page's script runs against its own markup
 node test/modes.js       that math mode has no text box and code mode does
 node test/typeface.js    that the reading face reaches prose and never the maths
+node test/interactive.js drives the real board in a real DOM and writes on it
+                         (needs `npm install jsdom`; skips without it)
 python3 tools/sync-macros.py --check   that TeX and KaTeX know the same commands
 ./install.sh             re-runs the environment check
 board doctor

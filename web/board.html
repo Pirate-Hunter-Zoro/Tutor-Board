@@ -16,6 +16,8 @@
 <link rel="stylesheet" href="/static/typeface.css">
 <link rel="stylesheet" href="/static/katex/katex.min.css">
 <link rel="stylesheet" href="/static/board.css">
+<!-- the drawing controls live in this page now, so they need their styles -->
+<link rel="stylesheet" href="/static/slate.css">
 <script src="/static/typeface.js" defer></script>
 </head>
 <!-- face is applied before anything paints -->
@@ -42,6 +44,9 @@
     <button id="btn-print" title="print or save as PDF">⎙</button>
   </div>
 </header>
+
+<!-- The drawing tools live in the page chrome, not floating over the lesson. -->
+<div id="drawbar" hidden></div>
 
 <!-- End of session. Asked here, because the person answering is on an iPad. -->
 <div id="finish" class="finish" hidden>
@@ -86,10 +91,12 @@
      question, so what you are answering stays on screen. -->
 <!-- Maths: answering means writing, and the writing happens here, opened for
      you the moment an answer is owed. Nothing to drag, nothing to find. -->
+<!-- Sits in the lesson, directly under the question it answers. Moved into
+     place by board.js after each render; never covers anything. -->
 <section id="writer" hidden>
   <div id="writer-head">
-    <span id="writer-label">✎ Your answer</span>
-    <button id="writer-hide" type="button" title="hide while you read">hide</button>
+    <span id="writer-label">Your answer</span>
+    <span id="writer-hint">write below, then Send</span>
   </div>
   <div id="slate"></div>
 </section>
