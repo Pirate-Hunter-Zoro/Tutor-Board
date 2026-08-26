@@ -61,6 +61,12 @@ Read `README.md` first.
 - **The service worker caches the shell and nothing live.** SSE, the board payload, uploads,
   slate saves, and figures go to the network every time. A cached lesson is a stale lesson, which
   is worse than a blank screen. Bump `VERSION` in `sw.js` whenever a shell file changes.
+- **The identity does not move to the Mac mini; the proxy does.** Between cluster nodes the
+  tailnet identity `board` moves, and that works because they share one home directory and one
+  ownership record. An always-on Mac shares neither, and runs the system Tailscale as its own node
+  besides. So the always-on host keeps `board` permanently and re-points `tailscale serve` at
+  whichever machine is actually serving. Do not try to make the identity migrate across that
+  boundary; the reasoning and the work list are in the README under "Not yet built".
 - **The tailnet address must never depend on the machine.** The node registers as `board`, not
   as the compute host, and its state lives in the shared home so the identity follows the user
   from node to node. The installed iPad app has one origin baked into it; changing that address

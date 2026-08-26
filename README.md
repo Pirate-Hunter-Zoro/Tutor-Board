@@ -77,7 +77,13 @@ push with no assistant attribution; Tailscale in userspace mode with HTTPS; the 
 - *macOS.* The platform paths in `boardlib.py`, `bootstrap.sh` and the LaunchAgent are written from
   documentation, not from a Mac.
 - *Headless mode.* `tutor headless` has never been run against a real agent end to end. The
-  `headless` recipes in the config are best guesses at each tool's non-interactive flags.
+  `headless` recipes in the config are best guesses at each tool's non-interactive flags. The
+  wrap-up turn that writes `HANDOFF.md` rides on that path and is equally unexercised.
+- *Always-on hosting.* There is no machine that is awake when the cluster allocation is not, so
+  the iPad can only reach a board while a session is already running somewhere. The plan for
+  fixing that is written up under
+  [Not yet built](#not-yet-built-always-on-with-the-compute-node-preferred) and is waiting on a
+  Mac mini to exist.
 
 ### Things that broke, and must not break again
 
@@ -380,29 +386,97 @@ a merge, and a session that refuses to start is worse than a session that starts
 
 ### Not yet built: always-on, with the compute node preferred
 
-The intended shape, once there is a Mac mini at home to be the always-on host:
+**The goal.** Open the app on the iPad, pick a course, get a session. No command anywhere, ever.
+The board runs on the compute node when there is one, because that is where the data and the
+hardware are, and on the Mac mini the rest of the time, because it is the machine that is always
+awake. Nothing about this should ever be visible to the person holding the iPad.
 
-- **The Mac mini holds the board by default.** It runs the headless daemon under its LaunchAgent
-  (`scripts/install-autostart.sh`), so the tailnet name always answers and the iPad app always has
-  something to open. Nothing to start, nothing to remember.
-- **A compute node takes over when there is one.** Starting work on a node claims the tailnet
-  identity, and the address the iPad is installed against now resolves there — nearer the data,
-  with the cluster's hardware.
-- **The Mac mini reclaims when the allocation ends.** The ownership record already carries the node
-  name and is already treated as stale when that node is no longer held; what does not exist yet is
-  anything that *watches* for that and takes the name back.
+Nothing here can be written blind — it needs the Mac mini to exist — so this is the work list.
 
-Two things make this harder than it sounds, and both are why it is not written yet:
+#### The design decision, and why the obvious one is wrong
 
-1. **Only one machine may hold the tailnet identity at a time.** The node key is shared through the
-   home directory; two daemons clawing at it is the failure this is designed to avoid. A handover
-   has to be a handover, not a race.
-2. **A takeover has to be polite.** A compute node claiming the name while the Mac mini is mid-push
-   should ask it to finish, exactly as switching course asks the outgoing assistant to write its
-   handoff.
+The obvious approach is that the tailnet identity `board` *moves*: whichever machine is serving
+claims it, the way it moves between compute nodes today. **That does not extend to the Mac mini,
+for two reasons that are worth writing down before someone rediscovers them:**
 
-None of it can be built blind. It needs the Mac mini to exist, and it needs to be tested with a
-real allocation ending under a real session.
+1. **The ownership record is not visible from home.** `owner.json` lives under
+   `~/.local/state/tailscale/`, and cluster nodes only agree about who holds the identity because
+   they share one home directory. The Mac mini shares nothing with them. The entire arbitration
+   mechanism is invisible across that boundary.
+2. **macOS runs its own Tailscale.** `boardlib.tailscale_cli()` returns `"system"` there: an app,
+   already signed in, already a node under its own name, with no daemon for the board to start and
+   no socket to point at the shared state. It cannot also be `board` in userspace mode, and it must
+   not be made to fight the system one.
+
+So invert it. **The Mac mini holds `board` permanently and proxies.**
+
+- The Mac mini is the tailnet node called `board`, always, and serves HTTPS on it. The identity
+  never moves, so there is no key to claw at, no race, and nothing to reclaim.
+- A compute node keeps its *own* ordinary tailnet name — not `board`.
+- When a compute node is serving, the Mac mini re-points its proxy target at that node over the
+  tailnet instead of at its own localhost. `tailscale serve --bg --https=443
+  http://<node>:<port>` is the same call `ts_repoint` already makes; only the target changes from
+  loopback to a tailnet address.
+- When the node's allocation ends, the Mac mini points the proxy back at itself.
+
+The iPad's single baked-in origin never changes and never needs to. The invariant holds by
+construction rather than by arbitration.
+
+#### On the Mac mini, once
+
+1. Install Tailscale from the App Store or tailscale.com, sign in, and rename that node to
+   **`board`** in the admin console. Enable HTTPS certificates for the tailnet if that was never
+   done (admin console → DNS → HTTPS Certificates).
+2. Clone this tool and the course repositories side by side, so `courses_dir` finds them.
+3. `bash install.sh`, then `board doctor` until it is quiet. Expect TeX to be the slow part —
+   TinyTeX plus the packages the diagram pipeline needs.
+4. In each course clone, `git config core.hooksPath .githooks` — or just let
+   `scripts/save-and-push.sh` do it on the first push. Make sure git can push without a prompt;
+   the scripts set `GIT_TERMINAL_PROMPT=0` deliberately and will fail rather than hang.
+5. Write `~/.config/tutor-board/config.json` with a `hosts` entry mapping the Mac mini's short
+   hostname to the assistant it should use there, and an `agents` entry whose `cmd` carries the
+   model — the DeepSeek-through-opencode recipe. Nothing in the code knows what a model is; this
+   is the only place it appears.
+6. `bash scripts/install-autostart.sh <course>` to register the LaunchAgent, so the daemon returns
+   after a reboot without anyone logging in.
+7. Confirm the platform assumptions that were **written from documentation and never run on a
+   Mac**: the paths in `boardlib.py` and `bootstrap.sh`, and the LaunchAgent plist itself.
+
+#### What has to be written
+
+- **`board vpn serve --to <host:port>`** — teach `ts_repoint` a target that is not loopback. It
+  currently hardcodes `http://127.0.0.1:<port>`; everything else about the call is already right.
+- **A follower loop on the always-on host.** Periodically: is a compute node serving a board for
+  this user? If yes and the proxy does not point there, re-point. If no and it does not point at
+  localhost, point it home. This is the only genuinely new process, and it belongs beside the
+  LaunchAgent, not inside `serve.py`.
+- **How a compute node announces itself.** It has a tailnet name and a port; the follower needs to
+  learn both. Cheapest honest answer: the node writes its name and port into the shared home —
+  where `.board.json` already records node and port per course — and the follower reads it, since
+  every cluster node shares that home even though the Mac mini does not. The Mac mini cannot read
+  the cluster's home, so this has to travel another way: either the node pushes a tiny record to
+  the git remote, or the follower probes `/health` on candidate node names over the tailnet. **The
+  probe is preferable** — no commits, no staleness, and `/health` already exists and already
+  reports the repository root.
+- **Politeness on takeover.** Before the proxy moves, the outgoing board should be told, so the
+  assistant attached to it writes its handoff instead of being cut off mid-lesson. `tutor agent
+  stop` already does exactly this over `SIGTERM`; what is missing is an authenticated way for one
+  machine to ask another to run it. A `/handover` endpoint restricted to the tailnet, plus a shared
+  secret in the config, is the smallest thing that works.
+- **`board doctor` should say which shape this machine is** — always-on host, or compute node —
+  because every diagnosis below depends on it and guessing from the hostname is how this gets
+  subtly wrong.
+
+#### What only real hardware can settle
+
+- Whether the iPad app's SSE stream reconnects cleanly when the proxy target moves underneath it,
+  or whether it needs a nudge. The service worker caches the shell and nothing live, so the risk is
+  a hung stream rather than a stale lesson.
+- How long a reclaim actually takes after an allocation dies, and whether that gap is short enough
+  to be invisible or wants a "reconnecting" state on the board.
+- Whether `tailscale serve` on macOS accepts a tailnet address as its proxy target as readily as it
+  accepts loopback.
+- Everything in the macOS list above that is currently inference.
 
 ### Why there is no registry
 
