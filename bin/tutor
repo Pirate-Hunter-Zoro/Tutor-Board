@@ -727,20 +727,34 @@ def cmd_restart(cfg, args):
             held.append("%s (mid-turn)" % c["dir"])
             continue
         name = st.get("agent")
+        was = st.get("pid")
         try:
-            os.kill(st["pid"], _sig.SIGTERM)
+            os.kill(was, _sig.SIGTERM)
         except OSError:
             pass
-        # The wrap-up turn a SIGTERM starts writes HANDOFF.md, and the next
-        # tutor reads it -- so waiting for the record to clear is waiting for
-        # the continuity to be written, not merely for a process to die.
-        for _ in range(60):
+        # The wrap-up turn a SIGTERM starts writes HANDOFF.md, and the next tutor
+        # reads it -- so waiting for the record to clear is waiting for the
+        # continuity to be written, not merely for a process to die. It is one
+        # turn, and a turn can take minutes, so this does not wait for ever.
+        gone = False
+        for _ in range(90):
             if not agent_live(c["root"]):
+                gone = True
                 break
             time.sleep(1.0)
+        if not gone:
+            # `agent_start` answers "already listening" here and answers it with
+            # a success code, which is how this came to report a restart it had
+            # not performed. Say what actually happened.
+            held.append("%s (still writing its handoff; run this again in a"
+                        " minute)" % c["dir"])
+            continue
         code, msg = agent_start(cfg, c, name)
-        (bounced if code == 0 else held).append(
-            c["dir"] if code == 0 else "%s (%s)" % (c["dir"], msg))
+        now = agent_live(c["root"]) or {}
+        if code == 0 and now.get("pid") and now["pid"] != was:
+            bounced.append(c["dir"])
+        else:
+            held.append("%s (%s)" % (c["dir"], msg.strip() or "did not come back"))
 
     if bounced:
         print("tutors restarted: %s" % ", ".join(bounced))

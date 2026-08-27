@@ -57,6 +57,13 @@ which kind of subject it is and the board adapts.
 >    depends on it reading an assignment PDF. It read one tonight, so it works — but that is one
 >    observation, not a check.
 >
+> 8. **`tutor restart --tutors` on a busy daemon.** It now refuses to claim a restart it did
+>    not perform — the first run of `ship.sh` reported "tutors restarted: Probability" while the
+>    old process was still writing its handoff, because `agent_start` answers "already
+>    listening" with a success code. Fixed by comparing pids; worth watching once.
+> 9. **Galois Theory has no tutor attached** as of tonight — its daemon was stopped earlier and
+>    never came back. `tutor headless galois` starts one.
+>
 > **What was learned tonight that is worth not relearning:** a board is a process and holds old
 > code (hence `scripts/ship.sh`); a headless agent with no `.claude/settings.local.json` reads,
 > thinks, composes a whole card and writes nothing; five of the visual defects were invisible to

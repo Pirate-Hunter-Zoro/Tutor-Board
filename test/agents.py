@@ -260,6 +260,10 @@ check("and restarts nothing when the push failed",
       "nothing has been restarted" in ship_src)
 check("a tutor mid-turn is not bounced out of the card it is writing",
       "mid-turn" in tool_src)
+check("a restart that did not happen is not reported as one",
+      "did not come back" in tool_src and 'now["pid"] != was' in tool_src)
+check("and a tutor still writing its handoff is said to be, not claimed restarted",
+      "still writing its handoff" in tool_src)
 check("and stopping one waits for its handoff to be written",
       "agent_live(c[\"root\"])" in tool_src)
 
