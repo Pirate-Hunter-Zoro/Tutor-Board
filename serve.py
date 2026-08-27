@@ -1434,10 +1434,20 @@ class Handler(BaseHTTPRequestHandler):
             # The tutor wrote this card and can read it back off disk, so what it
             # needs from here is which card was marked, roughly where, and the
             # ink itself.
-            msg["text"] = ("[annotation] they wrote on your card %s%s. Open the image, "
-                           "read what they marked, and answer it against that card's own "
-                           "text in live/cards/."
-                           % (card, (", " + record["where"]) if record["where"] else ""))
+            # Marks on the card that is currently asking are an answer, and the
+            # tutor has to be told that rather than left to infer it -- a card
+            # that asked the student to decide something gets marks back, and
+            # "they wrote on your card" reads like a passing note.
+            answering_now = (card == newest_question(repo))
+            msg["text"] = ("[annotation] %s card %s%s. Open the image, read what "
+                           "they marked, and answer it against that card's own "
+                           "text in live/cards/.%s"
+                           % ("this is their ANSWER to your question on"
+                              if answering_now else "they wrote on your",
+                              card,
+                              (", " + record["where"]) if record["where"] else "",
+                              " Treat it as the answer to that question."
+                              if answering_now else ""))
             msg["slate"] = os.path.join(repo.answers, base + ".png")
             with open(repo.messages_path, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(msg) + "\n")

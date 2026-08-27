@@ -331,6 +331,38 @@ body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180de
 }
 .figure.error { color: var(--bad); border-color: var(--bad); }
 
+/* ---------- answering a question in a code project ---------- */
+#codeanswer {
+  margin: 0 0 2.1rem;
+  border: 1px solid var(--rule);
+  border-radius: .5rem;
+  background: color-mix(in srgb, var(--ask) 6%, var(--paper));
+  padding: .7rem .9rem;
+  font-family: var(--ui);
+}
+#codeanswer-head {
+  display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap;
+  margin-bottom: .6rem;
+}
+#codeanswer-label { font-weight: 600; font-size: .92rem; }
+#codeanswer-hint { color: var(--ink-3); font-size: .8rem; }
+#codeanswer-head #codeanswer-skip {
+  margin-left: auto; flex: none;
+  font: inherit; font-size: .78rem;
+  background: transparent; color: var(--ink-3);
+  border: 1px solid var(--rule); border-radius: .35rem;
+  padding: .2rem .55rem;
+}
+#codeanswer-acts { display: flex; gap: .5rem; flex-wrap: wrap; }
+#codeanswer-acts button {
+  font: inherit; font-size: .88rem;
+  padding: .45rem .8rem; border-radius: .4rem;
+  border: 1px solid var(--rule); background: var(--paper); color: var(--ink);
+}
+#codeanswer-acts button.primary {
+  background: var(--ask); border-color: var(--ask); color: #fff;
+}
+
 /* ---------- student messages echoed on the board ---------- */
 .mine {
   margin: 0 0 1.4rem auto;

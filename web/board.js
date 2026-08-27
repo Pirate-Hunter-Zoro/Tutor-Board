@@ -69,6 +69,11 @@ var els = {
   pushed: document.getElementById("pushed"),
   pushedIcon: document.getElementById("pushed-icon"),
   pushedText: document.getElementById("pushed-text"),
+  codeanswer: document.getElementById("codeanswer"),
+  codeanswerInk: document.getElementById("codeanswer-ink"),
+  codeanswerType: document.getElementById("codeanswer-type"),
+  codeanswerSkip: document.getElementById("codeanswer-skip"),
+  codeanswerHint: document.getElementById("codeanswer-hint"),
   composer: document.getElementById("composer"),
   composerRow: document.getElementById("composer-row"),
   say: document.getElementById("say"),
@@ -696,9 +701,10 @@ function render(data) {
   /* A sent answer keeps the block open, because the tutor's next move is usually
      to point at a mistake in it. A declined one does the opposite: the whole
      point of skipping is that the prompt goes away. */
-  if (newestQ && (data.turns || []).some(function (t) {
-        return t.signal === "skip" && t.answers === newestQ;
-      })) {
+  var skipped = !!newestQ && (data.turns || []).some(function (t) {
+    return t.signal === "skip" && t.answers === newestQ;
+  });
+  if (skipped) {
     pinnedTo = null;
     owed = false;
   }
@@ -730,6 +736,11 @@ function render(data) {
   /* A past lesson is read only: no pen, no box, nothing to send into a session
      that has already been filed. */
   placeWriter(owed && !data.archived, qNode);
+  /* A question in a code project owes an answer just as much as one in a maths
+     course; what differs is how it is given. `owed` stays false there because it
+     governs the writing surface, so this is decided separately. */
+  placeCodeAnswer(codeMode && !!newestQ && !settled && !skipped && !data.archived,
+                  qNode, newestQ);
   paintComposer(codeMode && !data.archived, data);
   /* KaTeX walks the DOM it is handed. Handing it the whole lesson every frame
      re-renders mathematics that was already rendered; hand it only what was
@@ -1243,8 +1254,51 @@ function paintNotesSend() {
   var any = haveNotes();
   var owedSurface = !els.writer.hidden;
   els.notesend.hidden = !(any && !owedSurface);
+  /* Marks on the card that is asking are an ANSWER, and the button should say
+     so -- otherwise sending them reads like filing a note rather than replying,
+     which is exactly the doubt that sends somebody looking for a text box. */
+  var answeringNow = els.codeanswer && !els.codeanswer.hidden
+                     && window.Annotate
+                     && window.Annotate.marked().indexOf(els.codeanswer.dataset.card) !== -1;
+  els.notesend.textContent = answeringNow ? "send my annotations as my answer"
+                                          : "send my annotations";
+  els.notesend.classList.toggle("answering", !!answeringNow);
 }
 
+
+if (els.codeanswerInk) {
+  els.codeanswerInk.onclick = function () {
+    if (window.Annotate && !window.Annotate.isOn()) {
+      var btn = document.getElementById("btn-annotate");
+      if (btn && btn.onclick) btn.onclick();
+      else window.Annotate.setOn(true);
+    }
+    var card = els.codeanswer.dataset.card;
+    var node = card && document.querySelector('[data-card="' + card + '"]');
+    if (node && node.scrollIntoView) node.scrollIntoView({ block: "start" });
+    paintNotesSend();
+  };
+}
+
+if (els.codeanswerType) {
+  els.codeanswerType.onclick = function () {
+    /* The row, with no signal attached: this is an answer, not a cry for help. */
+    els.composerRow.hidden = false;
+    els.composerRow.dataset.signal = "";
+    var box = document.getElementById("say");
+    if (box) {
+      box.placeholder = "your answer";
+      box.focus();
+    }
+  };
+}
+
+if (els.codeanswerSkip) {
+  els.codeanswerSkip.onclick = function () {
+    els.codeanswerSkip.disabled = true;
+    say("skip");        /* anchored by `answering.question`, like any turn */
+  };
+}
 
 /* --------------------------------------------------- something to save yet? */
 /* Leaving is silent. An app is swiped away, a lid closes, a lesson is put down
@@ -1563,6 +1617,30 @@ var loadedTurn = null;
 
 var SIGNAL_LABEL = { done: "ready to check", help: "needs help", confused: "confused",
                      begin: "asked the tutor to begin", skip: "skipped this one" };
+
+/* The answer block for a code project.
+
+   The three signals are pace control -- ready to check, I need help, I'm
+   confused -- and not one of them is "here is my answer". The text row is shut
+   until help or confused is picked. So a card that asked the student to decide
+   something gave them nowhere to say what they had decided, and the only route
+   was a terminal, which is the ceremony this whole tool exists to remove.
+
+   Two ways, because the question decides which is easier: write on the card
+   itself, which is how you answer *about a place* in it, or type, which is how
+   you answer in sentences. */
+function placeCodeAnswer(owed, questionNode, card) {
+  if (!els.codeanswer) return;
+  els.codeanswer.hidden = !owed;
+  if (!owed) return;
+  els.codeanswer.dataset.card = card || "";
+  if (questionNode && questionNode.nextSibling !== els.codeanswer) {
+    questionNode.parentNode.insertBefore(els.codeanswer, questionNode.nextSibling);
+  } else if (!questionNode && els.codeanswer.parentNode !== els.cards) {
+    els.cards.appendChild(els.codeanswer);
+  }
+  paintNotesSend();
+}
 
 function placeWriter(owed, questionNode) {
   els.writer.hidden = !owed;

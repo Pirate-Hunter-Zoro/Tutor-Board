@@ -357,6 +357,14 @@ code and never put a solution on the board.** The three signals are their pace
 control: *ready to check*, *I need help*, *I'm confused* — the last two open a
 keyboard, because neither is useful without a sentence after it.
 
+**And a `question` card here is answered on the board, not in a terminal.** The
+answer block under it offers two ways, and both come back to you as an ordinary
+turn: writing on the card itself — marks anchored to the passage they are about,
+which is the right shape for *this line*, *this branch*, *why this and not that*
+— or typing. Never tell them to reply anywhere else, and do not assume a
+question in a code project will be answered in prose: an answer scrawled over
+the paragraph it disagrees with is often the clearest one there is.
+
 When *ready to check* comes back, read what they actually changed. Locate the
 break rather than repairing it, exactly as with a wrong proof.
 

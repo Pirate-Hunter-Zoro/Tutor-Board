@@ -35,7 +35,7 @@ if ! node -e "require('jsdom')" >/dev/null 2>&1; then
   echo
 fi
 
-SUITES="markdown macros hidden chrome theme pages modes typeface export interactive sizing link"
+SUITES="markdown macros hidden chrome theme pages modes typeface export interactive answer sizing link"
 fails=0
 skipped=0
 
