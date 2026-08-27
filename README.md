@@ -149,6 +149,8 @@ these tests fail, the test is right.
 | The save's label wrapped onto a second line in a crowded bar, making the button taller than its row, so it painted over the agent chip and the button beside it | `test/chrome.js` |
 | In dark mode a cream band filled the bottom of the screen: `<html>` painted `var(--paper)`, which resolves from `:root` and is therefore always the light value, while the dark palette is scoped to `<body>` | `test/theme.js` |
 | A board with no assistant attached looked exactly like one with an assistant: the chip simply hid itself, so a tap went into an inbox nobody was reading | `test/link.js` |
+| A login hook resumed the wrong course and then kept resuming it: the course was chosen by `live/.board.json` mtime, but `board stop` *deletes* that record, so the course you had just stopped became invisible — and starting the wrong one touched its files, which made it the most recent one next time too | `test/resume.py` |
+| The test for all of that wrote its temporary course names into the real `~/.config/tutor-board/` | `test/resume.py` isolates the config for the whole run |
 | The login-hook installer ran the commands inside its own comment: the block is written through an unquoted heredoc, so a backtick in a comment is a command substitution, and installing it executed `tutor resume` and pasted the output into the file | `test/resume.py` |
 | The app opened on a blank white screen after the serving machine's allocation ended: the worker's last-resort fallback was `caches.match("/")`, which resolves to `undefined` when nothing is cached there, and resolving `respondWith` with `undefined` is a network error — so the board's own "cannot reach the board" banner never ran, because nothing ran | `test/offline.js` |
 | A pen drag over a card started a native text selection: the card turned blue, the browser took the gesture, and the stroke died until a tap elsewhere cleared it — the slate page had refused selection from the start, the lesson never did | `test/link.js` |
@@ -361,8 +363,20 @@ tutor resume --no-agent      the board, and you drive the tutor yourself
 tutor resume --force         move it even from a node that is still alive
 ```
 
-It brings the link up, starts the board for the course whose board ran most recently, re-points
-the tailnet name, and attaches a tutor. What it is careful about is when *not* to act:
+It brings the link up, starts the board for the course you were last in, re-points the tailnet
+name, and attaches a tutor.
+
+**Which course** is the newer of two signals: when you last *named* one (`tutor galois`,
+`tutor headless galois`, `tutor resume galois` — recorded in
+`~/.config/tutor-board/chosen.json`) and when a course was last *worked in* (the newest of
+`live/.board.json`, `state.json`, `turns.jsonl` and `cards/`). Neither alone is enough. File times
+alone cannot tell a course you chose from one a login hook happened to start — and since starting a
+course touches its files, a hook that resumed the wrong one would go on resuming it for ever,
+quietly. A name alone is no better: one given last week should not beat an afternoon spent
+elsewhere. This is not a registry of courses; those are still whatever directories are sitting
+there. It records a decision, which is the one thing the filesystem cannot tell you.
+
+What it is careful about is when *not* to act:
 
 - a board already running here is left alone — only the tailnet name is re-checked, since a second
   board on this node moves it;

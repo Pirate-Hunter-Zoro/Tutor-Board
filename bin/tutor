@@ -877,22 +877,85 @@ def cmd_restart(cfg, args):
     return 0
 
 
-def last_board(cfg):
-    """The course whose board ran most recently, on any node.
+# What "you were working here" looks like on disk. Several signals, because no
+# single one survives everything:
+#
+#   .board.json  a board is running, or was killed without being stopped --
+#                but `board stop` DELETES it, so a cleanly stopped course has
+#                none at all;
+#   state.json   the session: course, chapter, kind. Written by `board open`
+#                and updated through the sitting, and never removed;
+#   turns.jsonl  the student's own contributions, appended as they answer;
+#   cards        the tutor's, written as it teaches.
+#
+# Taking the newest of these was the fix for a real mistake: the first version
+# looked only at `.board.json`, so stopping the board you were using made that
+# course invisible and the next login resumed a DIFFERENT one -- quietly, since
+# a login hook runs with --quiet, and the tailnet name moved with it.
+LIVE_SIGNS = (".board.json", "state.json", "turns.jsonl", "cards")
 
-    Discovered, not registered: `live/.board.json` is written every time a board
-    starts, so the newest one is the course you were last working in. Nothing new
-    to keep in step, and nothing that can go stale in a way that matters -- the
-    worst case is bringing back the course you used before the one you meant.
-    """
-    best = None
-    for c in courses(cfg):
-        path = os.path.join(c["root"], "live", ".board.json")
+
+def last_used(root):
+    """When this course was last worked in, as far as disk can say. 0 if never."""
+    best = 0
+    for rel in LIVE_SIGNS:
         try:
-            when = os.path.getmtime(path)
+            best = max(best, os.path.getmtime(os.path.join(root, "live", rel)))
         except OSError:
             continue
-        if not best or when > best[0]:
+    return best
+
+
+CHOSEN = os.path.join(CONFIG_DIR, "chosen.json")
+
+
+def remember_course(course):
+    """Note that a PERSON chose this course, and when.
+
+    Not a registry: courses are still whatever directories are sitting there.
+    This records a *decision*, which is a different thing and cannot be derived
+    from the filesystem -- because resuming a course touches its files too, so
+    "most recently used" is self-reinforcing. A hook that resumed the wrong
+    course once would go on resuming it for ever, quietly, taking the tailnet
+    name with it every time. Naming one is how you say otherwise.
+    """
+    try:
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        tmp = CHOSEN + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"dir": course["dir"], "root": course["root"],
+                       "at": time.time()}, fh)
+        os.replace(tmp, CHOSEN)
+    except OSError:
+        pass                      # a note, not a requirement
+
+
+def chosen_course(cfg):
+    """(when, course) for the last course a person named, if it still exists."""
+    try:
+        with open(CHOSEN, "r", encoding="utf-8") as fh:
+            rec = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    for c in courses(cfg):
+        if c["root"] == rec.get("root") or c["dir"] == rec.get("dir"):
+            return (rec.get("at") or 0, c)
+    return None                   # named once, since deleted or renamed
+
+
+def last_board(cfg):
+    """The course to bring back.
+
+    Two signals, and the newer one wins: when a person last named a course, and
+    when a course was last worked in. Neither alone is enough -- a name given a
+    week ago should not beat an afternoon spent in another course, and file times
+    alone cannot tell a course you chose from one a login hook happened to
+    start.
+    """
+    best = chosen_course(cfg)
+    for c in courses(cfg):
+        when = last_used(c["root"])
+        if when and (not best or when > best[0]):
             best = (when, c)
     return best[1] if best else None
 
@@ -934,6 +997,9 @@ def cmd_resume(cfg, args):
     if not course:
         say("no board has ever run in %s; start one with: tutor" % cfg["courses_dir"])
         return 0
+
+    if rest:
+        remember_course(course)        # named on the command line: a decision
 
     root = course["root"]
     info = board_record(root) or {}
@@ -1098,6 +1164,7 @@ def main(argv):
             return headless_stop(cfg, rest)
         found = courses(cfg)
         course = pick(found, rest[0]) if rest else choose(found)
+        remember_course(course)
         return headless(cfg, course, resolve_agent(cfg, course, flags["agent"]),
                         flags["session"])
 
@@ -1106,6 +1173,7 @@ def main(argv):
         print("no courses under %s" % cfg["courses_dir"], file=sys.stderr)
         return 1
     course = pick(found, args[0]) if args else choose(found)
+    remember_course(course)
 
     # --- catch up ----------------------------------------------------------
     print("\n%s" % (course.get("name") or course["dir"]))

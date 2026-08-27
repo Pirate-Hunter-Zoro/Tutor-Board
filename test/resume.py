@@ -50,6 +50,14 @@ def check(name, cond):
 tmp = tempfile.mkdtemp(prefix="tutor-resume-")
 calls = {"start": [], "link": [], "agent": [], "sync": []}
 
+# Nothing here may touch the config of whoever is running it. `cmd_resume`
+# records a course that was named on the command line, and this file names one
+# in nearly every case -- the first version of this test wrote its temporary
+# course names into a real ~/.config/tutor-board/chosen.json.
+conf = tempfile.mkdtemp(prefix="tutor-resume-conf-")
+tutor.CONFIG_DIR = conf
+tutor.CHOSEN = os.path.join(conf, "chosen.json")
+
 
 def make_course(name, node=None, pid=1, when=None):
     root = os.path.join(tmp, name)
@@ -79,6 +87,57 @@ try:
     picked = tutor.last_board(cfg)
     check("the most recently started board is the one to bring back",
           picked and picked["dir"] == "Newer")
+
+    # `board stop` DELETES .board.json. A course you stopped cleanly is the one
+    # you were most likely just using, and looking only at that record made it
+    # invisible -- so the next login quietly resumed a different course and took
+    # the tailnet name with it. Found by stopping a board and watching the wrong
+    # one come back.
+    stopped = os.path.join(tmp, "Stopped")
+    os.makedirs(os.path.join(stopped, "live", "cards"), exist_ok=True)
+    with open(os.path.join(stopped, "tutorboard.json"), "w", encoding="utf-8") as fh:
+        json.dump({"name": "Stopped", "mode": "math"}, fh)
+    with open(os.path.join(stopped, "live", "state.json"), "w", encoding="utf-8") as fh:
+        json.dump({"course": "Stopped", "session": "lecture"}, fh)
+    os.utime(os.path.join(stopped, "live", "state.json"), (20000, 20000))
+    picked = tutor.last_board(cfg)
+    check("a course whose board was stopped cleanly is still the one you were in",
+          picked and picked["dir"] == "Stopped")
+    shutil.rmtree(stopped)
+
+    # A course nobody has ever opened is not a candidate, whatever else is there.
+    check("and a course with nothing in its live/ is never picked",
+          tutor.last_used(os.path.join(tmp, "NeverRan")) == 0)
+
+    # Naming a course is a decision, and it has to outrank file times -- because
+    # resuming a course TOUCHES its files, so "most recently used" is
+    # self-reinforcing. Resume the wrong one once and it goes on being the most
+    # recently used one for ever, quietly, taking the tailnet name each time.
+    # That is not hypothetical: it happened, twice in a row, on a live board.
+    try:
+        check("with nothing named, the newest files decide",
+              tutor.last_board(cfg)["dir"] == "Newer")
+        tutor.remember_course({"dir": "Older", "root": os.path.join(tmp, "Older")})
+        check("a course named just now beats one used an hour ago",
+              tutor.last_board(cfg)["dir"] == "Older")
+        # ...but not for ever: an afternoon in another course is newer than a
+        # name given last week.
+        import json as _json
+        rec = _json.load(open(tutor.CHOSEN))
+        rec["at"] = 500
+        _json.dump(rec, open(tutor.CHOSEN, "w"))
+        check("and an old name does not outrank a course worked in since",
+              tutor.last_board(cfg)["dir"] == "Newer")
+        # A name pointing at something that is no longer there is ignored.
+        _json.dump({"dir": "Deleted", "root": "/nowhere", "at": 9e9},
+                   open(tutor.CHOSEN, "w"))
+        check("a name pointing at a course that no longer exists is ignored",
+              tutor.last_board(cfg)["dir"] == "Newer")
+    finally:
+        try:
+            os.remove(tutor.CHOSEN)      # back to "nothing has been named"
+        except OSError:
+            pass
 
     # --- stubs: nothing here may actually start a process -------------------
     def fake_board(root, *args):
@@ -129,6 +188,12 @@ try:
           calls["start"] == ["Newer"] and not calls["agent"])
 
     # --- already serving here: the common case, and it must be cheap --------
+    # No course named: this is the no-argument path a login hook takes. The
+    # cases above named one, and naming one is remembered, so clear it.
+    try:
+        os.remove(tutor.CHOSEN)
+    except OSError:
+        pass
     boardlib.board_is_running = lambda pid, root: True
     make_course("Here", node="compute301", pid=33, when=9500)
     reset()
@@ -233,6 +298,7 @@ try:
         shutil.rmtree(home, ignore_errors=True)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
+    shutil.rmtree(conf, ignore_errors=True)
 
 print()
 print("%d FAILURES" % len(fails) if fails
