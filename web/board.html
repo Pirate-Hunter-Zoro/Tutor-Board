@@ -46,6 +46,7 @@
     <button id="btn-face" title="typeface">Aa</button>
     <button id="btn-theme" title="light / dark / auto">◐</button>
     <button id="btn-reload" title="reload the app">↻</button>
+    <button id="btn-contents" title="chapters, problem sets and past lessons">☰</button>
     <button id="btn-history" title="past lessons" hidden>◷</button>
     <button id="btn-scratch" title="photos and PDFs">▤</button>
     <button id="btn-print" title="print or save as PDF">⎙</button>
@@ -181,6 +182,20 @@
   </div>
   <div id="history-list"></div>
   <div class="scratch-foot muted">Read only. The lesson you are in is on the board.</div>
+</aside>
+
+<!-- What this course is made of, and the way to any part of it. Chapters and
+     problem sets are discovered from the repository itself; past lessons are
+     what has already been filed. A course with none of the three -- a code
+     repository -- gets its sections as it goes. -->
+<aside id="contents" hidden>
+  <div class="scratch-head">
+    <strong>Contents</strong>
+    <button id="btn-contents-close">✕</button>
+  </div>
+  <div id="contents-list"></div>
+  <div class="scratch-foot muted">Opening one files the lesson you are in — it stays
+    readable under ◷.</div>
 </aside>
 
 <div id="reading" class="reading" hidden>

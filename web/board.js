@@ -51,6 +51,8 @@ var els = {
   kindLecture: document.getElementById("kind-lecture"),
   kindSets: document.getElementById("kind-sets"),
   kindCancel: document.getElementById("kind-cancel"),
+  contents: document.getElementById("contents"),
+  contentsList: document.getElementById("contents-list"),
   agent: document.getElementById("agent"),
   finish: document.getElementById("finish"),
   finishLead: document.getElementById("finish-lead"),
@@ -593,6 +595,8 @@ function render(data) {
   paintNotesSend();
   paintSave(data.unsaved);
   if (data.sets) knownSets = data.sets;
+  if (data.contents) contents = data.contents;
+  pastCount = data.history || 0;
 
   var codeMode = (state.mode || "math") === "code";
   document.body.dataset.mode2 = state.mode || "math";
@@ -1276,12 +1280,12 @@ function paintKindChooser() {
 
 var currentSet = null;
 
-function setSitting(kind, name) {
+function setSitting(kind, name, chapter) {
   els.kind.hidden = true;
   fetch("/session", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session: kind, hw: name || null })
+    body: JSON.stringify({ session: kind, hw: name || null, chapter: chapter || null })
   }).catch(function () { /* the payload will say what actually happened */ });
 }
 
@@ -1291,6 +1295,104 @@ els.session.onclick = function () {
 };
 els.kindLecture.onclick = function () { setSitting("lecture"); };
 els.kindCancel.onclick = function () { els.kind.hidden = true; };
+
+
+/* --------------------------------------------------------------- contents */
+/* A course is chapters and problem sets, and until now the board showed neither:
+   the only way to a different chapter was somebody typing `board open` in a
+   terminal. Everything listed here is discovered from the repository itself, so
+   there is no index to keep in step and nothing that can go stale.
+
+   Opening one files the current lesson away whole -- cards, turns and answers
+   together -- so what is being left stays readable under the history button
+   rather than being written over by what comes next. */
+var contents = { chapters: [], sets: [] };
+var pastCount = 0;
+
+function row(label, sub, current, go) {
+  var b = document.createElement("button");
+  b.type = "button";
+  b.textContent = label;
+  if (sub) {
+    var s2 = document.createElement("span");
+    s2.className = "sub";
+    s2.textContent = "  " + sub;
+    b.appendChild(s2);
+  }
+  if (current) b.classList.add("here");
+  b.onclick = go;
+  return b;
+}
+
+function group(title) {
+  var d = document.createElement("div");
+  d.className = "group";
+  d.textContent = title;
+  return d;
+}
+
+function openContents() {
+  var host = els.contentsList;
+  host.innerHTML = "";
+  var codeMode = document.body.dataset.mode2 === "code";
+  var here = (lastLive && lastLive.state && lastLive.state.chapter) || "";
+
+  if (contents.chapters.length) {
+    host.appendChild(group("Chapters"));
+    contents.chapters.forEach(function (c) {
+      host.appendChild(row(c.label, "", c.label === here, function () {
+        els.contents.hidden = true;
+        setSitting("lecture", null, c.label);
+      }));
+    });
+  }
+
+  if (contents.sets.length) {
+    host.appendChild(group("Problem sets"));
+    contents.sets.forEach(function (x) {
+      host.appendChild(row(x.name, x.rel, currentSet === x.name, function () {
+        els.contents.hidden = true;
+        setSitting("homework", x.name);
+      }));
+    });
+  }
+
+  if (!contents.chapters.length && !contents.sets.length) {
+    /* A code repository has neither, and gets its sections as it goes: a
+       section there is a piece of work that got committed, which is what
+       `board push` marks. */
+    host.appendChild(group(codeMode ? "Sections" : "This course"));
+    var p = document.createElement("p");
+    p.className = "none";
+    p.textContent = codeMode
+      ? "Sections here are made as you go: each piece of work that gets committed "
+        + "is filed as one, and stays readable under ◷."
+      : "No chapters or problem sets found in this repository.";
+    host.appendChild(p);
+  }
+
+  host.appendChild(group("Past lessons"));
+  if (pastCount > 0) {
+    host.appendChild(row("open the history", pastCount + " filed", false, function () {
+      els.contents.hidden = true;
+      openHistory();
+    }));
+  } else {
+    var q = document.createElement("p");
+    q.className = "none";
+    q.textContent = "Nothing filed yet.";
+    host.appendChild(q);
+  }
+
+  els.contents.hidden = false;
+}
+
+document.getElementById("btn-contents").onclick = function () {
+  if (els.contents.hidden) openContents(); else els.contents.hidden = true;
+};
+document.getElementById("btn-contents-close").onclick = function () {
+  els.contents.hidden = true;
+};
 
 /* ------------------------------------------------------------------ stream */
 var source = null;

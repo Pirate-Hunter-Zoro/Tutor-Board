@@ -147,6 +147,15 @@ Read `README.md` first.
   sitting is woken with the path to its assignment sheet and told the problems are not its to
   choose — the one thing that differs from a lecture. Do not let a homework prompt inherit the
   lecture's "pick a manageable few".
+- **A board is a process, and processes hold old code.** `serve.py` is read once, at start, so a
+  change to this repository reaches a course only when its board restarts — while the pages,
+  served from disk, already look new. `scripts/save-and-push.sh` runs `tutor restart` after a
+  successful push for exactly that reason. Restart only boards answering on this node; a record
+  on the shared home may be another machine's.
+- **A course is navigable from the board.** Chapters and problem sets are discovered, listed
+  under ☰, and opening one goes through `board open` so the lesson being left is archived whole
+  rather than written over. Do not add a registry of chapters; `chapters.tsv` and the chapter
+  directories are the source of truth, and a code repository correctly has neither.
 - **A writing prompt must be declinable.** Teaching is explain, then ask for an example — and a
   prompt that cannot be refused is a prompt that gets answered badly to make it go away. The answer
   block carries *skip this one* in its own header, so it dies with the block. A skip is a turn: in

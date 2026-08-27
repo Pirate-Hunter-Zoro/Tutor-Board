@@ -719,6 +719,26 @@ retype their own proof teaches nothing.
 
 The kind shows as a badge on the board, so there is never a question about which sitting this is.
 
+### Getting around a course
+
+**☰** in the title bar opens the contents: every chapter the course has, every problem set,
+and the way back to what has already been filed. Tapping a chapter opens a lecture there;
+tapping a set opens a homework sitting bound to it. The chapter you are in is marked.
+
+Nothing here is registered. Chapters come from the course's own `chapters.tsv` or its
+`chapters/chNN-*/` directories, problem sets from the two layouts described below — the same
+discovery everything else uses, so there is no index to maintain and nothing that can go
+stale. Galois Theory offers 20 chapters and 20 sets; Probability offers 11 and 3.
+
+**Opening one files the lesson you are in** — cards, turns and answers together — so what you
+leave stays readable under **◷** rather than being written over by what comes next. Jumping
+around a course is therefore free: go to chapter 7, come back to chapter 2, and chapter 2's
+lesson is still there with your own working in it.
+
+A code repository has neither chapters nor problem sets, and is not told it is broken: its
+sections are made as it goes. Each piece of work that gets committed is filed as one, which
+is what `board push` marks there.
+
 ### Switching between a lecture and homework
 
 The **LECTURE / HOMEWORK** badge in the title bar is the control. Tap it, and it offers
@@ -875,6 +895,24 @@ Everything below is optional, and each item buys something specific.
 7. **Somewhere for finished work** — a `handwritten/` folder, a `notes/` directory, whatever fits.
    The board hands the assistant a path to each slate page; where it should be filed afterwards is
    the repository's business, and `AI_INSTRUCTIONS.md` is where you say so.
+
+### Changing the tool restarts the boards
+
+A board is a long-lived process that read `serve.py` when it started, so a change to this
+repository does not reach a course until its board comes back. The pages are served from disk
+and look new while the endpoints behind them are still the old ones — a difference that is
+invisible from the outside and costs an evening to find. It cost one here.
+
+So this repository's `scripts/save-and-push.sh` runs `tutor restart` after a successful push:
+
+```
+tutor restart        restart every board running on this machine, on the current code
+```
+
+It only touches boards that are genuinely answering **on this node** — a record on a shared
+filesystem may belong to another machine, and stopping a stranger's process is worse than
+leaving a stale one. A course pushing its own work does not do this; only the tool does. A
+failed restart never fails the push.
 
 ## Commands
 

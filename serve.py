@@ -561,6 +561,27 @@ def repo_dirty(repo):
     return value
 
 
+def load_contents(repo):
+    """What this course is made of, so the board can offer a way around it.
+
+    Everything here is discovered, not registered: the chapter table or the
+    chapter directories, the problem sets, and the lessons already filed. A
+    course that is not a book simply has no chapters, and says so by returning
+    none rather than by inventing a chapter one.
+    """
+    try:
+        chapters = [{"num": c.get("num"), "label": syllabus.label(c)}
+                    for c in syllabus.chapters(repo.root)][:60]
+    except Exception:
+        chapters = []
+    try:
+        sets = [{"name": x["name"], "rel": x["rel"]}
+                for x in homework.sets(repo.root)][:60]
+    except Exception:
+        sets = []
+    return {"chapters": chapters, "sets": sets}
+
+
 def load_push(repo):
     """The outcome of the last push, so the iPad can see it without a terminal."""
     try:
@@ -940,6 +961,7 @@ class Hub:
             data["sets"] = [x["name"] for x in homework.sets(self.repo.root)][:40]
         except Exception:
             data["sets"] = []
+        data["contents"] = load_contents(self.repo)
         return data
 
     def poll_loop(self):
@@ -1242,6 +1264,22 @@ class Handler(BaseHTTPRequestHandler):
             if kind not in ("lecture", "homework"):
                 return self.send_json({"ok": False, "error": "bad session"}, status=400)
             want = (payload.get("hw") or "").strip()
+            chapter = (payload.get("chapter") or "").strip()
+
+            # Moving to a different chapter is starting a different lesson, and
+            # `board open` is what starts one: it files the current lesson away
+            # whole -- cards, turns and answers together -- so the one being left
+            # is still readable under the history button rather than being
+            # overwritten by the next.
+            if chapter:
+                known = [syllabus.label(c) for c in syllabus.chapters(repo.root)]
+                if chapter not in known:
+                    return self.send_json({"ok": False, "error": "no such chapter"},
+                                          status=400)
+                course = repo.state().get("course") or read_config(repo.root)["name"] or ""
+                board_cli(repo.root, ["open", course, chapter,
+                                      "--lecture" if kind == "lecture" else "--homework"])
+
             st = repo.state()
             st["session"] = kind
             if kind == "homework":
@@ -1252,6 +1290,12 @@ class Handler(BaseHTTPRequestHandler):
                 if want and not chosen:
                     return self.send_json({"ok": False, "error": "no such set"}, status=400)
                 if chosen:
+                    if not chapter and st.get("hw") != chosen["rel"]:
+                        course = st.get("course") or read_config(repo.root)["name"] or ""
+                        board_cli(repo.root, ["open", course, chosen["name"],
+                                              "--homework", "--set", chosen["name"]])
+                        st = repo.state()
+                        st["session"] = kind
                     st["hw"] = chosen["rel"]
                     st["chapter"] = chosen["name"]
             else:

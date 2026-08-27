@@ -238,6 +238,26 @@ check("and it does not touch the local work",
 
 shutil.rmtree(sandbox, ignore_errors=True)
 
+# --- restarting every board on this machine ----------------------------------
+# A board read serve.py when it started, so a change to the tool reaches a course
+# only when its board comes back. The pages are served from disk and look new
+# while the endpoints behind them are the old ones -- invisible from outside.
+import subprocess as _sp
+tool_src = open(os.path.join(ROOT, "bin", "tutor"), encoding="utf-8").read()
+check("there is a command to restart every board here",
+      "def cmd_restart(" in tool_src)
+check("and it refuses to touch a board belonging to another node",
+      'info["node"] != host' in tool_src)
+check("and only ones that are genuinely answering",
+      "board_is_running" in tool_src)
+
+push_src = open(os.path.join(ROOT, "scripts", "save-and-push.sh"), encoding="utf-8").read()
+check("pushing the tool restarts the boards it drives", "tutor restart" in push_src)
+check("but a course pushing its own work does not",
+      'Tutor-Board' in push_src and 'show-toplevel' in push_src)
+check("and a failure to restart does not fail the push",
+      "|| echo" in push_src)
+
 print()
 print("%d FAILURES" % len(fails) if fails else "the assistant follows the course")
 sys.exit(1 if fails else 0)

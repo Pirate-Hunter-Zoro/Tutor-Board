@@ -69,4 +69,20 @@ if [ $status -ne 0 ]; then
 fi
 
 echo "pushed $branch to origin"
+
+# A board is a long-lived process that read serve.py when it started, so a change
+# to this tool does not reach a course until its board comes back. The pages are
+# served from disk and look new while the endpoints behind them are still the old
+# ones -- a difference that is invisible from the outside and costs an evening to
+# find. So changing the tool restarts the boards it drives.
+#
+# Only this repository's push does this: a course pushing its own work has no
+# business bouncing anybody's board.
+if [ "$(basename "$(git rev-parse --show-toplevel)")" = "Tutor-Board" ]; then
+  if command -v tutor >/dev/null 2>&1; then
+    echo
+    tutor restart || echo "  (boards could not be restarted; run 'tutor restart' by hand)"
+  fi
+fi
+
 exit 0

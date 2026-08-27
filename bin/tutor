@@ -13,6 +13,7 @@ tutor -- start a tutoring session.
     tutor agent start galois    attach one there, detaching whatever was elsewhere
     tutor agent stop galois     ask it to write its handoff and go
     tutor where                 what is up, on this machine and on the tailnet
+    tutor restart               restart every board here, on the current code
 
 One command, from anywhere. It finds the course, brings its board up, opens a
 session, and launches whichever assistant you use -- already pointed at the
@@ -647,6 +648,50 @@ def headless(cfg, course, agent_name, session):
     return 0
 
 
+def cmd_restart(cfg, args):
+    """Restart every board running on this machine, on the current code.
+
+    A board is a long-lived process that read `serve.py` when it started, so a
+    change to this tool reaches a course only when its board comes back. That is
+    invisible from the outside: the pages are served from disk and look new while
+    the endpoints behind them are still the old ones, which is exactly the sort of
+    difference somebody spends an evening not finding.
+
+    Only boards that are actually answering on this node are touched -- a record
+    on a shared filesystem may belong to another machine, and stopping a stranger's
+    process is worse than leaving a stale one.
+    """
+    import boardlib
+    host = this_host()
+    touched, skipped = [], []
+    for c in courses(cfg):
+        live = os.path.join(c["root"], "live")
+        try:
+            with open(os.path.join(live, ".board.json"), "r", encoding="utf-8") as fh:
+                info = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if info.get("node") and info["node"] != host:
+            skipped.append("%s (on %s)" % (c["dir"], info["node"]))
+            continue
+        if not boardlib.board_is_running(info.get("pid"), c["root"]):
+            continue
+        board(c["root"], "stop")
+        code, out = board(c["root"], "start")
+        if code == 0:
+            touched.append(c["dir"])
+        else:
+            skipped.append("%s (%s)" % (c["dir"], out.strip().splitlines()[-1:] or "failed"))
+
+    if touched:
+        print("restarted: %s" % ", ".join(touched))
+    else:
+        print("no boards were running on %s" % host)
+    for s2 in skipped:
+        print("  left alone: %s" % s2)
+    return 0
+
+
 def cmd_where(cfg, args):
     """What is up, and whether anything is listening."""
     host = os.uname().nodename.split(".")[0]
@@ -726,6 +771,9 @@ def main(argv):
         else:
             args.append(a)
         i += 1
+
+    if args and args[0] in ("restart", "restart-boards"):
+        return cmd_restart(cfg, args[1:])
 
     if args and args[0] == "where":
         return cmd_where(cfg, args[1:])

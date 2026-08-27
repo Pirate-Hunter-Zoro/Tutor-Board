@@ -701,3 +701,23 @@ body.tools-out .annbar { bottom: calc(5.6rem + env(safe-area-inset-bottom)); }
 #kind-sets button.on, #kind-lecture.on {
   background: var(--note); border-color: var(--note); color: #fff; font-weight: 600;
 }
+
+/* The contents panel borrows the drawer the scratch list already uses. */
+#contents { }
+#contents-list .group {
+  font-family: var(--ui); font-size: .66rem; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3);
+  margin: .9rem 0 .35rem;
+}
+#contents-list .group:first-child { margin-top: .2rem; }
+#contents-list button {
+  display: block; width: 100%; text-align: left;
+  font: inherit; font-family: var(--ui); font-size: .82rem;
+  padding: .5rem .6rem; margin-bottom: .25rem; cursor: pointer;
+  border: 1px solid var(--rule); border-radius: .4rem;
+  background: var(--paper); color: var(--ink);
+}
+#contents-list button:hover { background: var(--paper-2); }
+#contents-list button.here { border-color: var(--note); font-weight: 650; }
+#contents-list button .sub { color: var(--ink-3); font-weight: 400; }
+#contents-list .none { color: var(--ink-3); font-size: .82rem; }

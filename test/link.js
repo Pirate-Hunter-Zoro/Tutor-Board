@@ -506,6 +506,64 @@ if (es) {
   else fail('the sitting chooser cannot be dismissed');
 }
 
+// A course is chapters and problem sets, and the board showed neither: the only
+// way to a different chapter was somebody typing `board open` in a terminal.
+if (es) {
+  var panel = doc.getElementById('contents');
+  var opener = doc.getElementById('btn-contents');
+  var frame = {
+    state: { course: 'G', session: 'lecture', mode: 'math',
+             chapter: 'Ch 02 — Rings' },
+    cards: [], turns: [], messages: [], uploads: [], slate: [], push: null,
+    agent: { agent: 'claude', state: 'listening' },
+    history: 3,
+    sets: ['ch01', 'ch02'],
+    contents: { chapters: [{ num: '01', label: 'Ch 01 — Groups' },
+                           { num: '02', label: 'Ch 02 — Rings' }],
+                sets: [{ name: 'ch01', rel: 'chapters/ch01/homework/a.tex' },
+                       { name: 'ch02', rel: 'chapters/ch02/homework/b.tex' }] },
+  };
+  es.onmessage({ data: JSON.stringify(frame) });
+
+  if (opener && panel.hidden) ok('the contents opener is there and closed');
+  else fail('no way into the contents, or it is up unasked');
+
+  opener.onclick();
+  var text = doc.getElementById('contents-list').textContent;
+  if (/Ch 01 — Groups/.test(text) && /Ch 02 — Rings/.test(text))
+    ok('every chapter the course has is listed');
+  else fail('chapters are not offered: ' + text.slice(0, 90));
+  if (/Problem sets/.test(text) && /ch01/.test(text))
+    ok('and its problem sets beside them');
+  else fail('problem sets are not offered');
+  if (/Past lessons/.test(text) && /3 filed/.test(text))
+    ok('and the way back to what is already filed');
+  else fail('past lessons are not reachable from the contents');
+
+  var hereBtn = Array.prototype.filter.call(
+    doc.querySelectorAll('#contents-list button'),
+    function (b) { return /Ch 02/.test(b.textContent); })[0];
+  if (hereBtn && /here/.test(hereBtn.className))
+    ok('and the chapter you are in is marked as such');
+  else fail('there is no way to tell which chapter you are in');
+
+  doc.getElementById('btn-contents-close').onclick();
+  if (panel.hidden) ok('the panel closes');
+  else fail('the contents panel cannot be closed');
+
+  // A code repository has neither chapters nor sets, and must not be told it is
+  // broken -- its sections are made as it goes.
+  es.onmessage({ data: JSON.stringify(Object.assign({}, frame, {
+    state: { course: 'TRD', session: 'lecture', mode: 'code' },
+    history: 0, contents: { chapters: [], sets: [] } })) });
+  opener.onclick();
+  var text2 = doc.getElementById('contents-list').textContent;
+  if (/Sections/.test(text2) && /as you go/.test(text2))
+    ok('a code course is told its sections are made as it goes');
+  else fail('a code course gets an empty or wrong contents: ' + text2.slice(0, 90));
+  doc.getElementById('btn-contents-close').onclick();
+}
+
 // The return offer is on a short timer, so it is checked after the fact.
 if (es) {
   setTimeout(function () {
