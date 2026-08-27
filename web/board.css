@@ -202,6 +202,24 @@ canvas.ann-layer {
   z-index: 2;
 }
 body.annotating canvas.ann-layer { pointer-events: auto; }
+
+/* While annotating, the lesson is a surface to write on and not text to select.
+   Without this the pen drags a native selection instead: the card turns blue,
+   the browser owns the gesture from that moment, and the pointer stream stops
+   reaching the canvas -- so the ink dies mid-stroke and does not come back until
+   a tap somewhere else clears the selection. The slate page has had these three
+   lines from the beginning; the lesson never got them, because until annotate
+   mode existed there was nothing to write on here.
+
+   Only while annotating: selecting and copying a definition out of a card is
+   worth having every other second of the day. */
+body.annotating .card,
+body.annotating .card * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: none;
+}
 body.annotating .card {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--ask) 35%, transparent);
   border-radius: .4rem;

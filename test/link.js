@@ -448,6 +448,57 @@ if (es && window.Annotate) {
                        + worst.toFixed(1) + 'px of 24)');
     else fail('the raw samples are drawn as they arrive: ' + worst.toFixed(1)
               + 'px spike survives, which is the jagged line');
+    // Lag. A fixed smoothing weight makes the ink trail the nib on a quick
+    // mark: at 20px a sample and 30% trust, the line settles about 45px behind
+    // the pen and only catches up when you stop. The trust now slides with
+    // speed, so a fast stroke ends where the pen ended.
+    window.Annotate.clear('0003');
+    ink('pointerdown', 40, 60, 0.5);
+    for (var f = 1; f <= 10; f++) ink('pointermove', 40 + f * 20, 60, 0.5);
+    ink('pointerup', 240, 60, 0.5);
+    var fast = window.Annotate.payload('0003').strokes.pop();
+    var endX = fast ? fast.p[fast.p.length - 2] * W : 0;
+    if (Math.abs(endX - 240) < 12)
+      ok('a quick mark ends where the pen ended (' + endX.toFixed(0) + 'px of 240)');
+    else fail('the ink trails the pen by ' + (240 - endX).toFixed(0)
+              + 'px on a fast stroke — smoothing is lagging it');
+    window.Annotate.clear('0003');
+
+    // The blue flash: a pen drag over a card used to start a native text
+    // selection. The moment it does, the browser owns the gesture, the pointer
+    // stream stops reaching the canvas, and the ink dies mid-stroke until a tap
+    // somewhere else clears it. The slate page has always refused selection;
+    // the lesson never did, because until annotate mode there was nothing to
+    // write on here.
+    if (/body\.annotating[^{]*\.card[^{]*\{[^}]*user-select:\s*none/.test(css3))
+      ok('the lesson refuses to be selected while annotating');
+    else fail('a pen drag over a card can start a text selection, which kills '
+              + 'the stroke and turns the card blue');
+
+    window.Annotate.setOn(true);
+    var sel1 = new window.Event('selectstart', { bubbles: true, cancelable: true });
+    card.dispatchEvent(sel1);
+    if (sel1.defaultPrevented) ok('and a selection that starts anyway is refused');
+    else fail('selectstart is not prevented while annotating');
+
+    window.Annotate.setOn(false);
+    var sel2 = new window.Event('selectstart', { bubbles: true, cancelable: true });
+    card.dispatchEvent(sel2);
+    if (!sel2.defaultPrevented) ok('while ordinary reading still selects and copies');
+    else fail('the lesson can no longer be selected at all');
+    window.Annotate.setOn(true);
+
+    // A card grows after it is laid out -- a figure compiles, KaTeX lands, the
+    // type size changes. If the layer does not grow with it, the bottom of the
+    // card is bare: a pen landing there hits prose, and the stroke is lost.
+    var grew = { left: 0, top: 0, width: W, height: 400, right: W, bottom: 400 };
+    card.getBoundingClientRect = function () { return grew; };
+    window.Annotate.redrawAll();
+    if (parseFloat(layer.style.height || '0') >= 400)
+      ok('the ink layer grows with the card, so no part of it is left bare');
+    else fail('the layer stayed at its old height (' + layer.style.height
+              + '); the bottom of a grown card is not writable');
+
     window.Annotate.clear('0003');
     window.Annotate.setOn(false);
   }

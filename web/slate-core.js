@@ -28,7 +28,14 @@ var AUTOSAVE_MS = 1200;
 var LIVE_IDLE_MS = 3000;
 var LIVE_MIN_GAP_MS = 15000;
 var UNDO_DEPTH = 60;
-var SMOOTH = 0.30;          /* how much of each new sample to trust */
+var SMOOTH = 0.30;          /* how much of each new sample to trust, at rest */
+/* ...and how fast the pen has to be moving, in logical units per sample, before
+   it is trusted completely. Smoothing buys steadiness by lagging the nib, and a
+   fixed amount of it is wrong at both ends: at a crawl the hand's tremor is the
+   whole signal and wants heavy averaging, while in a quick stroke the samples
+   are far apart, carry little relative jitter, and the lag is the only thing you
+   notice -- the ink visibly trails the pen. So the trust slides with speed. */
+var TRACK = 8;
 var RESAMPLE = 0.8;         /* logical units between rendered points */
 var MIN_STEP = 0.5;         /* how far the pen must travel to record a point */
 var POLISH = 2;             /* smoothing passes over a finished stroke */
@@ -100,6 +107,13 @@ function densify(pts) {
    which pulls out hand tremor while leaving the endpoints and the overall shape
    exactly where they were put. Pressure is averaged with it, so the width stops
    flickering along a line that was drawn at a steady weight. */
+/* How much of a new sample to believe, given how far it is from where the line
+   has got to. */
+function trust(dist) {
+  if (dist >= TRACK) return 1;
+  return SMOOTH + (1 - SMOOTH) * (dist / TRACK);
+}
+
 function polish(pts, passes) {
   if (pts.length < 4) return pts;
   var cur = pts;
@@ -526,12 +540,31 @@ function create(opts) {
       c.restore();
       return;
     }
-    for (var i = Math.max(1, from || 1); i < pts.length; i++) {
-      var a = pts[i - 1], b = pts[i];
-      c.lineWidth = s.hl ? base : base * (0.5 + 0.85 * ((a[2] + b[2]) / 2));
+    /* Segments of the same width go into ONE path. The curve is resampled to
+       about a pixel -- that density is what makes it read as smooth -- so
+       stroking each segment separately is a draw call per pixel of line,
+       hundreds a frame while writing. Pressure moves slowly, so consecutive
+       segments almost always land in the same quarter-pixel of width, and a
+       round join inside one path is the same ink as the round caps two separate
+       segments had. A highlighter has one width along its whole length and so
+       becomes a single path -- which also stops it blotching, since the caps
+       used to overlap and multiply into each other at every joint. */
+    var wOf = function (a, b) {
+      return s.hl ? base
+                  : Math.round(base * (0.5 + 0.85 * ((a[2] + b[2]) / 2)) * 4) / 4;
+    };
+    var i = Math.max(1, from || 1);
+    while (i < pts.length) {
+      var w = wOf(pts[i - 1], pts[i]);
+      c.lineWidth = w;
       c.beginPath();
-      c.moveTo(a[0], a[1]);
-      c.lineTo(b[0], b[1]);
+      c.moveTo(pts[i - 1][0], pts[i - 1][1]);
+      c.lineTo(pts[i][0], pts[i][1]);
+      i++;
+      while (i < pts.length && wOf(pts[i - 1], pts[i]) === w) {
+        c.lineTo(pts[i][0], pts[i][1]);
+        i++;
+      }
       c.stroke();
     }
     c.restore();
@@ -741,8 +774,11 @@ function create(opts) {
       var raw = toLogical(evs[i]);
       /* Trust each new sample only partly. Pointer data is noisy, and the
          jitter is exactly what reads as a granular line. */
-      drawing._sx += (raw.x - drawing._sx) * SMOOTH;
-      drawing._sy += (raw.y - drawing._sy) * SMOOTH;
+      var a = trust(Math.hypot(raw.x - drawing._sx, raw.y - drawing._sy));
+      drawing._sx += (raw.x - drawing._sx) * a;
+      drawing._sy += (raw.y - drawing._sy) * a;
+      /* Pressure is always smoothed hard: it is noisy, and nobody perceives it
+         as lag. */
       drawing._sp += (raw.p - drawing._sp) * 0.3;
       var last = drawing.pts[drawing.pts.length - 1];
       if (Math.hypot(drawing._sx - last[0], drawing._sy - last[1]) < MIN_STEP) continue;
@@ -1177,6 +1213,8 @@ window.Slate = {
     polish: polish,
     catmullRom: catmullRom,
     SMOOTH: SMOOTH,
+    TRACK: TRACK,
+    trust: trust,
     RESAMPLE: RESAMPLE,
     MIN_STEP: MIN_STEP,
     POLISH: POLISH,

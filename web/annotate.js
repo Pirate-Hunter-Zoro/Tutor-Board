@@ -44,6 +44,7 @@ var PAD = 12;
    exists not to have. */
 var ink = (window.Slate && window.Slate.ink) || null;
 var SMOOTH = ink ? ink.SMOOTH : 0.3;
+var trust = (ink && ink.trust) || function () { return SMOOTH; };
 var MIN_STEP = ink ? ink.MIN_STEP : 0.5;
 var RESAMPLE = ink ? ink.RESAMPLE : 0.8;
 var POLISH = ink ? ink.POLISH : 2;
@@ -131,13 +132,32 @@ function paint(ctx, s, dense, colour, scale) {
   paintFrom(ctx, dense, 1, base);
 }
 
+/* Segments that come out the same width are drawn as ONE polyline.
+
+   The curve is resampled to about a pixel, which is what makes it read as
+   smooth -- but stroking each of those segments as its own path is a draw call
+   per pixel of stroke, hundreds of them a frame, and that is a real cost on a
+   tablet. Pressure changes slowly, so consecutive segments almost always land in
+   the same quarter-pixel of width; batching them cuts the draw calls by an order
+   of magnitude and paints the same shape, because a round join between two
+   segments of one path is the same ink as the round caps they had apart. */
+function widthAt(a, b, base) {
+  return Math.round(base * (0.65 + 0.7 * ((a[2] + b[2]) / 2)) * 4) / 4;
+}
+
 function paintFrom(ctx, dense, from, base) {
-  for (var i = Math.max(1, from); i < dense.length; i++) {
-    var a = dense[i - 1], b = dense[i];
-    ctx.lineWidth = base * (0.65 + 0.7 * ((a[2] + b[2]) / 2));
+  var i = Math.max(1, from);
+  while (i < dense.length) {
+    var w = widthAt(dense[i - 1], dense[i], base);
+    ctx.lineWidth = w;
     ctx.beginPath();
-    ctx.moveTo(a[0], a[1]);
-    ctx.lineTo(b[0], b[1]);
+    ctx.moveTo(dense[i - 1][0], dense[i - 1][1]);
+    ctx.lineTo(dense[i][0], dense[i][1]);
+    i++;
+    while (i < dense.length && widthAt(dense[i - 1], dense[i], base) === w) {
+      ctx.lineTo(dense[i][0], dense[i][1]);
+      i++;
+    }
     ctx.stroke();
   }
 }
@@ -294,11 +314,13 @@ function feed(ev, d) {
     var pr = e.pressure > 0 ? e.pressure : 0.5;
     if (d.sx === null) { d.sx = xy[0]; d.sy = xy[1]; }
     else {
-      /* Smoothing as the pen moves, the same weight the slate uses. Enough to
-         take the tremor out of a sample stream without adding lag you can
-         feel. */
-      d.sx += (xy[0] - d.sx) * SMOOTH;
-      d.sy += (xy[1] - d.sy) * SMOOTH;
+      /* The slate's own smoothing, weight and all: heavy while the pen crawls,
+         where the hand's tremor is the whole signal, and out of the way while it
+         moves, where the only thing you would notice is the ink trailing the
+         nib. */
+      var a = trust(Math.hypot(xy[0] - d.sx, xy[1] - d.sy));
+      d.sx += (xy[0] - d.sx) * a;
+      d.sy += (xy[1] - d.sy) * a;
     }
     var last = d.raw[d.raw.length - 1];
     if (last && Math.abs(d.sx - last[0]) < MIN_STEP
@@ -377,10 +399,30 @@ function follow() {
   if (drawing) drawing.rect = drawing.canvas.getBoundingClientRect();
 }
 
+/* CSS alone does not always win here. A selection that has already begun -- from
+   a tap a moment earlier, or from an element outside a card -- survives
+   `user-select: none`, and iOS is happy to keep extending it. So refuse the
+   gesture outright while annotating, and drop anything already selected as the
+   pen goes down. */
+function noSelect(ev) {
+  if (on) ev.preventDefault();
+}
+
+function dropSelection() {
+  try {
+    var sel = window.getSelection && window.getSelection();
+    if (sel && !sel.isCollapsed) sel.removeAllRanges();
+  } catch (e) { /* not fatal */ }
+}
+
+document.addEventListener("selectstart", noSelect, true);
+document.addEventListener("dragstart", noSelect, true);
+
 function begin(ev, card) {
   if (!on) return;
   var id = card.dataset.card;
   if (!id) return;
+  dropSelection();
   if (ev.pointerType === "pen") sawPen = true;
   /* Once a pen has been seen, a finger is a palm. Same rule as the slate. */
   if (sawPen && ev.pointerType === "touch") return;
@@ -459,6 +501,20 @@ window.Annotate = {
     if (!card || !card.dataset.card || card._annotated) return;
     card._annotated = true;
     var canvas = layerOf(card);
+    /* A card grows after it is first laid out -- a figure finishes compiling,
+       KaTeX replaces a formula, the type size changes -- and the layer was only
+       re-sized on a render or a window resize. In between, the bottom of the
+       card was not covered by anything: a pen landing there hit the prose
+       instead, which starts a selection and loses the stroke. It looked like the
+       ink dying at random, and it was random -- it depended on where in the card
+       you touched. */
+    if (window.ResizeObserver) {
+      var ro = new window.ResizeObserver(function () {
+        if (drawing && drawing.card === card) return;   /* not mid-stroke */
+        if (size(card, canvas)) draw(card);
+      });
+      try { ro.observe(card); } catch (e) { /* not fatal */ }
+    }
     canvas.addEventListener("pointerdown", function (e) { begin(e, card); });
     canvas.addEventListener("pointermove", move);
     canvas.addEventListener("pointerup", end);
