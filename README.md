@@ -80,12 +80,19 @@ bash test/all.sh      # every suite; fetches jsdom itself the first time
 ```
 
 **Nothing survives a lost session on a cluster node.** Processes die with the allocation, so at the
-start of a new session expect to run, from a course directory:
+start of a new session expect to run:
 
 ```
-board vpn up          # reconnects without a new login; state persists
-board start
+tutor resume          # link back up, last course's board here, tutor attached
 ```
+
+or, to have that happen by itself on every login:
+
+```
+bash scripts/install-autostart.sh --login-hook
+```
+
+From inside a course directory the long way still works — `board vpn up` then `board start`.
 
 `board vpn serve` re-points the HTTPS name if it has drifted. The tailnet name is deliberately
 `board` and not the machine's, so the address the iPad app is installed against does not move —
@@ -142,6 +149,7 @@ these tests fail, the test is right.
 | The save's label wrapped onto a second line in a crowded bar, making the button taller than its row, so it painted over the agent chip and the button beside it | `test/chrome.js` |
 | In dark mode a cream band filled the bottom of the screen: `<html>` painted `var(--paper)`, which resolves from `:root` and is therefore always the light value, while the dark palette is scoped to `<body>` | `test/theme.js` |
 | A board with no assistant attached looked exactly like one with an assistant: the chip simply hid itself, so a tap went into an inbox nobody was reading | `test/link.js` |
+| The login-hook installer ran the commands inside its own comment: the block is written through an unquoted heredoc, so a backtick in a comment is a command substitution, and installing it executed `tutor resume` and pasted the output into the file | `test/resume.py` |
 | The app opened on a blank white screen after the serving machine's allocation ended: the worker's last-resort fallback was `caches.match("/")`, which resolves to `undefined` when nothing is cached there, and resolving `respondWith` with `undefined` is a network error — so the board's own "cannot reach the board" banner never ran, because nothing ran | `test/offline.js` |
 | A pen drag over a card started a native text selection: the card turned blue, the browser took the gesture, and the stroke died until a tap elsewhere cleared it — the slate page had refused selection from the start, the lesson never did | `test/link.js` |
 | The whole board glitched, shifted and snapped back while nothing was happening: the reconcile detached the entire lesson into a fragment and re-appended it on every payload, and re-inserting a node restarts its CSS animations — which every card carried | `test/interactive.js`, `test/chrome.js` |
@@ -335,6 +343,49 @@ compute nodes on a shared home. Two hosts cannot both answer to `board`, so give
 own name — `bootstrap.sh --name`, or `board vpn up --hostname mac-mini` later. Each gets its own
 `*.ts.net` address; install the board on the iPad from each, and you have two icons with no
 ambiguity about which machine you are talking to.
+
+### Arriving on a new node
+
+An allocation ending takes the board, the tutor and `tailscaled` with it, on a machine you will
+never be given back. The tailnet name the iPad has baked into it then points at nothing, and
+**no node can be asked to take over**, because being asked requires something already listening
+and that is precisely what died. A supervisor does not help either: it brings a service back after
+a machine reboots, and a compute node does not reboot, it stops being yours.
+
+The only moment a compute node gets is the moment you log in to it.
+
+```
+tutor resume                 take the board over here
+tutor resume galois          a particular course, not the last one
+tutor resume --no-agent      the board, and you drive the tutor yourself
+tutor resume --force         move it even from a node that is still alive
+```
+
+It brings the link up, starts the board for the course whose board ran most recently, re-points
+the tailnet name, and attaches a tutor. What it is careful about is when *not* to act:
+
+- a board already running here is left alone — only the tailnet name is re-checked, since a second
+  board on this node moves it;
+- a board on a node that Slurm still says is yours is left where it is;
+- no Slurm at all means *unknown*, not *gone*, and is also left alone;
+- a machine Slurm does not list as yours — a login node — gets no board at all.
+
+To make it automatic:
+
+```
+bash scripts/install-autostart.sh --login-hook
+bash scripts/install-autostart.sh --uninstall
+```
+
+That appends a marked block to `~/.bashrc`, which the shared home puts on every node. It runs in
+**interactive shells only** — a login file that writes to stdout breaks `scp`, `sftp` and
+git-over-ssh with a remote error nobody can read — takes a lock so five terminals do not race, and
+backgrounds itself so no prompt ever waits on the network. `~/.tutor-resume.log` has whatever it
+said; `export TUTOR_BOARD_NO_RESUME=1` turns it off for one shell.
+
+This is a workaround for not having an always-on machine, not a substitute for one. It still means
+the board is up only when you are logged in somewhere. The Mac mini design under
+[Not yet built](#not-yet-built-always-on-with-the-compute-node-preferred) is the real answer.
 
 ### Surviving a reboot
 

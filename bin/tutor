@@ -7,6 +7,7 @@ tutor -- start a tutoring session.
     tutor galois --homework     and open a homework sitting
     tutor trd --agent opencode  with a particular assistant
     tutor galois --no-agent     just bring the board up
+    tutor resume                take the board over on this machine (for a login hook)
     tutor headless galois       run the assistant as a daemon, driven from the iPad
     tutor headless --stop       stop it
     tutor agent status          which course has an assistant attached
@@ -876,6 +877,129 @@ def cmd_restart(cfg, args):
     return 0
 
 
+def last_board(cfg):
+    """The course whose board ran most recently, on any node.
+
+    Discovered, not registered: `live/.board.json` is written every time a board
+    starts, so the newest one is the course you were last working in. Nothing new
+    to keep in step, and nothing that can go stale in a way that matters -- the
+    worst case is bringing back the course you used before the one you meant.
+    """
+    best = None
+    for c in courses(cfg):
+        path = os.path.join(c["root"], "live", ".board.json")
+        try:
+            when = os.path.getmtime(path)
+        except OSError:
+            continue
+        if not best or when > best[0]:
+            best = (when, c)
+    return best[1] if best else None
+
+
+def board_record(root):
+    try:
+        with open(os.path.join(root, "live", ".board.json"), "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
+def cmd_resume(cfg, args):
+    """Take the board over on this machine. Safe to run from a login hook.
+
+    Nothing on a compute node outlives its allocation -- not the board, not the
+    tutor, not `tailscaled` itself -- so arriving on a new node means the tailnet
+    name points at a machine that no longer exists and the iPad gets nothing.
+    There is no way for a node to be asked to take over, because being asked
+    requires something already listening, and the thing that was listening is
+    what died. The only moment a compute node can act on is the moment you log
+    in to it, which is what this is for.
+
+    It is deliberately dull: quiet when there is nothing to do, quick when there
+    is nothing to do, and it never takes a board away from a machine that is
+    still alive unless told to.
+    """
+    quiet = "--quiet" in args
+    force = "--force" in args
+    rest = [a for a in args if not a.startswith("-")]
+    host = this_host()
+
+    def say(msg):
+        if not quiet:
+            print(msg)
+
+    found = courses(cfg)
+    course = pick(found, rest[0]) if rest else last_board(cfg)
+    if not course:
+        say("no board has ever run in %s; start one with: tutor" % cfg["courses_dir"])
+        return 0
+
+    root = course["root"]
+    info = board_record(root) or {}
+    on = info.get("node")
+
+    import boardlib
+    if on == host and boardlib.board_is_running(info.get("pid"), root):
+        # Already serving here. The one thing worth checking is that the tailnet
+        # name still points at this port, since that is the part a second board
+        # on this node moves out from under it.
+        link(root)
+        started = ensure_agent(cfg, course, args, say)
+        say("%s is already up here%s" % (course["dir"], started))
+        return 0
+
+    if on and on != host and not force:
+        # A record from another node proves nothing on a shared filesystem, so
+        # ask Slurm whether that machine is still a machine you hold. Unknown --
+        # no squeue at all -- is not the same as gone, and is left alone.
+        nodes = boardlib.slurm_nodes()
+        if nodes is None or on in nodes:
+            say("%s is on %s, which is still yours; leaving it there "
+                "(--force to move it here)" % (course["dir"], on))
+            return 0
+
+    # Not every machine you log in to is a machine you should start a board on.
+    # A login node is shared, is not yours, and is where long-running processes
+    # go to be killed -- and this runs from a login hook, so it will be invited
+    # to try. Slurm knows which nodes are actually yours; if there is no Slurm at
+    # all this is not a cluster and the question does not arise.
+    mine = boardlib.slurm_nodes()
+    if mine is not None and host not in mine and not force:
+        say("%s is not one of your allocations; not starting a board here" % host)
+        return 0
+
+    # Catch up first: a handoff written on the machine you have just left is the
+    # whole point of writing it down.
+    sync(root, quiet=True)
+
+    code, out = board(root, "start")
+    if code != 0:
+        say(out.strip() or "could not start the board")
+        return 1
+    link(root)
+    started = ensure_agent(cfg, course, args, say)
+    _, net = board(root, "net")
+    for line in net.splitlines():
+        if "ts.net/" in line and "https" in line:
+            say("%s is up here, at %s%s" % (course["dir"], line.strip().split()[0], started))
+            break
+    else:
+        say("%s is up here%s" % (course["dir"], started))
+    return 0
+
+
+def ensure_agent(cfg, course, args, say):
+    """Attach a tutor unless told not to. Returns a clause for the caller's line."""
+    if "--no-agent" in args:
+        return ""
+    if agent_live(course["root"]):
+        return ", tutor already attached"
+    name = resolve_agent(cfg, course, _flag(args, "--agent"))
+    code, msg = agent_start(cfg, course, name)
+    return (", %s attached" % name) if code == 0 else (", no tutor (%s)" % msg)
+
+
 def cmd_where(cfg, args):
     """What is up, and whether anything is listening."""
     host = os.uname().nodename.split(".")[0]
@@ -961,6 +1085,9 @@ def main(argv):
 
     if args and args[0] == "where":
         return cmd_where(cfg, args[1:])
+
+    if args and args[0] == "resume":
+        return cmd_resume(cfg, argv[argv.index("resume") + 1:])
 
     if args and args[0] == "agent":
         return cmd_agent(cfg, argv[argv.index("agent") + 1:])

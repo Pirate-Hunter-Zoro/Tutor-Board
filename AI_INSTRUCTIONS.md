@@ -250,6 +250,18 @@ Read `README.md` first.
   -- but say what it costs and take the saving back somewhere else in the same
   change. Never let a style note ship without the token pass; the two are one
   piece of work, not a feature and an optimisation to do later.
+- **A compute node can only be caught at login.** Nothing there outlives the
+  allocation, and no node can be *asked* to take the board over, because asking
+  needs something already listening and that is what died. So `tutor resume` is
+  the takeover, and it is written to be run from a login file: silent and quick
+  when there is nothing to do, and refusing to act when a board is alive on a
+  node that is still yours, when Slurm cannot be asked, or when this machine is
+  not one of your allocations. Anything appended to `~/.bashrc` must be guarded
+  on an interactive shell -- a login file that writes to stdout breaks `scp`,
+  `sftp` and git-over-ssh, and the failure surfaces on the other machine as
+  something incomprehensible. `test/resume.py` holds all of it. This is a
+  workaround for having no always-on host; it is not the always-on design and
+  must not grow into a substitute for it.
 - **No session ends without a handoff.** Sessions end by being abandoned — a switched course, a
   closed lid, an expired allocation — so the departing assistant gets one last turn, with no student
   attached, to write `HANDOFF.md` at the course root. `SIGTERM` starts that wrap-up; nothing may

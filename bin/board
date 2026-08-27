@@ -145,24 +145,7 @@ def live_root(info):
 
 def slurm_nodes():
     """Nodes where this user currently holds an allocation, or None if unknown."""
-    try:
-        p = subprocess.run(["squeue", "-h", "-u", os.environ.get("USER", ""), "-o", "%N"],
-                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=10)
-        if p.returncode != 0:
-            return None
-        out = p.stdout.decode("utf-8", "replace")
-        nodes = set()
-        for tok in re.findall(r"compute\[?([0-9,\-]+)\]?", out):
-            for part in tok.split(","):
-                if "-" in part:
-                    a, b = part.split("-", 1)
-                    for n in range(int(a), int(b) + 1):
-                        nodes.add("compute%d" % n)
-                else:
-                    nodes.add("compute" + part)
-        return nodes
-    except (OSError, subprocess.TimeoutExpired, ValueError):
-        return None
+    return boardlib.slurm_nodes()
 
 
 def default_port(root):

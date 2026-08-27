@@ -53,6 +53,38 @@ def have_tex(env=None):
     return all(shutil.which(x, path=path) for x in ("latex", "pdflatex", "dvisvgm"))
 
 
+def slurm_nodes():
+    """Nodes where this user currently holds an allocation, or None if unknown.
+
+    Platform knowledge, so it lives here: `board` uses it to decide whether a
+    lock belongs to a job that has ended, and `tutor resume` uses it to decide
+    whether the node named in a record is a machine that still exists. Where
+    there is no `squeue` the answer is None -- unknown, not empty -- and every
+    caller must treat those differently, because "no allocations" and "not a
+    cluster" lead to opposite decisions.
+    """
+    import re
+    import subprocess
+    try:
+        p = subprocess.run(["squeue", "-h", "-u", os.environ.get("USER", ""), "-o", "%N"],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=10)
+        if p.returncode != 0:
+            return None
+        out = p.stdout.decode("utf-8", "replace")
+        nodes = set()
+        for tok in re.findall(r"compute\[?([0-9,\-]+)\]?", out):
+            for part in tok.split(","):
+                if "-" in part:
+                    a, b = part.split("-", 1)
+                    for n in range(int(a), int(b) + 1):
+                        nodes.add("compute%d" % n)
+                else:
+                    nodes.add("compute" + part)
+        return nodes
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+
+
 def board_is_running(pid, root):
     """Is this pid genuinely our board for this repository?
 

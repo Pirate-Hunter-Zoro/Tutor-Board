@@ -3,6 +3,7 @@
 # install-autostart.sh -- bring the board back by itself after a reboot.
 #
 #   bash scripts/install-autostart.sh <course-directory> [agent]
+#   bash scripts/install-autostart.sh --login-hook      (cluster nodes)
 #   bash scripts/install-autostart.sh --uninstall
 #
 # An always-on machine is only always-on until it isn't: a power cut, a software
@@ -13,6 +14,14 @@
 # macOS: a LaunchAgent under ~/Library/LaunchAgents.
 # Linux with systemd --user: a user unit under ~/.config/systemd/user.
 #
+# On a cluster node neither of those is the right shape, and `--login-hook` is.
+# A supervisor brings a service back after the machine reboots; a compute node
+# does not reboot, it ceases to be yours -- the allocation ends and takes the
+# board, the tutor and tailscaled with it, on a machine you will never be given
+# back. There is no process left to notice, and no way for the iPad to ask,
+# because asking requires something already listening. The only moment a compute
+# node gets is the moment you log in to it, so that is where the hook goes.
+#
 # No sudo either way. Both run as you, which is what you want -- the daemon needs
 # your ssh keys, your tailnet, and your git credentials.
 # ---------------------------------------------------------------------------
@@ -22,7 +31,60 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TUTOR="$HERE/bin/tutor"
 LABEL="com.tutorboard.headless"
 
+BEGIN_MARK="# >>> tutor-board resume >>>"
+END_MARK="# <<< tutor-board resume <<<"
+RC="$HOME/.bashrc"
+
+strip_hook() {
+  [ -f "$RC" ] || return 0
+  grep -qF "$BEGIN_MARK" "$RC" || return 0
+  python3 - "$RC" "$BEGIN_MARK" "$END_MARK" <<'PYEOF'
+import io, sys
+rc, begin, end = sys.argv[1], sys.argv[2], sys.argv[3]
+text = io.open(rc, encoding="utf-8").read()
+while begin in text and end in text:
+    a = text.index(begin)
+    b = text.index(end) + len(end)
+    text = text[:a].rstrip("\n") + "\n" + text[b:].lstrip("\n")
+io.open(rc, "w", encoding="utf-8").write(text)
+PYEOF
+  echo "removed the login hook from $RC"
+}
+
+if [ "${1:-}" = "--login-hook" ]; then
+  [ -f "$RC" ] || touch "$RC"
+  cp "$RC" "$RC.bak.tutor-board"
+  strip_hook
+  cat >> "$RC" <<HOOK
+
+$BEGIN_MARK
+# Take the board over on whatever machine this is, if it should be taken over.
+# Interactive shells only: a login file that writes to stdout breaks scp, sftp
+# and git-over-ssh, and that failure is remote and baffling. Backgrounded, so a
+# slow network never delays a prompt. The resume command itself decides whether
+# there is anything to do -- it is quiet and quick when there is not, it leaves a board
+# alone on a node that is still yours, and it refuses to start one on a machine
+# Slurm does not say is yours.
+if [ -n "\${BASH_VERSION:-}" ] && [[ \$- == *i* ]] && [ -z "\${TUTOR_BOARD_NO_RESUME:-}" ]; then
+  (
+    if command -v flock >/dev/null 2>&1; then
+      flock -n 9 || exit 0            # another shell on this node got there first
+    fi
+    "\$HOME/.local/bin/tutor" resume --quiet
+  ) 9>"/tmp/.tutor-resume.\$USER.lock" >>"\$HOME/.tutor-resume.log" 2>&1 &
+  disown 2>/dev/null || true
+fi
+$END_MARK
+HOOK
+  echo "added the login hook to $RC  (previous copy at $RC.bak.tutor-board)"
+  echo "log:    ~/.tutor-resume.log"
+  echo "off:    export TUTOR_BOARD_NO_RESUME=1   (for one shell)"
+  echo "remove: bash $0 --uninstall"
+  exit 0
+fi
+
 if [ "${1:-}" = "--uninstall" ]; then
+  strip_hook
   case "$(uname -s)" in
     Darwin)
       launchctl unload "$HOME/Library/LaunchAgents/$LABEL.plist" 2>/dev/null
@@ -39,7 +101,12 @@ fi
 
 COURSE="${1:-}"
 AGENT="${2:-}"
-[ -n "$COURSE" ] || { echo "usage: $0 <course-directory> [agent]"; exit 1; }
+[ -n "$COURSE" ] || {
+  echo "usage: $0 <course-directory> [agent]"
+  echo "       $0 --login-hook      on a cluster node, where nothing survives"
+  echo "       $0 --uninstall"
+  exit 1
+}
 
 ARGS=("headless" "$COURSE")
 [ -n "$AGENT" ] && ARGS+=("--agent" "$AGENT")
