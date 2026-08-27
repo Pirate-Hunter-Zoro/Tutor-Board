@@ -692,12 +692,33 @@ def guess_mode(root):
     return "code"
 
 
+_SLURM = {"at": 0.0, "nodes": None}
+
+
+def held_nodes():
+    """Nodes this user still holds, cached for a few seconds.
+
+    `sibling_courses` asks once per course and the hub asks often, so without a
+    cache this is a `squeue` per repository per poll.
+    """
+    now = time.time()
+    if now - _SLURM["at"] > 15.0:
+        _SLURM["nodes"] = boardlib.slurm_nodes()
+        _SLURM["at"] = now
+    return _SLURM["nodes"]
+
+
 def sibling_courses(repo):
     """Course repositories sitting alongside this one.
 
     A repository counts if it holds AI_INSTRUCTIONS.md or a live/ directory. The
     parent directory is the whole search -- there is no configuration and no
     registry to keep in step with reality.
+
+    This is also the answer to "which subjects can I open from here", and it is
+    the right answer by construction: it lists what the machine SERVING the board
+    actually has on disk. A host with half the repositories cloned offers half
+    the subjects, and no list anywhere has to be edited to say so.
     """
     parent = os.path.dirname(repo.root)
     out = []
@@ -750,7 +771,16 @@ def sibling_courses(repo):
                 except OSError:
                     pass
             else:
-                entry["running"] = bool(info.get("node"))
+                # A record naming another node proves nothing: the home
+                # directory is shared, so a board that died with an allocation
+                # leaves one behind that looks exactly like a live board. The
+                # hub said "live on compute304" for hours after compute304
+                # stopped being a machine this user had. Ask Slurm; `None` means
+                # there is no Slurm to ask, which is unknown rather than gone.
+                held = held_nodes()
+                entry["running"] = held is None or info["node"] in held
+                if not entry["running"]:
+                    entry["node"] = None
         except (OSError, ValueError):
             pass
         out.append(entry)

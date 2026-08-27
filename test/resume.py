@@ -205,6 +205,10 @@ try:
           not calls["sync"])
 
     # --- no squeue at all is not the same as no allocations -----------------
+    # The cases above swept these records, which is what they are supposed to do
+    # -- a run of `resume` clears records from nodes that no longer exist. Lay
+    # them down again for what follows.
+    make_course("Newer", node="compute999", pid=22, when=9000)
     boardlib.slurm_nodes = lambda: None
     boardlib.board_is_running = lambda pid, root: False
     reset()
@@ -246,6 +250,46 @@ try:
               code == 0 and not calls["start"])
     finally:
         shutil.rmtree(empty, ignore_errors=True)
+    # --- sweeping records left by machines that no longer exist -------------
+    # A board that died with its allocation leaves `live/.board.json` behind, and
+    # nothing can tell that from a board that is answering -- so the hub goes on
+    # offering "live on compute304" days later, and a tap goes where nothing is
+    # listening. Logging in is when we can find out which nodes are real.
+    ghost = os.path.join(tmp, "Ghost")
+    os.makedirs(os.path.join(ghost, "live"), exist_ok=True)
+    with open(os.path.join(ghost, "tutorboard.json"), "w", encoding="utf-8") as fh:
+        json.dump({"name": "Ghost", "mode": "math"}, fh)
+    ghost_rec = os.path.join(ghost, "live", ".board.json")
+
+    def lay_ghost(node):
+        with open(ghost_rec, "w", encoding="utf-8") as fh:
+            json.dump({"node": node, "pid": 4242, "root": ghost}, fh)
+
+    lay_ghost("compute999")
+    boardlib.slurm_nodes = lambda: {"compute301"}
+    tutor.prune_dead_records(cfg, "compute301")
+    check("a record from a node that is gone is swept",
+          not os.path.exists(ghost_rec))
+
+    lay_ghost("compute301")
+    tutor.prune_dead_records(cfg, "compute301")
+    check("a record from THIS machine is never swept, whatever it says",
+          os.path.exists(ghost_rec))
+
+    lay_ghost("compute999")
+    boardlib.slurm_nodes = lambda: None
+    tutor.prune_dead_records(cfg, "compute301")
+    check("and with no Slurm to ask, nothing is swept — unknown is not gone",
+          os.path.exists(ghost_rec))
+
+    lay_ghost("compute301")
+    boardlib.slurm_nodes = lambda: {"compute301", "compute999"}
+    lay_ghost("compute999")
+    tutor.prune_dead_records(cfg, "compute301")
+    check("nor is a record from a node that is still yours",
+          os.path.exists(ghost_rec))
+    shutil.rmtree(ghost)
+
     # --- the login hook itself ---------------------------------------------
     # It is appended to a file that runs on every shell on every machine, so the
     # ways it can do damage are: printing something (which breaks scp, sftp and

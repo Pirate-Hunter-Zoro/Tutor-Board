@@ -968,6 +968,32 @@ def board_record(root):
         return None
 
 
+def prune_dead_records(cfg, host):
+    """Drop `live/.board.json` for boards on nodes that are gone.
+
+    Only for nodes Slurm can positively say are no longer yours. No Slurm at all
+    means unknown, and unknown is left exactly where it is -- deleting a record
+    for a board that is in fact answering would leave a live process nothing can
+    find. Returns the courses it swept, for the caller to report.
+    """
+    import boardlib
+    held = boardlib.slurm_nodes()
+    if held is None:
+        return []
+    swept = []
+    for c in courses(cfg):
+        info = board_record(c["root"]) or {}
+        on = info.get("node")
+        if not on or on == host or on in held:
+            continue
+        try:
+            os.remove(os.path.join(c["root"], "live", ".board.json"))
+            swept.append(c["dir"])
+        except OSError:
+            pass
+    return swept
+
+
 def cmd_resume(cfg, args):
     """Take the board over on this machine. Safe to run from a login hook.
 
@@ -991,6 +1017,17 @@ def cmd_resume(cfg, args):
     def say(msg):
         if not quiet:
             print(msg)
+
+    # Records left behind by nodes that no longer exist make the hub lie: it
+    # cannot tell a board that died with an allocation from one that is
+    # answering, so a course reads as "live on compute304" days after compute304
+    # stopped being a machine you had, and a tap goes where nothing is
+    # listening. Logging in is the moment to sweep them, because it is the
+    # moment we can find out which nodes are real. Before choosing a course,
+    # since a record is one of the things that decides.
+    swept = prune_dead_records(cfg, host)
+    if swept:
+        say("cleared a dead board record for: %s" % ", ".join(swept))
 
     found = courses(cfg)
     course = pick(found, rest[0]) if rest else last_board(cfg)

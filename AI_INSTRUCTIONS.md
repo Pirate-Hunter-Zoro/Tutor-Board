@@ -250,6 +250,18 @@ Read `README.md` first.
   -- but say what it costs and take the saving back somewhere else in the same
   change. Never let a style note ship without the token pass; the two are one
   piece of work, not a feature and an optimisation to do later.
+- **The subject list belongs to whoever is serving.** The hub lists the serving
+  host's own `courses_dir`, built per request -- so a machine with a subset of
+  the repositories offers a subset, and a proxy forwarding to a compute node
+  shows that node's list, which is the machine that would have to run the board.
+  Never cache it, never bake it into the app, and never add a list of subjects
+  anywhere: the two cases compose correctly precisely because neither machine
+  knows about the other's repositories. And never let the hub claim a course is
+  running on the strength of a `live/.board.json` naming another node -- the home
+  directory is shared, so a board that died with an allocation leaves a record
+  identical to a live one. Check it against the nodes Slurm still says are yours;
+  `tutor resume` sweeps the dead ones at login, and where there is no Slurm the
+  answer is unknown, which is left alone rather than deleted.
 - **A compute node can only be caught at login.** Nothing there outlives the
   allocation, and no node can be *asked* to take the board over, because asking
   needs something already listening and that is what died. So `tutor resume` is

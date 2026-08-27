@@ -733,6 +733,36 @@ construction rather than by arbitration.
   because every diagnosis below depends on it and guessing from the hostname is how this gets
   subtly wrong.
 
+#### On the Mac mini: hosting only what it has
+
+Most of this needs no work at all, and it is worth writing down why before someone builds a
+mechanism for it.
+
+- **The subject list follows the machine already.** The hub lists the serving host's own
+  directories, so a mini with a subset cloned offers a subset. Put the subset in that machine's own
+  `~/.config/tutor-board/courses.txt` and run `bootstrap.sh`; nothing else knows or cares.
+- **A subject that exists only on the cluster is not missing from the app when a compute node is
+  serving** — the proxy forwards to that node, and the hub the app gets is the node's own. The two
+  cases compose correctly without either machine knowing about the other's repositories.
+- **The stale-record sweep does not apply there.** It only removes records for nodes Slurm says are
+  gone, and a Mac has no Slurm — `slurm_nodes()` returns `None`, which means unknown, so nothing is
+  swept. It also cannot see the cluster's `live/` at all, since it does not share that home.
+
+What does have to be written:
+
+- **The mini's equivalent of the login hook is not the login hook.** A Mac does not end an
+  allocation; it sleeps and wakes and stays logged in. `tutor resume` exits when it is done, so
+  `KeepAlive` is the wrong shape — a LaunchAgent with `RunAtLoad` plus `StartInterval` (a few
+  minutes) is the right one, and it is the same agent as the follower loop below rather than a
+  second thing.
+- **`install-autostart.sh` needs a course-less form.** It currently registers
+  `tutor headless <course>`, which bakes one course into a plist. The mini should bring back
+  whichever course it last served — that is what `tutor resume` already decides, from the newer of
+  the course you last named and the course last worked in.
+- **The follower loop, and the proxy re-point** — `board vpn serve --to <host:port>`, probing
+  `/health` on candidate node names, and `/handover` so an outgoing board writes its handoff. Those
+  are described above and are the real work.
+
 #### What only real hardware can settle
 
 - Whether the iPad app's SSE stream reconnects cleanly when the proxy target moves underneath it,
@@ -749,6 +779,32 @@ construction rather than by arbitration.
 Courses are whatever directories are sitting beside the tool. Adding one means making a directory;
 there is no list to update and nothing that can go stale. `courses_dir` moves the search if your
 repositories live somewhere else.
+
+## Which subjects the app offers
+
+**Whatever the machine that is serving has on disk, and nothing else.** The hub's list is a
+directory listing of the serving host's `courses_dir`, built when the app asks for it — never
+cached, never baked into the installed app, never written down anywhere. So the answer changes with
+the machine, by itself:
+
+- serving from a compute node with every repository cloned into the shared home, the app offers
+  every subject;
+- serving from a Mac mini with four of them cloned, the app offers four;
+- and when the mini is proxying to a compute node, the hub you get is *that node's*, listing that
+  node's repositories, which is right — it is the machine that would have to run the board.
+
+There is no list to edit and nothing that can disagree with reality. To put a subset on a second
+machine, clone a subset: `~/.config/tutor-board/courses.txt` is what `bootstrap.sh` reads, and it
+is per-machine and not in this repository.
+
+**A course that is not running is still offered**, because opening it is what starts it. What the
+hub must never do is claim one is running when it is not. That was a real defect: a board that died
+with an allocation leaves `live/.board.json` behind on the shared home, and nothing distinguishes
+that from a board answering right now — so the hub went on saying *live on compute304* for hours
+after compute304 stopped being a machine this user had, and a tap went somewhere nothing was
+listening. The record is now checked against the nodes Slurm says are still yours, and
+`tutor resume` sweeps the dead ones as you log in. Where there is no Slurm to ask, the answer is
+*unknown*, and unknown is left alone rather than deleted.
 
 ## Courses, and the two modes
 
