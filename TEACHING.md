@@ -68,6 +68,25 @@ by what is adjacent in the text.
 The answer arrives as an image of handwriting. Open it. Read what they actually
 wrote, not what you expected.
 
+**A page is not always an attempt.** Read what is on it before deciding what it
+is. People write questions in the margin, in a bubble, or instead of an answer:
+*am I on the right track?*, *why is that disjoint?*, *HELP I don't know what to
+do*. A blank page with a question on it is a question, not a wrong answer, and
+answering it as though it were a wrong answer is the single most discouraging
+thing you can do.
+
+- **A question on the page gets answered first**, in its own card, before any
+  assessment of the working around it. Answer the thing they asked, in the terms
+  they asked it.
+- **"I do not know how to start" is a legitimate and useful answer.** It means the
+  step before this one did not land. Go back one step, teach that, and re-pose --
+  do not repeat the same prompt louder, and do not mark them wrong for saying it.
+- **Never label a question `wrong`.** The card kinds carry tone: `wrong` says
+  *you got this wrong*. Use `note` or `review` when you are answering a question,
+  `wrong` only when there is an actual argument with an actual break in it.
+- A page with both working and a question is both: answer the question, then say
+  where the working stands.
+
 - Right: say so plainly, in one or two lines, and name the step that carried it.
   No praise beyond that.
 - Wrong: locate the break — the specific line where it goes wrong — and say what

@@ -24,20 +24,44 @@ which kind of subject it is and the board adapts.
 
 ## Picking this up in a new session
 
-> **Where this is right now, 26 August 2026.** The board has just been rebuilt around a
-> transcript, and none of it has been used in anger. The next thing that happens is the owner
-> working through **Galois Theory, chapters 1 and 2**, on the iPad, with a separate tutor in
-> `../Galois-Theory` — and coming back *here*, to this repository, in a different session, to
-> report what was wrong with the board while doing it.
+> **Where this is right now, 26 August 2026, end of the first real evening.** The board has now
+> been used in anger, for about two hours, across Galois Theory and Probability. Most of what
+> follows was found by a person holding an iPad, not by a test.
 >
-> **So if you are reading this in a fresh session on Tutor-Board: your job is fixing the board,
-> from a person's account of using it.** Not teaching Galois theory — that is the other session's
-> job, in the other repository, and it does not know or care about this one.
+> **If you are reading this in a fresh session on Tutor-Board: your job is fixing the board from
+> a person's account of using it.** Not teaching the subject — that is the other session's job,
+> in the course repository, and it does not know or care about this one.
 >
-> Everything below the line *"Where this stands"* is the honest state. In particular, five of the
-> seven defects found on the first day of real use were CSS that no test could have caught, and
-> the transcript, the docked tool bar and the history view have **still never been looked at in a
-> browser**. Expect the feedback to be visual. Read the CSS before theorising about the platform.
+> **What has never been tried, in rough order of how likely it is to be broken:**
+>
+> 1. **Everything shipped after about 20:20 is unverified on a device.** The marker fix (a
+>    highlighter now stays pale in the export instead of coming out as a black smudge), the
+>    receipt under the writing surface, the writing surface moving *below* the tutor's feedback,
+>    the six-control title bar with the `⋯` menu, and the contents panel (`☰`). All of it passes
+>    tests; none of it has been looked at.
+> 2. **The writing surface after a reload.** It vanished entirely once, because it survived a
+>    send only through an in-memory pin. It is now decided from the transcript — a question stays
+>    open until a `correct` card settles it. Close the app mid-correction and check there is
+>    still somewhere to write.
+> 3. **Leaving and saving.** The exit offer appears, but nobody has ever tapped *Save and push*.
+>    The server side is tested; the button reaching it is not.
+> 4. **Asking a question on the slate.** The tutor is now told to answer a question before
+>    assessing any working, and never to label a question `wrong`. Write *"am I on the right
+>    track?"* with no working and see what comes back.
+> 5. **A second turn in a headless session.** Turns after the first now resume the agent's own
+>    session rather than re-reading the whole contract. If a resume fails it retries once as a
+>    fresh turn. Only the first turn of each course has actually been watched.
+> 6. **The homework write-up, end to end.** Statements are transcribed and `hw01.pdf` compiles.
+>    Nobody has yet agreed an answer and watched it land in a solution region.
+> 7. **`board eyes`** has never been run against the headless agent, and a homework sitting
+>    depends on it reading an assignment PDF. It read one tonight, so it works — but that is one
+>    observation, not a check.
+>
+> **What was learned tonight that is worth not relearning:** a board is a process and holds old
+> code (hence `scripts/ship.sh`); a headless agent with no `.claude/settings.local.json` reads,
+> thinks, composes a whole card and writes nothing; five of the visual defects were invisible to
+> every test and obvious in one screenshot. Ask for a screenshot early. Read the CSS before
+> theorising about the platform.
 
 Read [`AI_INSTRUCTIONS.md`](./AI_INSTRUCTIONS.md) first — it is the contract for working on this
 repository and it carries the invariants that were learned the hard way. Then:
@@ -104,6 +128,11 @@ these tests fail, the test is right.
 | `board net` re-pointed the HTTPS name at a dead port, trusting a stale record from another node | `alive()` in `cmd_net` |
 | An empty maths board could not be answered, asked, or prodded from the iPad at all: the first turn needed a terminal | `test/begin.py` |
 | A writing prompt could not be declined, so an unwanted exercise had to be answered badly to clear it | `test/modes.js` |
+| The writing surface vanished after closing and reopening the app: it survived a send only through an in-memory pin, and a pin is a variable | `test/link.js`, `test/modes.js` |
+| A marker stroke came out of the export as a black smudge over the working it pointed at: the light-ink-to-dark-ink conversion was applied to a six-times-wide translucent stroke | `asHighlight` in `slate-core.js` |
+| The marker was invisible on black paper and perfect in the sent PNG: a highlighter multiplies, and multiplying into near-black gives back near-black | `test/chrome.js` reads the CSS; the blend now follows the surface, not the setting |
+| A sent answer was frozen into the transcript directly above the surface the same ink was still sitting on | `test/interactive.js`, `test/link.js` |
+| The save's label wrapped onto a second line in a crowded bar, making the button taller than its row, so it painted over the agent chip and the button beside it | `test/chrome.js` |
 | In dark mode a cream band filled the bottom of the screen: `<html>` painted `var(--paper)`, which resolves from `:root` and is therefore always the light value, while the dark palette is scoped to `<body>` | `test/theme.js` |
 | A board with no assistant attached looked exactly like one with an assistant: the chip simply hid itself, so a tap went into an inbox nobody was reading | `test/link.js` |
 | The "is a tutor attached" dot could never go green outside headless: only the daemon ever wrote `agent.json`, and a heartbeat is the wrong test for a session that is idle whenever its person is thinking | `test/agents.py`, `test/begin.py` |
@@ -183,6 +212,20 @@ for the next sitting rather than a loss.
 In a code course the unit is a change made in the student's own editor, and the
 three signals — *ready to check*, *I need help*, *I'm confused* — do what skip
 does in mathematics. The rest of the discipline is identical.
+
+### Sending, and what happens next
+
+Sending used to drop a frozen copy of your ink into the transcript directly above the surface
+that ink was still sitting on — the same thing twice, one above the other — and said nothing
+about whether it had arrived.
+
+Now the surface stays where it is and reports underneath itself: **sent at 8:12 — the tutor is
+reading it**, or *waiting for the tutor*, or *no tutor is attached to read it yet*. What was
+sent is not rendered into the lesson while it is still the thing you are looking at.
+
+The moment the tutor replies, that changes: your answer takes its proper place under the
+question, the receipt stands down, and **the writing surface moves below the feedback** — so
+correcting your work happens under the criticism of it rather than scrolled off above it.
 
 ### Writing on the lesson itself
 
@@ -831,6 +874,10 @@ hub shows the last result too.
 
 `board push "message"` does it from the terminal without asking.
 
+**⤓ save commits and pushes.** It runs the repository's `scripts/save-and-push.sh` — the same
+script, the same commit, the same push as the offer you get on the way out and as `board push`
+from a terminal. There is one path to a commit and three doors onto it.
+
 **You can save without the tutor, at any point.** `⤓ save` in the title bar raises the
 same offer, worded as what it is — *Save this work? … The lesson stays open.* Sessions end
 by being abandoned far more often than they end tidily: a lid closes, an allocation
@@ -838,7 +885,10 @@ expires, somebody puts the iPad down. Until this existed the only route to a com
 prompt only `board finish` could raise, so leaving mid-session meant leaving the work
 uncommitted.
 
-**And the way out asks, every time.** The back arrow (`‹`) does not simply leave: it offers
+**And the way out asks when there is something to lose.** With everything committed the back
+arrow (`‹`) just goes — a prompt that appears regardless is a prompt that gets dismissed
+unread, which is how the one time it mattered gets dismissed too. With work outstanding it
+offers
 *Save and push*, *Leave without saving*, or *Stay*, and says plainly that the lesson is kept
 either way — cards, answers and annotations are files, and they are all still there when you
 come back. Leaving without committing is a choice somebody makes, not something that happens
@@ -896,6 +946,23 @@ Everything below is optional, and each item buys something specific.
    The board hands the assistant a path to each slate page; where it should be filed afterwards is
    the repository's business, and `AI_INSTRUCTIONS.md` is where you say so.
 
+### Shipping a change
+
+```
+bash scripts/ship.sh ["message"]
+```
+
+Commit, push, and put every course on the new code in one act — because they are one act. A
+board and a tutor read `serve.py` and `bin/tutor` once, when they start, so changing this
+repository does nothing to a course already running: the pages come from disk and look new
+while the endpoints and the daemon behind them are the old ones.
+
+If the push fails, nothing is restarted. Running processes stay on the old code, which is the
+right place for them while the change is not saved anywhere.
+
+The commit is authored by whoever `git config user.name` says — no trailers, no co-authors, no
+attribution to any assistant.
+
 ### Changing the tool restarts the boards
 
 A board is a long-lived process that read `serve.py` when it started, so a change to this
@@ -906,8 +973,14 @@ invisible from the outside and costs an evening to find. It cost one here.
 So this repository's `scripts/save-and-push.sh` runs `tutor restart` after a successful push:
 
 ```
-tutor restart        restart every board running on this machine, on the current code
+tutor restart              restart every board running on this machine
+tutor restart --tutors     and the headless tutors attached to them
 ```
+
+A tutor in the middle of a turn is left alone: bouncing it loses the card it is writing, and
+the student is who pays for that. Otherwise it is stopped with `SIGTERM` — which is what starts
+the wrap-up turn that writes `HANDOFF.md` — and the restart waits for that to finish before
+starting the next one, so the continuity is written rather than merely a process killed.
 
 It only touches boards that are genuinely answering **on this node** — a record on a shared
 filesystem may belong to another machine, and stopping a stranger's process is worse than

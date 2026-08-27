@@ -1428,7 +1428,15 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 write_turn(repo, record)
                 msg = dict(record)
-                msg["text"] = ("[slate] %s rev %d, %d strokes"
+                # What arrived is a page, not a verdict. It may be an attempt,
+                # a question written in the margin, or "I don't know how to
+                # start" -- and reading it as a wrong answer when it is a
+                # question is the most discouraging thing this can do.
+                msg["text"] = ("[slate] %s rev %d, %d strokes. Open the image and "
+                               "read what is actually on it: if there is a question "
+                               "anywhere on the page, answer that first, in its own "
+                               "card, before assessing any working. Do not mark a "
+                               "question wrong."
                                % (tid, rev, len(strokes)))
                 msg["slate"] = os.path.join(repo.answers, base + ".png")
                 with open(repo.messages_path, "a", encoding="utf-8") as fh:

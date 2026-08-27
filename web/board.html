@@ -36,22 +36,29 @@
     <button id="session" class="session" type="button" hidden title="lecture or homework"></button>
     <span id="agent" class="agent" hidden></span>
   </div>
+  <!-- Thirteen controls in one row is a row that overlaps itself on a tablet.
+       What stays out here is what a lesson actually uses; the rest is real but
+       occasional, and lives one tap away rather than fighting for width. -->
   <div class="bar-right">
-    <button id="btn-save" title="save this work and push it">⤓ save</button>
+    <button id="btn-contents" title="chapters, problem sets and past lessons">☰</button>
     <button id="btn-annotate" title="write on the lesson itself">✎ annotate</button>
     <a id="btn-slate" href="/slate" title="write with the Apple Pencil">✎ slate</a>
     <label id="btn-clip" for="file" title="attach a photo or a PDF">＋</label>
-    <button id="btn-smaller" title="smaller type">A&minus;</button>
-    <button id="btn-bigger" title="larger type">A+</button>
-    <button id="btn-face" title="typeface">Aa</button>
-    <button id="btn-theme" title="light / dark / auto">◐</button>
-    <button id="btn-reload" title="reload the app">↻</button>
-    <button id="btn-contents" title="chapters, problem sets and past lessons">☰</button>
-    <button id="btn-history" title="past lessons" hidden>◷</button>
-    <button id="btn-scratch" title="photos and PDFs">▤</button>
-    <button id="btn-print" title="print or save as PDF">⎙</button>
+    <button id="btn-save" title="save this work and push it">⤓ save</button>
+    <button id="btn-more" title="everything else">⋯</button>
   </div>
 </header>
+
+<div id="barmenu" class="barmenu" hidden>
+  <button id="btn-smaller" title="smaller type">A&minus;  smaller type</button>
+  <button id="btn-bigger" title="larger type">A+  larger type</button>
+  <button id="btn-face" title="typeface">Aa  reading face</button>
+  <button id="btn-theme" title="light / dark / auto">◐  light / dark</button>
+  <button id="btn-scratch" title="photos and PDFs">▤  photos and PDFs</button>
+  <button id="btn-history" title="past lessons" hidden>◷  past lessons</button>
+  <button id="btn-print" title="print or save as PDF">⎙  print</button>
+  <button id="btn-reload" title="reload the app">↻  reload the app</button>
+</div>
 
 <!-- End of session. Asked here, because the person answering is on an iPad. -->
 <div id="finish" class="finish" hidden>
@@ -229,6 +236,12 @@
     <button id="skip" type="button">skip this one</button>
   </div>
   <div id="slate"></div>
+  <!-- Sending into silence is the thing that makes a person wonder whether it
+       arrived. This sits under the surface they sent from and says it did. -->
+  <div id="sent" class="sent" hidden>
+    <span id="sent-mark">✓</span>
+    <span id="sent-text"></span>
+  </div>
 </section>
 
 <!-- Code: the work happens in the editor on the real machine. What the board is

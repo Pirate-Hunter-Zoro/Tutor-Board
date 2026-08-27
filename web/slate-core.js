@@ -123,6 +123,26 @@ function polish(pts, passes) {
    survive that change is darkened until it does. Hue is kept -- a colour chosen
    to mean something still means it -- and only the lightness moves. A near-grey
    has no hue worth keeping and goes to near-black. */
+/* A highlighter has to stay a highlight when the page turns white. `forPaper`
+   exists to make a light INK readable on white, and running a marker through it
+   produced the opposite of a highlight: a six-times-wide stroke of near-black,
+   multiplied -- a smudge over the very working it was drawn to point at. Keep
+   the hue, force it pale, and let multiply do the rest. */
+function asHighlight(css) {
+  var m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(css || "").trim());
+  if (!m) return "#ffe08a";
+  var h = m[1].length === 3 ? m[1].replace(/./g, "$&$&") : m[1];
+  var r = parseInt(h.slice(0, 2), 16),
+      g = parseInt(h.slice(2, 4), 16),
+      b = parseInt(h.slice(4, 6), 16);
+  var top = Math.max(r, g, b, 1);
+  /* Scale the brightest channel up to near-white and carry the others with it,
+     which lightens without shifting the hue. */
+  var k = 245 / top;
+  var pale = function (v) { return Math.round(Math.min(255, 200 + (v * k - 200) * 0.55)); };
+  return "rgb(" + pale(r) + "," + pale(g) + "," + pale(b) + ")";
+}
+
 function forPaper(css) {
   var m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(css || "").trim());
   if (!m) return css;
@@ -450,11 +470,23 @@ function create(opts) {
     c.stroke();
   }
 
-  function paintStroke(c, s) {
+  /* `onDark` is a property of the surface being painted, not of the current
+     paper: the same function draws the live canvas and the PNG, and the PNG is
+     always white however dark the screen is. Reading the paper setting here
+     would fix the marker on screen and lose it in the file. */
+  function paintStroke(c, s, onDark) {
     var pts = s.dense || (s.dense = densify(s.pts));
     if (!pts.length) return;
     c.save();
-    if (s.hl) { c.globalAlpha = 0.3; c.globalCompositeOperation = "multiply"; }
+    if (s.hl) {
+      /* A highlighter works by darkening what is under it, which is why it is
+         multiplied -- and on black paper multiplying a colour into near-black
+         gives back near-black, so the marker was invisible on screen while
+         showing perfectly well in the PNG, which is always dark ink on white.
+         On dark paper the same gesture has to lighten instead. */
+      c.globalAlpha = 0.3;
+      c.globalCompositeOperation = onDark ? "screen" : "multiply";
+    }
     c.strokeStyle = s.c;
     c.fillStyle = s.c;
     c.lineCap = "round";
@@ -484,8 +516,9 @@ function create(opts) {
     cacheCtx.clearRect(0, 0, cache.width, cache.height);
     cacheCtx.setTransform(d * view.k, 0, 0, d * view.k, d * view.ox, d * view.oy);
     paintPaper(cacheCtx, p, view.k);
-    p.strokes.forEach(function (s) { if (s.hl) paintStroke(cacheCtx, s); });
-    p.strokes.forEach(function (s) { if (!s.hl) paintStroke(cacheCtx, s); });
+    var dark = tool.paper === "black";
+    p.strokes.forEach(function (s) { if (s.hl) paintStroke(cacheCtx, s, dark); });
+    p.strokes.forEach(function (s) { if (!s.hl) paintStroke(cacheCtx, s, dark); });
     cacheValid = true;
   }
 
@@ -506,7 +539,9 @@ function create(opts) {
     ctx.drawImage(cache, 0, 0);
     ctx.setTransform(d * view.k, 0, 0, d * view.k, d * view.ox, d * view.oy);
 
-    if (drawing && drawing !== "erasing") paintStroke(ctx, drawing);
+    if (drawing && drawing !== "erasing") {
+      paintStroke(ctx, drawing, tool.paper === "black");
+    }
 
     if (lasso && lasso.length > 1) {
       ctx.save();
@@ -779,8 +814,8 @@ function create(opts) {
                  .concat(p.strokes.filter(function (s) { return !s.hl; }));
     order.forEach(function (s) {
       var swapped = s.c;
-      s.c = forPaper(s.c);
-      paintStroke(g, s);
+      s.c = s.hl ? asHighlight(s.c) : forPaper(s.c);
+      paintStroke(g, s, false);        /* the PNG is white, always */
       s.c = swapped;
     });
     return c.toDataURL("image/png");

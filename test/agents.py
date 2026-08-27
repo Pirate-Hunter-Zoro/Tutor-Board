@@ -251,6 +251,18 @@ check("and it refuses to touch a board belonging to another node",
 check("and only ones that are genuinely answering",
       "board_is_running" in tool_src)
 
+ship = os.path.join(ROOT, "scripts", "ship.sh")
+check("there is one command that ships a change", os.path.isfile(ship))
+ship_src = open(ship, encoding="utf-8").read() if os.path.isfile(ship) else ""
+check("and it restarts the tutors as well as the boards",
+      "--tutors" in ship_src)
+check("and restarts nothing when the push failed",
+      "nothing has been restarted" in ship_src)
+check("a tutor mid-turn is not bounced out of the card it is writing",
+      "mid-turn" in tool_src)
+check("and stopping one waits for its handoff to be written",
+      "agent_live(c[\"root\"])" in tool_src)
+
 push_src = open(os.path.join(ROOT, "scripts", "save-and-push.sh"), encoding="utf-8").read()
 check("pushing the tool restarts the boards it drives", "tutor restart" in push_src)
 check("but a course pushing its own work does not",

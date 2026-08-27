@@ -110,11 +110,35 @@ r = paint('math', question, [{ id: 't0001', rev: 1, kind: 'ink', answers: '0001'
                                t: now + 10, t0: now + 10 }]);
 check('math: the answer block survives a send, so it can be corrected', r.answer === false);
 
-// A different question is the thing that closes it.
+// A new question is a new thing to answer, so the surface stays open -- moved on
+// to the new question rather than closed. The old assertion here used "hidden" as
+// a proxy for "no longer pinned to the previous question", which is not the same
+// claim and hid the one that matters.
 const question2 = [{ id: '0002', kind: 'question', title: 'And now?', body: 'q', mtime: now + 20 }];
 r = paint('math', question2, [{ id: 't0001', rev: 1, kind: 'ink', answers: '0001',
                                 t: now + 30, t0: now + 30 }]);
-check('math: a new question closes the block for the old one', r.answer === true);
+check('math: an unanswered question keeps a surface open', r.answer === false);
+
+// What actually closes it is the tutor settling the question.
+r = paint('math', question.concat([{ id: '0002', kind: 'correct', title: 'Yes',
+                                     body: 'that is it', mtime: now + 40 }]),
+          [{ id: 't0001', rev: 1, kind: 'ink', answers: '0001',
+             t: now + 30, t0: now + 30 }]);
+check('math: a "correct" card settles the question and closes the block',
+      r.answer === true);
+
+// Feedback that is not a settlement leaves it open, below the feedback, because
+// the next thing the student does is fix their work. And this has to survive the
+// app being closed and reopened: it is decided from the transcript, not from a
+// variable that only exists while the page is loaded.
+r = paint('math', question.concat([{ id: '0002', kind: 'wrong', title: 'Not quite',
+                                     body: 'the split is not disjoint', mtime: now + 40 },
+                                   { id: '0003', kind: 'lesson', title: 'A nudge',
+                                     body: 'try this', mtime: now + 50 }]),
+          [{ id: 't0001', rev: 1, kind: 'ink', answers: '0001',
+             t: now + 30, t0: now + 30 }]);
+check('math: after feedback the surface is still there to correct the work on',
+      r.answer === false);
 
 r = paint('math', [{ id: '0001', kind: 'lesson', body: 'x', mtime: now }], []);
 check('math: no offer when nothing was asked', r.answer === true);

@@ -46,6 +46,8 @@ var els = {
   scratch: document.getElementById("scratch"),
   scratchList: document.getElementById("scratch-list"),
   writer: document.getElementById("writer"),
+  sent: document.getElementById("sent"),
+  sentText: document.getElementById("sent-text"),
   session: document.getElementById("session"),
   kind: document.getElementById("kind"),
   kindLecture: document.getElementById("kind-lecture"),
@@ -58,6 +60,7 @@ var els = {
   finishLead: document.getElementById("finish-lead"),
   finishSub: document.getElementById("finish-sub"),
   save: document.getElementById("btn-save"),
+  barmenu: document.getElementById("barmenu"),
   home: document.getElementById("btn-home"),
   finishLeave: document.getElementById("finish-leave"),
   finishYes: document.getElementById("finish-yes"),
@@ -480,6 +483,19 @@ function render(data) {
     return (a.pos - b.pos) || (a.sub - b.sub) || (a.t - b.t);
   });
 
+  /* An answer that has been sent and not yet answered is not rendered into the
+     transcript: the ink is still on the writing surface directly below, and
+     showing a frozen copy of it immediately above that surface is the same thing
+     twice. It appears in its proper place the moment the tutor replies, which is
+     when it stops being "what I am looking at" and becomes "what was handed in".
+   */
+  awaitingReply = null;
+  var lastItem = items[items.length - 1];
+  if (lastItem && lastItem.turn && lastItem.turn.kind !== "text") {
+    awaitingReply = lastItem.turn;
+    items.pop();
+  }
+
   var atBottom = nearBottom();
   var frag = document.createDocumentFragment();
   var anythingNew = false;
@@ -593,6 +609,7 @@ function render(data) {
   paintHomework(data.hw);
   if (!started) paintWaiting(data);
   paintNotesSend();
+  paintSent();
   paintSave(data.unsaved);
   if (data.sets) knownSets = data.sets;
   if (data.contents) contents = data.contents;
@@ -617,10 +634,22 @@ function render(data) {
     }
   });
   (data.turns || []).forEach(function (m) { if (m.t > lastSent) lastSent = m.t; });
-  if (pinnedTo && pinnedTo !== newestQ) pinnedTo = null;
-  var owed = !codeMode && !!(lastQuestion && lastQuestion > lastSent);
-  if (owed) pinnedTo = newestQ;
-  owed = owed || (!codeMode && !!pinnedTo && pinnedTo === newestQ);
+  /* A question stays open until it is settled, and what settles it is the tutor
+     saying so -- a `correct` card written after it, or another question taking
+     its place. Not the clock.
+
+     It used to be "the newest question is newer than your newest send", plus an
+     in-memory pin so the surface survived a send. That pin is a variable, and a
+     variable does not survive closing the app: reopening a lesson where the
+     tutor had replied with anything other than a question left no writing
+     surface at all, on a board whose whole purpose is being written on. The
+     transcript on disk has to be enough to decide this. */
+  var settled = false;
+  (data.cards || []).forEach(function (c) {
+    if (c.kind === "correct" && c.mtime >= lastQuestion) settled = true;
+  });
+  var owed = !codeMode && !!newestQ && !settled;
+  pinnedTo = owed ? newestQ : null;
 
   /* A sent answer keeps the block open, because the tutor's next move is usually
      to point at a mistake in it. A declined one does the opposite: the whole
@@ -639,15 +668,22 @@ function render(data) {
   });
   answering = { question: newestQ, turn: mine.length ? mine[mine.length - 1] : null };
 
-  /* The panel goes after the question AND after anything already sent for it,
-     so the order reads question, what you handed in, the surface to correct it
-     on. Sliding it in above your own answer put the two out of order. */
+  /* The writing surface goes at the END of the transcript, under whatever the
+     last thing in it is. That is what makes a correction work the way a person
+     expects: the tutor's feedback arrives, and the surface to fix the answer on
+     is beneath the feedback rather than scrolled off above it.
+
+     While an answer is waiting to be read there is nothing to put under, so the
+     surface stays where it is and says so underneath itself -- see paintSent.
+     What it must never do is sit under a frozen copy of the very ink still
+     showing on the surface: that is the same thing twice, one above the other. */
   var qNode = null;
-  var nodes = els.cards.querySelectorAll('.card[data-kind="question"]');
-  if (nodes.length) qNode = nodes[nodes.length - 1];
-  if (qNode && newestQ) {
-    var mineNodes = els.cards.querySelectorAll('.mine[data-answers="' + newestQ + '"]');
-    if (mineNodes.length) qNode = mineNodes[mineNodes.length - 1];
+  var kids = els.cards.children;
+  for (var q = kids.length - 1; q >= 0; q--) {
+    if (kids[q] !== els.writer && kids[q].dataset && kids[q].dataset.key) {
+      qNode = kids[q];
+      break;
+    }
   }
   /* A past lesson is read only: no pen, no box, nothing to send into a session
      that has already been filed. */
@@ -1176,9 +1212,11 @@ function paintNotesSend() {
    offer is put in front of you once rather than waiting to be found. */
 var unsaved = 0;
 var offeredOnReturn = false;
+var lastUnsavedKnown = false;
 
 function paintSave(n) {
-  unsaved = (typeof n === "number") ? n : 0;
+  lastUnsavedKnown = (typeof n === "number");
+  unsaved = lastUnsavedKnown ? n : 0;
   var has = unsaved > 0;
   els.save.classList.toggle("dirty", has);
   els.save.textContent = has ? "⤓ save " + unsaved : "⤓ save";
@@ -1214,6 +1252,12 @@ document.addEventListener("visibilitychange", function () {
 var leavingTo = null;
 
 function askBeforeLeaving(href) {
+  /* Nothing outstanding, nothing to ask about. A prompt that appears every time
+     regardless is a prompt that gets dismissed without being read, which is how
+     the one time it mattered gets dismissed too. `unsaved` is unknown (null) in
+     a directory that is not a repository at all -- ask then, rather than assume.
+   */
+  if (unsaved === 0 && lastUnsavedKnown) { window.location.href = href; return; }
   leavingTo = href;
   els.finishLead.textContent = "Leaving this lesson.";
   els.finishSub.textContent = (unsaved > 0
@@ -1394,11 +1438,43 @@ document.getElementById("btn-contents-close").onclick = function () {
   els.contents.hidden = true;
 };
 
+
+/* The overflow menu. Closing on any choice matters more than it looks: on a
+   tablet a menu that stays open after a tap is a menu that swallows the next
+   one. */
+document.getElementById("btn-more").onclick = function (e) {
+  e.stopPropagation();
+  els.barmenu.hidden = !els.barmenu.hidden;
+};
+Array.prototype.forEach.call(els.barmenu.querySelectorAll("button"), function (b) {
+  b.addEventListener("click", function () { els.barmenu.hidden = true; });
+});
+document.addEventListener("click", function (e) {
+  if (els.barmenu.hidden) return;
+  if (!els.barmenu.contains(e.target)) els.barmenu.hidden = true;
+});
+
+
+/* What happened to the thing I just sent. Silence after sending is what makes a
+   person tap Send again, or wonder whether the pen even worked. */
+function paintSent() {
+  if (!awaitingReply) { els.sent.hidden = true; return; }
+  els.sent.hidden = false;
+  var when = timeLabel(awaitingReply.t);
+  var state = attached ? (working ? "working" : "waiting") : "none";
+  els.sent.dataset.state = state;
+  els.sentText.textContent =
+      state === "working" ? "sent at " + when + " — the tutor is reading it"
+    : state === "waiting" ? "sent at " + when + " — waiting for the tutor"
+    : "sent at " + when + " — no tutor is attached to read it yet";
+}
+
 /* ------------------------------------------------------------------ stream */
 var source = null;
 var linkDead = false;
 var everGotData = false;
 var attached = false;      /* is there a tutor on the other end at all */
+var awaitingReply = null;  /* an answer sent and not yet replied to */
 var working = false;       /* and is it in the middle of a turn right now */
 var sentAt = 0;            /* when begin was last tapped, so its label survives a frame */
 

@@ -108,8 +108,16 @@ body { background: var(--paper); min-height: 100vh; min-height: 100dvh; }
 .dot.live { background: #35a35f; box-shadow: 0 0 0 3px color-mix(in srgb, #35a35f 22%, transparent); }
 .dot.dead { background: #b64b4b; }
 
-.bar-right { display: flex; align-items: center; gap: .25rem; }
+/* The right group keeps its width; the left group is what gives way, because a
+   course name can be any length and a control cannot be half a control. */
+.bar-right { display: flex; align-items: center; gap: .25rem; flex: none; }
+.bar-left { overflow: hidden; }
 #bar button, #bar a {
+  /* A control must never wrap. When the bar got crowded the save's label broke
+     onto a second line, which made the button taller than the row it lived in --
+     so it painted over the chip beside it and the button after it. Crowding
+     caused it; wrapping is what turned crowding into overlap. */
+  white-space: nowrap; flex: none;
   font: inherit; line-height: 1;
   padding: .4rem .55rem;
   border: 1px solid transparent; border-radius: .4rem;
@@ -125,7 +133,8 @@ body { background: var(--paper); min-height: 100vh; min-height: 100dvh; }
   background: var(--paper-2); color: var(--ink-3);
 }
 .agent {
-  flex: none; display: inline-flex; align-items: center; gap: .3rem;
+  display: inline-flex; align-items: center; gap: .3rem;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: .68rem; color: var(--ink-3);
 }
 .agent::before {
@@ -721,3 +730,43 @@ body.tools-out .annbar { bottom: calc(5.6rem + env(safe-area-inset-bottom)); }
 #contents-list button.here { border-color: var(--note); font-weight: 650; }
 #contents-list button .sub { color: var(--ink-3); font-weight: 400; }
 #contents-list .none { color: var(--ink-3); font-size: .82rem; }
+
+/* ---------- the overflow menu ---------- */
+/* Anchored under the bar rather than floating over the lesson, so it reads as
+   part of the chrome it came out of. */
+.barmenu {
+  position: absolute; z-index: 45;
+  right: max(.6rem, env(safe-area-inset-right));
+  top: 100%;
+  display: flex; flex-direction: column; gap: .15rem;
+  min-width: 12rem;
+  padding: .4rem;
+  border: 1px solid var(--rule); border-radius: .5rem;
+  background: var(--paper);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, .3);
+  font-family: var(--ui); font-size: .84rem;
+}
+.barmenu button {
+  font: inherit; text-align: left; cursor: pointer;
+  padding: .5rem .6rem; border-radius: .35rem;
+  border: 1px solid transparent; background: transparent; color: var(--ink);
+  white-space: nowrap;
+}
+.barmenu button:hover { background: var(--paper-2); }
+#btn-more { font-weight: 700; letter-spacing: .05em; }
+
+/* ---------- the receipt ---------- */
+/* Under the writing surface, inside the same block, because that is where the
+   eye already is at the moment of sending. */
+.sent {
+  display: flex; align-items: center; gap: .5rem;
+  padding: .55rem .9rem;
+  background: #1c1e23;
+  border-top: 1px solid #2c2f37;
+  font-family: var(--ui); font-size: .78rem; color: #b9bcc4;
+}
+#sent-mark { color: #7fc79a; font-weight: 700; flex: none; }
+.sent[data-state="working"] #sent-mark {
+  color: var(--ask);
+  animation: pulse 1.1s ease-in-out infinite;
+}

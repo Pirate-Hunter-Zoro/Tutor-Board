@@ -455,6 +455,15 @@ if (es) {
   var wentTo = null;
   window.addEventListener('board:leave', function (e) { wentTo = e.detail.to; });
 
+  // With nothing outstanding, leaving is not worth a question.
+  es.onmessage({ data: JSON.stringify(Object.assign({}, b4, { unsaved: 0 })) });
+  var quiet = new window.Event('click', { bubbles: true, cancelable: true });
+  home.dispatchEvent(quiet);
+  if (fin.hidden) ok('with everything committed, leaving just leaves');
+  else fail('the way out asks a question it has no reason to ask');
+
+  // With work uncommitted, it asks.
+  es.onmessage({ data: JSON.stringify(Object.assign({}, b4, { unsaved: 2 })) });
   var ev = new window.Event('click', { bubbles: true, cancelable: true });
   home.dispatchEvent(ev);
   if (wentTo === null) ok('the back arrow does not simply walk out of the lesson');
@@ -504,6 +513,133 @@ if (es) {
   doc.getElementById('kind-cancel').onclick();
   if (chooser2.hidden) ok('and it can be dismissed');
   else fail('the sitting chooser cannot be dismissed');
+}
+
+// --- what happens between sending and being answered ------------------------
+// Sending used to drop a frozen copy of the ink directly above the surface the
+// ink was still sitting on -- the same thing twice, one above the other -- and
+// said nothing at all about whether it had arrived.
+if (es) {
+  var flow = doc.getElementById('cards');
+  var writer = doc.getElementById('writer');
+  var receipt = doc.getElementById('sent');
+  var t1 = Date.now() / 1000;
+  var qCard = { id: '0001', slug: 'q', kind: 'question', title: 'Prove it',
+                body: 'go on then', mtime: t1 };
+  var myInk = { id: 't0001', rev: 1, kind: 'ink', answers: '0001',
+                t: t1 + 60, t0: t1 + 60, png: '/answers/t0001-r1.png' };
+  var base5 = { state: { course: 'P', session: 'homework', mode: 'math' },
+                messages: [], uploads: [], slate: [], push: null,
+                agent: { agent: 'claude', state: 'working' } };
+
+  // The real sequence: the question arrives first and opens the surface, and the
+  // surface stays open across the send so a correction can be made on it.
+  es.onmessage({ data: JSON.stringify(Object.assign({}, base5,
+    { cards: [qCard], turns: [] })) });
+  if (!writer.hidden) ok('a question opens the writing surface');
+  else fail('no surface was offered for the question');
+
+  es.onmessage({ data: JSON.stringify(Object.assign({}, base5,
+    { cards: [qCard], turns: [myInk] })) });
+
+  if (!flow.querySelector('.mine[data-answers="0001"]'))
+    ok('a just-sent answer is not repeated above the surface it is still on');
+  else fail('the frozen copy is rendered right above the writing block again');
+  if (!receipt.hidden) ok('and the surface says underneath itself that it arrived');
+  else fail('sending is silent — nothing says it was received');
+  if (/reading it/.test(doc.getElementById('sent-text').textContent))
+    ok('and says the tutor is reading it while the tutor is working');
+  else fail('the receipt does not reflect the tutor: '
+            + doc.getElementById('sent-text').textContent);
+
+  // Feedback arrives. Now the answer belongs in the transcript, and the surface
+  // to correct it on belongs below the feedback.
+  var fb = { id: '0002', slug: 'r', kind: 'wrong', title: 'Not quite',
+             body: 'the second split is not disjoint', mtime: t1 + 120 };
+  es.onmessage({ data: JSON.stringify(Object.assign({}, base5,
+    { cards: [qCard, fb], turns: [myInk],
+      agent: { agent: 'claude', state: 'listening' } })) });
+
+  if (flow.querySelector('.mine[data-answers="0001"]'))
+    ok('once answered, what was handed in takes its place in the transcript');
+  else fail('the sent answer never reappears');
+  if (receipt.hidden) ok('and the receipt stands down');
+  else fail('the receipt is still claiming to be waiting');
+
+  var order5 = Array.prototype.map.call(flow.children, function (n) {
+    return n === writer ? 'WRITER'
+         : (n.dataset && n.dataset.key ? n.dataset.key.split(':').slice(0, 2).join(':') : '?');
+  });
+  if (String(order5) === String(['card:0001', 'turn:t0001', 'card:0002', 'WRITER']))
+    ok('and the surface to correct it on is below the feedback, not above it');
+  else fail('the writing block is in the wrong place: ' + order5);
+}
+
+// Closing the app and coming back must not take the writing surface with it.
+// It used to: the surface survived a send because of an in-memory pin, and a pin
+// is a variable. Reopening a lesson where the tutor had replied with anything
+// other than a question left no way to write at all.
+if (es) {
+  var flow2 = doc.getElementById('cards');
+  var writer2 = doc.getElementById('writer');
+  var t2 = Date.now() / 1000;
+  var reopened = {
+    state: { course: 'P', session: 'homework', mode: 'math' },
+    messages: [], uploads: [], slate: [], push: null,
+    agent: { agent: 'claude', state: 'listening' },
+    cards: [
+      { id: '0001', kind: 'question', title: 'Prove it', body: 'q', mtime: t2 },
+      { id: '0002', kind: 'note', title: 'Aside', body: 'a', mtime: t2 + 100 },
+      { id: '0003', kind: 'wrong', title: 'Not quite', body: 'w', mtime: t2 + 200 },
+      { id: '0004', kind: 'lesson', title: 'A nudge', body: 'l', mtime: t2 + 300 },
+    ],
+    turns: [{ id: 't0001', rev: 2, kind: 'ink', answers: '0001',
+              t: t2 + 60, t0: t2 + 50, png: '/answers/t0001-r2.png' }],
+  };
+  es.onmessage({ data: JSON.stringify(reopened) });
+  if (!writer2.hidden)
+    ok('reopening a lesson mid-correction still offers somewhere to write');
+  else fail('the writing surface is gone after a reload — the exact defect');
+
+  var last = flow2.children[flow2.children.length - 1];
+  if (last === writer2) ok('and it is at the end, below the tutor\'s latest word');
+  else fail('the surface is not below the newest card');
+
+  // The tutor settling it is what closes it, and that also survives a reload.
+  var settled = JSON.parse(JSON.stringify(reopened));
+  settled.cards.push({ id: '0005', kind: 'correct', title: 'Yes', body: 'c',
+                       mtime: t2 + 400 });
+  es.onmessage({ data: JSON.stringify(settled) });
+  if (writer2.hidden) ok('and a "correct" from the tutor puts the pen down');
+  else fail('nothing closes the surface once the work is agreed');
+}
+
+// Thirteen controls in one row is a row that overlaps itself on a tablet.
+if (es) {
+  var menu = doc.getElementById('barmenu');
+  var more = doc.getElementById('btn-more');
+  var right = doc.querySelector('.bar-right');
+  var visible = right.querySelectorAll('button, a, label').length;
+  if (visible <= 6) ok('the title bar carries only what a lesson uses (' + visible + ')');
+  else fail('the title bar is still crowded: ' + visible + ' controls');
+
+  if (menu && menu.hidden) ok('and the rest is one tap away, not on screen');
+  else fail('the overflow menu is missing or always open');
+
+  ['btn-smaller', 'btn-bigger', 'btn-face', 'btn-theme', 'btn-scratch',
+   'btn-history', 'btn-print', 'btn-reload'].forEach(function (id) {
+    var el = doc.getElementById(id);
+    if (el && menu.contains(el)) return;
+    fail(id + ' is not in the overflow menu — it is back in the bar');
+  });
+  ok('every occasional control lives in the menu');
+
+  more.onclick(new window.Event('click'));
+  if (!menu.hidden) ok('the menu opens');
+  else fail('the menu does not open');
+  doc.getElementById('btn-face').click();
+  if (menu.hidden) ok('and closes behind a choice, so it cannot swallow the next tap');
+  else fail('the menu stays open after a choice');
 }
 
 // A course is chapters and problem sets, and the board showed neither: the only

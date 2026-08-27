@@ -13,7 +13,7 @@ tutor -- start a tutoring session.
     tutor agent start galois    attach one there, detaching whatever was elsewhere
     tutor agent stop galois     ask it to write its handoff and go
     tutor where                 what is up, on this machine and on the tailnet
-    tutor restart               restart every board here, on the current code
+    tutor restart [--tutors]    restart every board here (and its tutor) on current code
 
 One command, from anywhere. It finds the course, brings its board up, opens a
 session, and launches whichever assistant you use -- already pointed at the
@@ -709,6 +709,45 @@ def cmd_restart(cfg, args):
         print("no boards were running on %s" % host)
     for s2 in skipped:
         print("  left alone: %s" % s2)
+
+    if "--tutors" not in args:
+        return 0
+
+    # The daemons hold old code for exactly the same reason the boards do: this
+    # file is read once, when the process starts. A tutor in the middle of a turn
+    # is left alone -- bouncing it loses the card it is writing, and the student
+    # is the one who pays for that.
+    import signal as _sig
+    bounced, held = [], []
+    for c in courses(cfg):
+        st = agent_live(c["root"])
+        if not st or st.get("mode") == "interactive":
+            continue
+        if st.get("state") == "working":
+            held.append("%s (mid-turn)" % c["dir"])
+            continue
+        name = st.get("agent")
+        try:
+            os.kill(st["pid"], _sig.SIGTERM)
+        except OSError:
+            pass
+        # The wrap-up turn a SIGTERM starts writes HANDOFF.md, and the next
+        # tutor reads it -- so waiting for the record to clear is waiting for
+        # the continuity to be written, not merely for a process to die.
+        for _ in range(60):
+            if not agent_live(c["root"]):
+                break
+            time.sleep(1.0)
+        code, msg = agent_start(cfg, c, name)
+        (bounced if code == 0 else held).append(
+            c["dir"] if code == 0 else "%s (%s)" % (c["dir"], msg))
+
+    if bounced:
+        print("tutors restarted: %s" % ", ".join(bounced))
+    elif not held:
+        print("no tutors were attached on %s" % host)
+    for h in held:
+        print("  left alone: %s" % h)
     return 0
 
 

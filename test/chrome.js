@@ -21,16 +21,23 @@ const fail = (m) => { errors.push(m); console.log('FAIL ' + m); };
 
 // The declarations of one top-level rule, with @media blocks left out.
 function block(selector) {
-  const screen = CSS.replace(/@media[^{]*\{(?:[^{}]*\{[^{}]*\}\s*)*\}/g, '');
+  // Comments first: a declaration written under an explanatory comment is still
+  // a declaration, and leaving them in made `decl` miss the line after one.
+  const screen = CSS.replace(/\/\*[\s\S]*?\*\//g, '')
+                    .replace(/@media[^{]*\{(?:[^{}]*\{[^{}]*\}\s*)*\}/g, '');
   const re = new RegExp('(^|[},])\\s*' + selector.replace(/[#.]/g, '\\$&')
-                        + '\\s*\\{([^}]*)\\}', 'm');
-  const m = re.exec(screen);
-  return m ? m[2] : null;
+                        + '\\s*\\{([^}]*)\\}', 'mg');
+  // Every rule with this selector, not merely the first: a stylesheet may well
+  // add to a selector further down, and testing only the first one reports a
+  // property as missing while it is sitting there.
+  let m, body = '';
+  while ((m = re.exec(screen)) !== null) body += ';' + m[2];
+  return body || null;
 }
 
 function decl(body, prop) {
   if (!body) return null;
-  const m = new RegExp('(?:^|;)\\s*' + prop + '\\s*:\\s*([^;]+)').exec(body);
+  const m = new RegExp('(?:^|;|\\n)\\s*' + prop + '\\s*:\\s*([^;]+)', 'm').exec(body);
   return m ? m[1].trim() : null;
 }
 
@@ -60,6 +67,23 @@ draw ? ok('#drawbar has a rule') : fail('#drawbar has no rule at all');
     ? ok(sel + ' does not separately claim the top')
     : fail(sel + ' sticks to the top on its own and will overlap the stack');
 });
+
+// A control in the bar must never wrap. It did: the save's label broke onto a
+// second line once the bar filled up, which made the button taller than its row,
+// and it painted straight over the agent chip and the button beside it. This is
+// the same family as the two bars fighting for the top -- something in the chrome
+// growing past the space it was given and covering what is next to it.
+const barBtn = block('#bar button, #bar a');
+if (barBtn === null) fail('#bar controls have no rule of their own');
+else if (/nowrap/.test(decl(barBtn, 'white-space') || ''))
+  ok('a control in the bar cannot wrap onto a second line');
+else fail('bar controls may wrap — a two-line button overlaps its neighbours');
+
+// And the left group is what gives way when the course name is long.
+const left = block('.bar-left');
+/hidden/.test(decl(left, 'overflow') || '')
+  ? ok('the left group truncates rather than pushing the controls off the edge')
+  : fail('a long course name can still push the controls out of the bar');
 
 // The tools own the bottom, and must not claim a top edge at all.
 /sticky|fixed/.test(decl(draw, 'position') || '') && decl(draw, 'bottom') === '0'

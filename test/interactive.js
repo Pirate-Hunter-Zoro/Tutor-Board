@@ -170,13 +170,27 @@ setTimeout(() => setTimeout(() => {
     // What the student wrote belongs in the lesson, under the question it
     // answers -- not in a drawer of unlabelled thumbnails at the bottom of the
     // screen, which is where it used to go.
+    const q1 = { id: '0001', kind: 'question', title: 'Q', body: 'hi', mtime: now };
+    const ink1 = { id: 't0001', rev: 1, kind: 'ink', answers: '0001',
+                   t: now + 5, t0: now + 5, png: '/answers/t0001-r1.png',
+                   ink: '/answers/t0001-r1.json', strokes: 12 };
+    // While it is still waiting to be read, the answer is deliberately NOT in the
+    // flow: the ink is on the writing surface immediately below, and a frozen
+    // copy of it above that surface is the same thing twice.
     window.__render({
       state: { course: 'X', mode: 'math' },
-      cards: [{ id: '0001', kind: 'question', title: 'Q', body: 'hi', mtime: now }],
-      messages: [], uploads: [], slate: [],
-      turns: [{ id: 't0001', rev: 1, kind: 'ink', answers: '0001',
-                t: now + 5, t0: now + 5, png: '/answers/t0001-r1.png',
-                ink: '/answers/t0001-r1.json', strokes: 12 }],
+      cards: [q1], messages: [], uploads: [], slate: [], turns: [ink1],
+    });
+    doc.querySelector('.mine[data-turn="t0001"]')
+      ? fail('a just-sent answer is duplicated above the surface it is still on')
+      : ok('a just-sent answer is not repeated above the writing surface');
+
+    // The tutor replies. Now it is what was handed in, and it belongs in place.
+    window.__render({
+      state: { course: 'X', mode: 'math' },
+      cards: [q1, { id: '0002', kind: 'wrong', title: 'Not quite', body: 'no',
+                    mtime: now + 10 }],
+      messages: [], uploads: [], slate: [], turns: [ink1],
     });
     const mine = doc.querySelector('.mine[data-turn="t0001"]');
     mine ? ok('an answer appears in the lesson, not in a drawer')
@@ -192,7 +206,8 @@ setTimeout(() => setTimeout(() => {
     // A revision supersedes in place rather than piling up at the end.
     window.__render({
       state: { course: 'X', mode: 'math' },
-      cards: [{ id: '0001', kind: 'question', title: 'Q', body: 'hi', mtime: now }],
+      cards: [q1, { id: '0002', kind: 'wrong', title: 'Not quite', body: 'no',
+                    mtime: now + 10 }],
       messages: [], uploads: [], slate: [],
       turns: [{ id: 't0001', rev: 2, kind: 'ink', answers: '0001',
                 t: now + 90, t0: now + 5, png: '/answers/t0001-r2.png',
