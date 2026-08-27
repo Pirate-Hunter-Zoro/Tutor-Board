@@ -50,7 +50,6 @@ for phrase, why in [
     ("skip", "a declined prompt is obeyed"),
     ("one question", "one question per turn"),
     ("HANDOFF.md", "the session ends in writing"),
-    ("code course", "a code course is a different shape and says so"),
     ("Write the card before", "the card lands before the turn's other work"),
     ("board hw", "an agreed answer is typeset into the course's own file"),
     ("board finish", "the session ends by offering the push"),
@@ -67,6 +66,17 @@ for phrase, why in [
     ("One concept per check", "one concept per check, not three in one card"),
     ("Tiny", "a check is small enough to answer at once"),
     ("can be skipped", "and a check can be declined like any other prompt"),
+    # A code repository is a project, and the method used to be fifteen lines
+    # bolted onto a document about books. So a first card on a project with no
+    # chapters opened with "Which chapter this is", invented an order out of the
+    # README's headings, and taught a lesson nobody asked for while the actual
+    # task list sat unread in another repository.
+    ("not a course", "a code repository is a project, not a course"),
+    ("Do not manufacture a curriculum", "and no curriculum is invented for it"),
+    ("where the work is planned", "the README says where the work is planned"),
+    ("follow that pointer", "and the tutor follows that pointer for what is next"),
+    ("do not choose an agenda", "and asks rather than choosing its own work"),
+    ("goes with a commit", "and finishing work includes writing it down"),
 ]:
     check("the method states: " + why, phrase.lower() in text.lower())
 
@@ -77,11 +87,59 @@ check("and it forbids the survey-then-ask shape outright",
 # --- delivery -----------------------------------------------------------------
 tmp = tempfile.mkdtemp(prefix="tutor-teaching-")
 try:
+    import json  # noqa: E402
+    with open(os.path.join(tmp, "tutorboard.json"), "w", encoding="utf-8") as fh:
+        json.dump({"name": "T", "mode": "code"}, fh)
     live = boardcli.Live(tmp)
     dest = boardcli.install_teaching(live)
     check("starting a board puts it in the course's live/", bool(dest) and os.path.isfile(dest))
-    check("and it is the same document, not a summary of it",
-          bool(dest) and open(dest, encoding="utf-8").read() == text)
+
+    # It is a filter, never a rewrite. A maths course has no use for the project
+    # method and a project has no use for the homework rules, and every session
+    # pays to read whichever half does not apply -- but a hand-written summary
+    # would drift, which is the whole reason this file lives in one place.
+    maths = boardcli.for_mode(text, "math")
+    code = boardcli.for_mode(text, "code")
+
+    def sections(doc):
+        out, cur = {}, None
+        for line in doc.splitlines(True):
+            if line.strip().startswith("<!-- mode:"):
+                continue          # delivery plumbing, not one of the words
+            if line.startswith("## "):
+                cur = line.strip()
+                out[cur] = ""
+            elif cur:
+                out[cur] += line
+        return out
+
+    src_s, math_s, code_s = sections(text), sections(maths), sections(code)
+    check("every section of the method is delivered to somebody",
+          all(h in math_s or h in code_s for h in src_s))
+    check("and every delivered section is the source's own words, not a summary",
+          all(math_s[h] == src_s[h] for h in math_s)
+          and all(code_s[h] == src_s[h] for h in code_s))
+    check("a maths course gets the section method and not the project one",
+          "A section, from start to finish" in maths
+          and "A project, from where you are" not in maths)
+    check("a code project gets the project method and not the homework rules",
+          "A project, from where you are" in code
+          and "A homework sitting" not in code)
+    check("and both get the rules that belong to neither in particular",
+          "Write the card before you do anything else" in maths
+          and "Write the card before you do anything else" in code)
+    marker_line = lambda doc: any(l.strip().startswith("<!-- mode:")
+                                  and l.strip().endswith("-->")
+                                  and len(l.strip()) < 24
+                                  for l in doc.splitlines())
+    check("the mode markers themselves never reach a course",
+          not marker_line(maths) and not marker_line(code))
+    check("a course whose mode is unknown gets the whole document, not half",
+          boardcli.for_mode(text, None) == text)
+    check("the code delivery is genuinely smaller, which is the point",
+          len(code) < len(text) * 0.75)
+    check("and what lands in live/ is the delivery for this course",
+          bool(dest) and open(dest, encoding="utf-8").read() == code)
 
     # It is a delivery, not an edit to the course: live/ is ignored by git.
     check("it lands under live/, which no course commits",
@@ -91,7 +149,7 @@ try:
     open(dest, "w", encoding="utf-8").write("something older")
     boardcli.install_teaching(live)
     check("a stale copy is replaced on the next start",
-          open(dest, encoding="utf-8").read() == text)
+          open(dest, encoding="utf-8").read() == code)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

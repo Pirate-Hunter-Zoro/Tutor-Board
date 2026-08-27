@@ -176,10 +176,47 @@ def install_teaching(live):
         return None
     dest = live.path("TEACHING.md")
     try:
-        shutil.copyfile(src, dest)
+        with open(src, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        with open(dest, "w", encoding="utf-8") as fh:
+            fh.write(for_mode(text, read_config(live.root).get("mode")))
     except OSError:
         return None
     return dest
+
+
+def for_mode(text, mode):
+    """The method, minus the half this course will never use.
+
+    A maths course has no use for the project method and a code project has no
+    use for the homework rules, and every session pays to read whichever half
+    does not apply to it. Sections are tagged in the source with
+    `<!-- mode: math -->` or `<!-- mode: code -->`; anything untagged is shared
+    and goes to both.
+
+    This is a filter, never a rewrite: the sections that survive are byte for
+    byte the ones in TEACHING.md, so there is still exactly one copy of every
+    rule and nothing to drift. An unknown mode gets the whole document, because
+    the failure to avoid is a tutor teaching with half a method.
+    """
+    if mode not in ("math", "code"):
+        return text
+    other = "code" if mode == "math" else "math"
+    out, drop = [], False
+    for line in text.splitlines(True):
+        if line.startswith("## "):
+            drop = False
+        if line.strip() == "<!-- mode: %s -->" % other:
+            drop = True
+            while out and out[-1].strip() == "":
+                out.pop()
+            out.pop()                     # the heading this tag belongs to
+            continue
+        if line.strip() == "<!-- mode: %s -->" % mode:
+            continue                      # keep the section, drop the marker
+        if not drop:
+            out.append(line)
+    return "".join(out)
 
 
 # What an unattended tutor has to be allowed to do. Narrow on purpose: write into

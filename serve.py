@@ -286,6 +286,35 @@ SIGNAL_SENSE = {
 }
 
 
+def code_sense(label):
+    """Where a code project says what comes next: its README, and what it points at.
+
+    This is the whole prompt in a headless session, so it carries the shape as
+    well as the place -- and the shape is the part that was wrong. A project has
+    no chapters, no sections and no exercises, and manufacturing them out of the
+    README's structure is the specific failure this exists to prevent: those
+    headings describe how the system is built, not an order to learn it in.
+    """
+    where = ("They are working on %r; start there. " % label) if label else ""
+    return (
+        "Follow live/TEACHING.md, the code-project half of it. This repository is "
+        "a PROJECT, not a course: there are no chapters, no sections and no "
+        "exercises, and you must not invent any out of the README's headings.\n\n"
+        "Read README.md at the root first. It is the entry point, and it says "
+        "where the work is planned -- a task list, a planning document, a "
+        "companion repository. Follow that pointer and read what it names: that "
+        "is what says what comes next, and it outranks anything you would have "
+        "chosen yourself. Read HANDOFF.md too if there is one. If the README "
+        "names nothing, or what it names is missing, ask them in your first card "
+        "rather than picking an agenda of your own.\n\n"
+        + where +
+        "Then write ONE card saying what to change next: the file, what it has "
+        "to do, and how they will know it works. They write the code in their "
+        "own editor -- you never write it and never put a solution on the board. "
+        "One change per turn, then stop and wait for 'ready to check'."
+    )
+
+
 def session_sense(repo):
     """What this sitting is, in a sentence an assistant can act on.
 
@@ -298,6 +327,16 @@ def session_sense(repo):
     st = repo.state()
     kind = st.get("session") or "lecture"
     chapter = (st.get("chapter") or "").strip()
+
+    # A code repository is a PROJECT, and everything below this is written for a
+    # course that follows a book. Without this branch it fell through to the last
+    # case, which tells the assistant to "begin at the beginning of the course as
+    # the repository itself orders it, and say in your first card which chapter
+    # you are opening" -- so it dutifully invented chapters out of the README's
+    # section headings and opened "Chapter 1". There are no chapters in a
+    # project. There is a README, and the README says where the work is planned.
+    if read_config(repo.root).get("mode") == "code":
+        return code_sense(chapter)
     # In a headless session this line is the whole prompt, so it has to carry the
     # pointer to the method as well as the pointer to the place.
     how = ("Follow live/TEACHING.md: teach only what the problem in front of them "
