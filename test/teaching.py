@@ -56,6 +56,7 @@ for phrase, why in [
     ("board finish", "the session ends by offering the push"),
     ("assignment sheet", "a homework sitting reads the sheet it was set"),
     ("not yours", "and does not choose its own problems there"),
+    ("no exception to this", "and nothing outranks getting the card up first"),
     ("has not produced", "no solution is invented for the student"),
 ]:
     check("the method states: " + why, phrase.lower() in text.lower())

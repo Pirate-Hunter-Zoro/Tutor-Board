@@ -56,10 +56,14 @@ DEFAULT_CONFIG = {
         # session and offer a flag to resume it, which is what belongs here.
         "claude": {
             "cmd": ["claude"], "prompt": "argv",
+            # `headless_first` opens the session; `headless` continues it, so the
+            # agent is not re-reading the whole contract on every single turn.
+            "headless_first": ["claude", "-p", "{prompt}"],
             "headless": ["claude", "-p", "{prompt}", "--continue"],
         },
         "opencode": {
             "cmd": ["opencode"], "prompt": "argv",
+            "headless_first": ["opencode", "run", "{prompt}"],
             "headless": ["opencode", "run", "--continue", "{prompt}"],
         },
         "codex": {
@@ -608,11 +612,27 @@ def headless(cfg, course, agent_name, session):
         ticker = threading.Thread(target=beat, daemon=True)
         ticker.start()
 
-        cmd = [a.replace("{prompt}", HEADLESS_PROMPT % out.strip()) for a in recipe]
+        # The first turn of a session has no conversation to continue, and a
+        # resume flag against nothing is an immediate failure. After that the
+        # agent's own session is worth keeping: without it every turn pays for
+        # re-reading the contract, the method and the lesson before it can write
+        # a word, which is most of what a turn costs.
+        use = recipe if turns > 1 else (spec.get("headless_first") or recipe)
+        prompt = HEADLESS_PROMPT % out.strip()
+        cmd = [a.replace("{prompt}", prompt) for a in use]
         try:
             p = subprocess.run(cmd, cwd=root, stdout=log, stderr=subprocess.STDOUT,
                                timeout=cfg.get("headless_timeout", 900))
             err = None if p.returncode == 0 else "exit %d" % p.returncode
+            # A resume that finds nothing to resume is not a broken turn; it is a
+            # first turn wearing the wrong recipe. Try it once as one.
+            if err and use is not (spec.get("headless_first") or recipe):
+                log.write("!! resume failed, retrying as a fresh turn\n")
+                cmd = [a.replace("{prompt}", prompt)
+                       for a in (spec.get("headless_first") or recipe)]
+                p = subprocess.run(cmd, cwd=root, stdout=log, stderr=subprocess.STDOUT,
+                                   timeout=cfg.get("headless_timeout", 900))
+                err = None if p.returncode == 0 else "exit %d" % p.returncode
         except subprocess.TimeoutExpired:
             err = "timed out"
         except OSError as exc:

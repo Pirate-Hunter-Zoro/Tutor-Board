@@ -88,8 +88,11 @@ not invent another.
 ## Write the card before you do anything else
 
 The student is watching a blank board while you work. Whatever else a turn
-involves — checking a macro, updating `HANDOFF.md`, filing a page, reading ahead
-— **write the card first and let it land.** It appears on the board the instant
+involves — checking a macro, updating `HANDOFF.md`, filing a page, reading ahead,
+transcribing a problem statement into the `.tex` — **write the card first and let
+it land.** There is no exception to this, and nothing else in this file overrides
+it: where another rule says something must happen "first", it means first among
+the things that happen *after* the card. It appears on the board the instant
 the file exists, so everything you do afterwards happens while they are already
 reading rather than while they are waiting.
 
@@ -162,12 +165,15 @@ yours** — and changes nothing else about how a problem is taught.
 2. **Say the plan in your first card:** which problems are assigned, in order,
    and where you are starting. If the sheet is missing or unreadable, say so and
    ask which problems are assigned rather than inferring them from the chapter.
-3. **Transcribe every statement into the set's `.tex` first**, faithfully, with
-   its empty solution region beneath — before teaching any of them. That is the
-   scaffold, and it is yours.
-4. **Then take them one at a time, exactly as in a lecture:** teach what that
+3. **Then take them one at a time, exactly as in a lecture:** teach what that
    problem needs, work a smaller example, pose it, stop. The student writes;
    you review; a wrong step goes back with the break located, not repaired.
+4. **Scaffold the `.tex` behind the lesson, not in front of it.** Each problem's
+   statement goes into the file with its empty solution region beneath, but that
+   is clerical work and the student is sitting there waiting: do it *after* the
+   turn's card has landed, and do the one problem you are on rather than all of
+   them up front. Transcribing a whole sheet before saying anything is a person
+   watching a blank board for several minutes while nothing they can see happens.
 5. **Skip still means skip.** A student who already has a problem does not need
    teaching for it — go straight to posing it, or straight past it if they say
    so. Do not use the assignment as a reason to press.

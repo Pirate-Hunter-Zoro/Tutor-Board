@@ -197,6 +197,49 @@ def install_teaching(live):
     return dest
 
 
+# What an unattended tutor has to be allowed to do. Narrow on purpose: write into
+# its own course, drive this tool, and read a PDF. Nothing here grants a network,
+# a package manager, or a shell in general.
+TUTOR_PERMISSIONS = {
+    "permissions": {
+        # File edits are the whole job -- a tutor that cannot write a card cannot
+        # teach. Everything else still has to be listed.
+        "defaultMode": "acceptEdits",
+        "allow": [
+            "Bash(board:*)", "Bash(board *)",
+            "Bash(pdftotext:*)", "Bash(pdftotext *)",
+            "Bash(pdfinfo:*)", "Bash(pdfinfo *)",
+        ],
+    }
+}
+
+
+def install_permissions(live):
+    """Let a headless tutor actually write, if this course has not said otherwise.
+
+    A daemon has nobody to approve anything: a tool that needs permission simply
+    fails, silently as far as the board is concerned. That is not theoretical --
+    a first homework turn read the assignment, composed the whole opening card,
+    and ended having written nothing, because the course had no permissions file
+    and every write was refused.
+
+    Only ever created, never edited: a course that has built up its own list keeps
+    it, and this is a committed file the owner can read and change.
+    """
+    d = os.path.join(live.root, ".claude")
+    path = os.path.join(d, "settings.local.json")
+    if os.path.exists(path):
+        return None
+    try:
+        os.makedirs(d, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(TUTOR_PERMISSIONS, fh, indent=2)
+            fh.write("\n")
+    except OSError:
+        return None
+    return path
+
+
 def cmd_start(live, args):
     info = live.info()
     if info and alive(info):
@@ -220,6 +263,10 @@ def cmd_start(live, args):
                 return 1
 
     install_teaching(live)
+    granted = install_permissions(live)
+    if granted:
+        print("wrote %s so a headless tutor can write cards here"
+              % os.path.relpath(granted, live.root))
 
     port = default_port(live.root)
     lan = False
