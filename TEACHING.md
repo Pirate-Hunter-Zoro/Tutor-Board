@@ -55,13 +55,55 @@ Do these in order, and **do not run two of them together in one card**:
 2. **Work an example yourself.** Smaller than the exercise, and concrete: real
    numbers, a group of order six, two or three cases, not the general statement.
    The student watches one done before being asked to do one.
-3. **Pose the exercise.** A `question` card, stated in full, in the book's own
+3. **Hand them one to do — every concept, before the exercise.** A `question`
+   card with a *tiny* instance of the thing you just taught. This is not
+   optional and it is not the exercise: see **Every concept gets a hand-check**
+   below.
+4. **Pose the exercise.** A `question` card, stated in full, in the book's own
    terms. Nothing else in that card.
-4. **Stop. Wait.** The board is showing an answer block; the student writes.
+5. **Stop. Wait.** The board is showing an answer block; the student writes.
 
 If the exercise needs two unfamiliar ideas, that is two teaching cards before the
-question, not one card containing both. Size a step by what is unfamiliar, never
-by what is adjacent in the text.
+question, not one card containing both — and **two hand-checks, one per idea**.
+Size a step by what is unfamiliar, never by what is adjacent in the text.
+
+### Every concept gets a hand-check
+
+A concept that has only been read is not a concept the student can use, and an
+exercise is where that gets discovered — too late, at the point where it costs
+them the exercise. So **between explaining a concept and posing the exercise
+that needs it, the student works one small instance of it themselves.**
+
+One card, `kind: question`, and it obeys these:
+
+- **One concept per check.** Cosets, then normality, then the index — three
+  checks, three cards, not one card asking for all three.
+- **Tiny.** Thirty seconds to a minute of writing: list the cosets of a
+  two-element subgroup of a group of order six; conjugate one element by one
+  other; say which of two subgroups is normal. A check that takes as long as the
+  exercise has replaced the exercise.
+- **Mechanical on purpose.** A check asks them to *do the operation*, not to
+  prove anything. The proof is what the exercise is for.
+- **Concrete.** Actual elements, actual numbers. Never "show that in general".
+- **Answerable from the card above it.** If a check needs something you have not
+  taught yet, it is not a check, it is the next concept.
+- **Say what it is for**, in one clause: *before the exercise, make sure the
+  operation itself is fluent*.
+
+Then stop and read what comes back, exactly as with any question. A wrong check
+is the cheapest possible place to find a misunderstanding, and it is why this
+exists: fix it there, in one card, rather than in the middle of a proof.
+
+**A check can be skipped, and a skip is not a failure.** The answer block
+carries *skip this one*; tapping it means *I already have this*. Treat the
+concept as known, do not re-ask it, do not press the point, and move straight on
+to the next concept or to the exercise. A student who skips three checks and
+then struggles with the exercise gets the concept taught again at that point —
+without comment about the skipping.
+
+Do not stack a check and the exercise in one card, and do not let a check
+sprawl into a second concept. The whole value is that it is small enough to be
+answered immediately and cheap enough to be skipped without losing anything.
 
 ### 4. Read what comes back, and respond to *that*
 

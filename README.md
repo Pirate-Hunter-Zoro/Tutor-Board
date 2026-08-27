@@ -142,6 +142,12 @@ these tests fail, the test is right.
 | The save's label wrapped onto a second line in a crowded bar, making the button taller than its row, so it painted over the agent chip and the button beside it | `test/chrome.js` |
 | In dark mode a cream band filled the bottom of the screen: `<html>` painted `var(--paper)`, which resolves from `:root` and is therefore always the light value, while the dark palette is scoped to `<body>` | `test/theme.js` |
 | A board with no assistant attached looked exactly like one with an assistant: the chip simply hid itself, so a tap went into an inbox nobody was reading | `test/link.js` |
+| The whole board glitched, shifted and snapped back while nothing was happening: the reconcile detached the entire lesson into a fragment and re-appended it on every payload, and re-inserting a node restarts its CSS animations — which every card carried | `test/interactive.js`, `test/chrome.js` |
+| Every payload re-parsed the markdown of every card and rebuilt its DOM, for a reconcile that then threw all of it away — a full frame's work, thirty seconds apart, for a heartbeat | `test/interactive.js` |
+| A circle drawn round something near the edge of a card came back with a straight edge chopped across it: annotation samples were clamped into the card's own box | `test/link.js` |
+| Annotation ink was faceted and jagged next to the slate's: the layer joined raw pointer samples with straight lines, redrew every stroke inside the pointer handler, and never asked for the samples the Pencil actually took | `test/link.js` |
+| A `begin` signal sent while no tutor was attached was invisible for ever: `board wait` took the unread count at start as a baseline and returned only when it grew, so the first tap did nothing and the second one woke it | `test/begin.py` |
+| A resumed turn was told to re-read the contract, the method, the handoff and every card — about fourteen thousand tokens it was already carrying, plus a round trip per card | `test/tokens.py` |
 | The "is a tutor attached" dot could never go green outside headless: only the daemon ever wrote `agent.json`, and a heartbeat is the wrong test for a session that is idle whenever its person is thinking | `test/agents.py`, `test/begin.py` |
 
 The pattern in most of them: a stub that returns a plausible object for everything will report that
@@ -203,7 +209,11 @@ The shape, in a mathematics course:
 2. **Choose a manageable few** — three to five, sometimes two — and say in the
    opening card which ones and why each earned its place. Not all of them.
 3. **For each in turn:** teach the concept it needs, work a smaller example
-   yourself, then pose the exercise as a `question` card and stop.
+   yourself, **hand the student a tiny instance of it to work themselves**, and
+   only then pose the exercise as a `question` card and stop. A concept that has
+   only been read is not one they can use, and the exercise is an expensive place
+   to discover that. The check is thirty seconds of writing, one concept at a
+   time, and it can be skipped like any other prompt.
 4. **Read what comes back.** A wrong answer gets its break located, not repaired.
 5. **When the chosen set is done, offer more** as a question — the student
    answers, or taps **skip**, which means *move on*.
@@ -391,6 +401,38 @@ resumes its session belongs in the recipe. Output goes to `live/agent.log`.
 allocation, so the daemon dies when the job ends — headless there is only useful for as long as
 you hold the node. An always-on machine is the right home for it: a Mac mini already on your
 tailnet, with its own clones of the course repositories, kept in step by pushing.
+
+### What a session costs, and why that is a design question
+
+The tutor may be a model billed by the token rather than a flat-rate
+subscription, and a headless course is a long sequence of turns against a
+conversation that only grows. Two facts drive everything here: **a re-read is
+charged again for the rest of the turn and again for the rest of the session**,
+because every round trip resends the whole conversation; and **the lesson is
+already on disk**, so nothing has to be carried in the conversation to survive.
+
+- **Two prompts, not one.** A cold turn reads the contract, `TEACHING.md` and
+  `HANDOFF.md` once. Every turn after it runs on the agent's own resumed session
+  and is told, in as many words, *not* to re-read them. The single prompt this
+  replaced told every turn to read the lot — roughly fourteen thousand tokens of
+  documents the agent was already holding, plus one round trip per card in the
+  lesson, plus a `board inbox` that answered "inbox empty" because the wake-up
+  had already marked it read.
+- **`board recap` reads a lesson in one call.** Every card as a line, the newest
+  in full, the student's own turns, and which question is still open. Reading a
+  twelve-card lesson card by card is twelve round trips for what fits in one, and
+  it is what picking a course up cold used to mean.
+- **Sessions are recycled.** `session_turns` in the config (12 by default)
+  starts a fresh session once carrying the old one costs more than reading the
+  lesson back off disk. Set it to 0 to resume for ever, which is the right answer
+  on a flat rate and the wrong one on a meter.
+- **The handoff is capped** at 350 words and is no longer invited to review the
+  course's documentation on its way out. It is read in full at the start of every
+  future session, so length there is a cost paid over and over.
+
+None of this is allowed to cost teaching quality, and the rule cuts both ways: a
+change to how the tutor teaches is also a change to what it costs, so a new rule
+in `TEACHING.md` is weighed the same way. `test/tokens.py` holds it.
 
 ### Knowing what is actually up
 
@@ -1007,6 +1049,7 @@ board push "message"             # or just do it
 board eyes                       # can the assistant driving this see images?
 board open "Galois Theory" "Ch 7 — Splitting fields"
 board next lesson splitting-fields   # -> live/cards/0001-splitting-fields.md
+board recap                      # the lesson so far, in one call
 board inbox                      # what the student sent back, with file paths
 board slate                      # just the pages written on the iPad
 board wait --timeout 300         # block until the student sends something

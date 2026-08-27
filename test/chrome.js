@@ -125,6 +125,22 @@ comp ? ok('#composer has a rule') : fail('#composer has no styling at all');
   ? ok('a code course reserves room for the composer')
   : fail('nothing reserves height for the composer — it will cover the last card');
 
+// An entry animation on every card, rather than on the ones that just arrived,
+// is invisible for exactly as long as nothing re-inserts a card. The reconcile
+// did, on every payload, and the whole lesson slid and faded each time -- the
+// board "glitching and shifting and going right back". `render` already marks
+// what is new.
+!/animation:\s*rise/.test(block('.card') || '')
+  ? ok('a card that is merely on screen does not animate')
+  : fail('every .card carries an entry animation; any re-insertion replays it '
+         + 'across the whole lesson');
+/animation:\s*rise/.test(block('.card.fresh') || '')
+  ? ok('and a card that has just arrived does')
+  : fail('nothing animates a newly arrived card');
+!/animation:\s*rise/.test(block('.mine') || '')
+  ? ok('the same holds for the student\'s own turns')
+  : fail('every .mine carries an entry animation');
+
 console.log(errors.length ? '\n' + errors.length + ' FAILURES'
                           : '\nevery bar is where it belongs');
 process.exit(errors.length ? 1 : 0);

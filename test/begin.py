@@ -223,6 +223,40 @@ try:
     last = lines[-1].get("text", "")
     check("a sentence of their own is left alone",
           "the lattice makes no sense" in last and "they are stuck" not in last)
+
+    # `board wait` has to wake on what is ALREADY unread, not only on what
+    # arrives while it happens to be blocking. It used to take the unread count
+    # as a baseline and return when that count grew, so a begin signal sent
+    # before a tutor was attached -- which is the entire cold start this file is
+    # about -- left the daemon waiting for a second tap on a board that was
+    # already asking. The student tapped begin twice and got one card.
+    import subprocess  # noqa: E402
+    import time as _t   # noqa: E402
+
+    with open(repo.messages_path, "r", encoding="utf-8") as fh:
+        unread = [json.loads(l) for l in fh if l.strip()]
+    check("something is sitting unread before the wait starts",
+          any(not m.get("read") for m in unread))
+
+    began = _t.time()
+    p_wait = subprocess.run([sys.executable, os.path.join(ROOT, "bin", "board"),
+                             "wait", "--timeout", "20"], cwd=tmp,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            timeout=60)
+    took = _t.time() - began
+    out = p_wait.stdout.decode("utf-8", "replace")
+    check("a message already unread wakes `board wait` at once",
+          p_wait.returncode == 0 and took < 5)
+    check("and it is handed the message, not an empty inbox",
+          "the lattice makes no sense" in out)
+
+    # Reading is what consumes a message, so the next wait must block again
+    # rather than deliver the same thing for ever.
+    p_wait = subprocess.run([sys.executable, os.path.join(ROOT, "bin", "board"),
+                             "wait", "--timeout", "1"], cwd=tmp,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            timeout=60)
+    check("a read message does not wake it again", p_wait.returncode == 2)
 finally:
     httpd.shutdown()
     shutil.rmtree(tmp, ignore_errors=True)

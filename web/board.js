@@ -398,8 +398,23 @@ function timeLabel(t) {
 /* Nodes inserted by the last reconcile, so only they get typeset. */
 var freshNodes = [];
 
-function reconcile(host, frag) {
-  var wanted = Array.prototype.slice.call(frag.childNodes);
+/* Keyed, and **in place**. A node that is already where it belongs is not
+   touched at all -- not moved, not re-appended, not re-inserted.
+
+   This used to collect every kept node into a fragment and append the fragment,
+   which detaches and re-inserts the entire lesson on every payload. The DOM is
+   happy with that; CSS is not. Taking a node out of the document and putting it
+   back restarts its animations, and every `.card` carried an entry animation, so
+   each frame slid the whole board up from half a rem and faded it back in --
+   read from a chair as the board glitching, shifting, and snapping back to where
+   it already was. Payloads arrive for reasons that have nothing to do with the
+   lesson (a slate save, a figure finishing, the uncommitted count changing), so
+   it happened while nothing on screen had changed at all.
+
+   It also threw away work: re-inserting a subtree forces style, layout and paint
+   for the whole lesson, and re-inserting a canvas costs a fresh compositor
+   layer. Moving only what actually moved is both correct and most of the fix. */
+function reconcile(host, wanted) {
   var have = Object.create(null);
   var i, node, key;
 
@@ -409,19 +424,28 @@ function reconcile(host, frag) {
     if (key) have[key] = node;
   }
 
-  var out = document.createDocumentFragment();
+  var cursor = host.firstChild;
   for (i = 0; i < wanted.length; i++) {
-    node = wanted[i];
-    key = node.dataset && node.dataset.key;
-    var kept = key && have[key];
+    /* Either a node just built, or a key saying "the one already on screen is
+       still right". */
+    key = wanted[i].key;
+    node = wanted[i].node;
+    var kept = have[key];
+    /* The writing surface lives among these nodes and has no key of its own;
+       `placeWriter` owns where it sits, so step over it rather than matching
+       against it. */
+    while (cursor && !(cursor.dataset && cursor.dataset.key)) {
+      cursor = cursor.nextSibling;
+    }
     if (kept) {
-      /* Same content, already rendered, already typeset. Move it, do not
-         rebuild it -- and do not re-add it to the fresh list. */
       delete have[key];
-      out.appendChild(kept);
-      /* The answer block lives among these nodes and must ride along. */
-    } else {
-      out.appendChild(node);
+      if (kept === cursor) {
+        cursor = cursor.nextSibling;      /* already in place: leave it alone */
+        continue;
+      }
+      host.insertBefore(kept, cursor);
+    } else if (node) {
+      host.insertBefore(node, cursor);
       freshNodes.push(node);
     }
   }
@@ -430,7 +454,6 @@ function reconcile(host, frag) {
   for (key in have) {
     if (have[key].parentNode === host) host.removeChild(have[key]);
   }
-  host.appendChild(out);
 }
 
 function render(data) {
@@ -497,7 +520,21 @@ function render(data) {
   }
 
   var atBottom = nearBottom();
-  var frag = document.createDocumentFragment();
+  /* What is on screen already, by key. A payload arrives for all sorts of
+     reasons that have nothing to do with the lesson -- the tutor's heartbeat
+     lands every thirty seconds while it writes, the uncommitted count changes, a
+     figure finishes compiling -- and every one of them used to re-parse the
+     markdown of every card, rebuild its DOM, and hand the lot to a reconcile
+     that threw all of it away because the keys had not changed. On a tablet
+     holding a long lesson that is the whole cost of a frame, spent on nothing.
+     Build only what is genuinely new. */
+  var onScreen = Object.create(null);
+  for (var ex = 0; ex < els.cards.childNodes.length; ex++) {
+    var exNode = els.cards.childNodes[ex];
+    var exKey = exNode.dataset && exNode.dataset.key;
+    if (exKey) onScreen[exKey] = true;
+  }
+  var wanted = [];
   var anythingNew = false;
 
   items.forEach(function (item) {
@@ -506,10 +543,15 @@ function render(data) {
     if (fresh) anythingNew = true;
     seenIds[stamp] = true;
 
-    var node = document.createElement(item.card ? "article" : "div");
     /* The key is identity plus version: a card edited in place, or a turn
        revised, changes its key and is rebuilt; everything else is reused. */
-    node.dataset.key = stamp + (item.card ? ":m" + Math.round(item.card.mtime) : "");
+    var wantKey = stamp + (item.card ? ":m" + Math.round(item.card.mtime) : "");
+    if (onScreen[wantKey]) {
+      wanted.push({ key: wantKey, node: null });     /* keep what is there */
+      return;
+    }
+    var node = document.createElement(item.card ? "article" : "div");
+    node.dataset.key = wantKey;
     if (item.card) {
       var c = item.card;
       node.className = "card" + (fresh ? " fresh" : "");
@@ -584,7 +626,7 @@ function render(data) {
         });
       }
     }
-    frag.appendChild(node);
+    wanted.push({ key: wantKey, node: node });
   });
 
   /* Reconcile rather than rebuild. Every payload used to blow the lesson away
@@ -594,7 +636,7 @@ function render(data) {
      the tutor's, on an iPad, for cards that did not change. Nodes are keyed by
      card id and revision, so an unchanged card is left exactly where it is --
      which also keeps its scroll position and any selection inside it. */
-  reconcile(els.cards, frag);
+  reconcile(els.cards, wanted);
 
   /* The way out stays open until the tutor has actually said something. Keyed on
      CARDS, not on the transcript: asking makes the transcript non-empty, so

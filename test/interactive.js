@@ -76,6 +76,66 @@ try {
   ok('rendered a question');
 } catch (e) { fail('render: ' + e.message); }
 
+// A payload arrives for reasons that have nothing to do with the lesson: the
+// tutor's heartbeat lands every thirty seconds while it writes, the uncommitted
+// count changes, a figure finishes compiling. The reconcile used to answer every
+// one of them by detaching the whole lesson into a fragment and re-appending it,
+// which restarts CSS animations -- and every card carried an entry animation, so
+// the board visibly slid up and faded back in while nothing on screen had
+// changed. From a chair it reads as the board glitching and snapping back.
+try {
+  const doc0 = window.document;
+  const host = doc0.getElementById('cards');
+  const before = host.querySelector('.card');
+  if (!before) throw new Error('no card was rendered');
+  const identity = {};
+  before.__identity = identity;
+  before.querySelector('.body').setAttribute('data-not-rebuilt', 'yes');
+
+  let moved = 0;
+  // A keyed node, or a fragment carrying keyed nodes -- the old path moved the
+  // whole lesson inside a fragment, and counting only bare nodes misses it
+  // entirely, which is exactly the shape of a test that proves nothing.
+  const keyed = (n) => {
+    if (n.dataset && n.dataset.key) return 1;
+    if (n.childNodes) {
+      return Array.prototype.filter.call(
+        n.childNodes, (c) => c.dataset && c.dataset.key).length;
+    }
+    return 0;
+  };
+  const realInsert = host.insertBefore.bind(host);
+  const realAppend = host.appendChild.bind(host);
+  host.insertBefore = function (n, r) { moved += keyed(n); return realInsert(n, r); };
+  host.appendChild = function (n) { moved += keyed(n); return realAppend(n); };
+
+  // Same lesson, different heartbeat. This is the common case, not a corner.
+  window.__render({
+    state: { course: 'X', mode: 'math' },
+    cards: [{ id: '0001', kind: 'question', title: 'Q', body: 'hi', mtime: now }],
+    messages: [], uploads: [], slate: [],
+    agent: { agent: 'claude', state: 'working', pid: 1, host: 'h', last_seen: now + 30 },
+  });
+
+  host.insertBefore = realInsert;
+  host.appendChild = realAppend;
+
+  const after = host.querySelector('.card');
+  moved === 0
+    ? ok('an unchanged lesson is not moved when a payload arrives')
+    : fail('the lesson was re-inserted ' + moved + ' time(s) for a payload that '
+           + 'changed nothing in it — every card replays its entry animation');
+  after && after.__identity === identity
+    ? ok('and the card keeps the very node it had')
+    : fail('the card node was replaced, losing its ink layer and scroll position');
+  after && after.querySelector('.body').getAttribute('data-not-rebuilt') === 'yes'
+    ? ok('and its body was not re-rendered from markdown')
+    : fail('the card body was rebuilt, so every payload re-parses the whole lesson');
+  after && !after.classList.contains('fresh')
+    ? ok('and it is not marked fresh, so nothing animates')
+    : fail('an old card came back marked fresh');
+} catch (e) { fail('reconcile: ' + e.message); }
+
 setTimeout(() => setTimeout(() => {
   const doc = window.document;
   const writer = doc.getElementById('writer');

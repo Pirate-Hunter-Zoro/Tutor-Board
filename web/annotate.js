@@ -22,6 +22,39 @@
 var LAYER = "ann-layer";
 var pen = { colour: "#e0b45c", width: 2.2 };
 var on = false;
+
+/* Room to draw outside the card. A mark about a line of prose is very often a
+   ring around it, and a ring around something near an edge goes outside the box
+   -- the coordinates used to be clamped into [0,1], so the ring came back with
+   a straight edge where it met the boundary. It read as the pen cutting out.
+   Fractions are still fractions OF THE CARD, so everything anchored stays
+   anchored; the canvas simply extends past the card and the fractions are
+   allowed past 0 and 1 by this much.
+
+   Kept comfortably under half the gap between cards (`.card` has 2.1rem of
+   margin below it), because while annotate mode is on these layers take the
+   pointer, and two of them overlapping would mean marks landing on the wrong
+   card near a boundary. */
+var PAD = 12;
+
+/* The slate's ink geometry, shared rather than reimplemented: smooth the samples
+   as they arrive, run a Catmull-Rom curve through them, resample it to about a
+   pixel, and vary the width along it. Without this the layer drew raw pointer
+   samples joined by straight lines, which is the faceted, jagged line the slate
+   exists not to have. */
+var ink = (window.Slate && window.Slate.ink) || null;
+var SMOOTH = ink ? ink.SMOOTH : 0.3;
+var MIN_STEP = ink ? ink.MIN_STEP : 0.5;
+var RESAMPLE = ink ? ink.RESAMPLE : 0.8;
+var POLISH = ink ? ink.POLISH : 2;
+
+function densify(pts) {
+  return ink ? ink.densify(pts) : pts;
+}
+
+function polish(pts, passes) {
+  return ink ? ink.polish(pts, passes) : pts;
+}
 var store = Object.create(null);      /* card id -> [stroke, ...] */
 var dirty = Object.create(null);      /* card ids with unsaved changes */
 var onChange = function () {};
@@ -42,43 +75,103 @@ function layerOf(card) {
 }
 
 /* The canvas is sized in device pixels and scaled down by CSS, or the ink is
-   soft on exactly the screens this is meant for. */
+   soft on exactly the screens this is meant for. It is PAD larger than the card
+   on every side, and offset by -PAD, so a ring drawn around something near an
+   edge has somewhere to go. `_w`/`_h` stay the CARD's size: that is what the
+   stored fractions are fractions of. */
 function size(card, canvas) {
   var r = card.getBoundingClientRect();
   var dpr = window.devicePixelRatio || 1;
   var w = Math.max(1, Math.round(r.width)), h = Math.max(1, Math.round(r.height));
   if (canvas._w === w && canvas._h === h && canvas._dpr === dpr) return false;
   canvas._w = w; canvas._h = h; canvas._dpr = dpr;
-  canvas.width = Math.round(w * dpr);
-  canvas.height = Math.round(h * dpr);
-  canvas.style.width = w + "px";
-  canvas.style.height = h + "px";
+  canvas.width = Math.round((w + 2 * PAD) * dpr);
+  canvas.height = Math.round((h + 2 * PAD) * dpr);
+  canvas.style.width = (w + 2 * PAD) + "px";
+  canvas.style.height = (h + 2 * PAD) + "px";
+  canvas.style.left = -PAD + "px";
+  canvas.style.top = -PAD + "px";
+  /* A resize invalidates every cached pixel path on this card. */
+  var strokes = store[card.dataset.card] || [];
+  for (var i = 0; i < strokes.length; i++) strokes[i]._k = null;
   return true;
 }
 
+/* Stored fractions -> a dense pixel path, cached per canvas size. The
+   densifying is done in pixels rather than in fractions so the line is resampled
+   to the size it is actually being drawn at: a card that reflows narrower gets a
+   correctly resampled curve rather than a stretched one. */
+function pathOf(s, w, h) {
+  var key = w + "x" + h;
+  if (s._k === key && s._d) return s._d;
+  var raw = [];
+  var pr = s.pr || null;
+  for (var i = 0, n = 0; i < s.p.length; i += 2, n++) {
+    raw.push([s.p[i] * w + PAD, s.p[i + 1] * h + PAD,
+              pr && pr[n] !== undefined ? pr[n] : 0.5]);
+  }
+  s._k = key;
+  s._d = densify(raw);
+  return s._d;
+}
+
+/* One stroke, with the width varying along it. Straight `lineTo` between raw
+   samples is what "jagged" was. */
+function paint(ctx, s, dense, colour, scale) {
+  if (!dense.length) return;
+  var base = (s.w || pen.width) * (scale || 1);
+  ctx.strokeStyle = colour;
+  ctx.fillStyle = colour;
+  if (dense.length === 1) {
+    ctx.beginPath();
+    ctx.arc(dense[0][0], dense[0][1], base * (0.65 + 0.7 * dense[0][2]) / 2, 0, 6.2832);
+    ctx.fill();
+    return;
+  }
+  paintFrom(ctx, dense, 1, base);
+}
+
+function paintFrom(ctx, dense, from, base) {
+  for (var i = Math.max(1, from); i < dense.length; i++) {
+    var a = dense[i - 1], b = dense[i];
+    ctx.lineWidth = base * (0.65 + 0.7 * ((a[2] + b[2]) / 2));
+    ctx.beginPath();
+    ctx.moveTo(a[0], a[1]);
+    ctx.lineTo(b[0], b[1]);
+    ctx.stroke();
+  }
+}
+
+function context(canvas) {
+  var ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  var dpr = canvas._dpr || 1;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  return ctx;
+}
+
 function draw(card) {
+  if (!card) return;
   var id = card.dataset.card;
   if (!id) return;
   var canvas = layerOf(card);
   size(card, canvas);
-  var ctx = canvas.getContext("2d");
+  var ctx = context(canvas);
   if (!ctx) return;
-  var dpr = canvas._dpr || 1;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, canvas._w, canvas._h);
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
+  ctx.clearRect(0, 0, canvas._w + 2 * PAD, canvas._h + 2 * PAD);
   (store[id] || []).forEach(function (s) {
     if (!s.p || s.p.length < 2) return;
-    ctx.strokeStyle = s.c || pen.colour;
-    ctx.lineWidth = (s.w || pen.width);
-    ctx.beginPath();
-    for (var i = 0; i < s.p.length; i += 2) {
-      var x = s.p[i] * canvas._w, y = s.p[i + 1] * canvas._h;
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
+    paint(ctx, s, pathOf(s, canvas._w, canvas._h), s.c || pen.colour);
   });
+  /* The stroke being drawn right now is not in the store yet on the frame it
+     starts, and a full redraw during a stroke would wipe it. */
+  if (drawing && drawing.card === card && drawing.dense.length) {
+    ctx.strokeStyle = drawing.stroke.c || pen.colour;
+    paintFrom(ctx, drawing.dense, 1, drawing.stroke.w || pen.width);
+    drawing.drawnTo = drawing.dense.length - 1;
+  }
 }
 
 /* Where on the card, in words, so the tutor can say "the bit you circled near
@@ -118,15 +211,9 @@ function png(id) {
   (store[id] || []).forEach(function (s) {
     if (!s.p || s.p.length < 2) return;
     /* Dark ink on white whatever the screen is showing -- the PNG's only job is
-       to be legible to whatever opens it. */
-    ctx.strokeStyle = "#1a1a1a";
-    ctx.lineWidth = (s.w || pen.width) * 1.3;
-    ctx.beginPath();
-    for (var i = 0; i < s.p.length; i += 2) {
-      var x = s.p[i] * live._w, y = s.p[i + 1] * live._h;
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
+       to be legible to whatever opens it. The same smoothed path as the screen,
+       a little heavier, because it is read at whatever size the reader chooses. */
+    paint(ctx, s, pathOf(s, live._w, live._h), "#1a1a1a", 1.3);
   });
   try { return out.toDataURL("image/png"); } catch (e) { return ""; }
 }
@@ -158,6 +245,8 @@ function restore(snap) {
 
 var tool = "pen";        /* pen | erase */
 var drawing = null;
+var sawPen = false;
+var pending = false;
 
 /* Within this many card-widths of a stroke counts as touching it. Generous,
    because the target is a pen line over prose on a tablet. */
@@ -177,68 +266,189 @@ function eraseAt(id, x, y) {
   return true;
 }
 
+/* Canvas-space pixels. The canvas is offset by -PAD, so its own rect already
+   carries the padding and this needs no correction. */
+function at(ev, d) {
+  return [ev.clientX - d.rect.left, ev.clientY - d.rect.top];
+}
+
+/* Every sample the hardware actually took. A Pencil reports far faster than the
+   frame rate, and the browser hands the extra samples over only if they are
+   asked for -- taking one event per frame throws away most of the line and is a
+   large part of what made this look coarse next to an app that does ask. */
+function samples(ev) {
+  if (typeof ev.getCoalescedEvents === "function") {
+    try {
+      var all = ev.getCoalescedEvents();
+      if (all && all.length) return all;
+    } catch (e) { /* not fatal */ }
+  }
+  return [ev];
+}
+
+function feed(ev, d) {
+  var list = samples(ev);
+  for (var i = 0; i < list.length; i++) {
+    var e = list[i];
+    var xy = at(e, d);
+    var pr = e.pressure > 0 ? e.pressure : 0.5;
+    if (d.sx === null) { d.sx = xy[0]; d.sy = xy[1]; }
+    else {
+      /* Smoothing as the pen moves, the same weight the slate uses. Enough to
+         take the tremor out of a sample stream without adding lag you can
+         feel. */
+      d.sx += (xy[0] - d.sx) * SMOOTH;
+      d.sy += (xy[1] - d.sy) * SMOOTH;
+    }
+    var last = d.raw[d.raw.length - 1];
+    if (last && Math.abs(d.sx - last[0]) < MIN_STEP
+             && Math.abs(d.sy - last[1]) < MIN_STEP) continue;
+    d.raw.push([d.sx, d.sy, pr]);
+  }
+}
+
+/* Grow the dense path by whatever the new samples allow. A Catmull-Rom segment
+   needs the point after its end, so the newest sample is always held back one
+   frame -- which is invisible, and much cheaper than re-densifying the whole
+   stroke on every frame. */
+function extend(d) {
+  var pts = d.raw;
+  if (!ink) { d.dense = pts.slice(); d.built = pts.length; return; }
+  while (d.built + 2 < pts.length) {
+    var i = d.built;
+    var p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+    if (!d.dense.length) d.dense.push(p1);
+    var dist = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+    var steps = Math.max(1, Math.min(24, Math.ceil(dist / RESAMPLE)));
+    for (var k = 1; k <= steps; k++) {
+      d.dense.push(ink.catmullRom(p0, p1, p2, p3, k / steps));
+    }
+    d.built++;
+  }
+}
+
+/* One paint per frame, and only the part of the line that is new. The old layer
+   redrew every stroke on the card from scratch inside the pointermove handler,
+   which on a tablet is the difference between ink that follows the nib and ink
+   that arrives after it. */
+function tick() {
+  pending = false;
+  var d = drawing;
+  if (!d || d.erasing) return;
+  extend(d);
+  if (d.dense.length <= d.drawnTo + 1) return;
+  var ctx = context(d.canvas);
+  if (!ctx) return;
+  ctx.strokeStyle = d.stroke.c || pen.colour;
+  paintFrom(ctx, d.dense, d.drawnTo + 1, d.stroke.w || pen.width);
+  d.drawnTo = d.dense.length - 1;
+}
+
+function frame() {
+  if (pending) return;
+  pending = true;
+  (window.requestAnimationFrame || function (fn) { setTimeout(fn, 16); })(tick);
+}
+
+function store_stroke(d) {
+  /* Polished once, on lift: a weighted average over the interior that pulls out
+     hand tremor while leaving the endpoints exactly where they were put. */
+  var pts = polish(d.raw, POLISH);
+  var w = d.canvas._w || 1, h = d.canvas._h || 1;
+  var flat = [], pr = [];
+  for (var i = 0; i < pts.length; i++) {
+    /* Fractions OF THE CARD, so ink stays anchored to the words it is about
+       through every reflow -- and allowed outside [0,1] by the padding, so a
+       ring around something near an edge is not cut off at the boundary. */
+    flat.push((pts[i][0] - PAD) / w, (pts[i][1] - PAD) / h);
+    pr.push(Math.round(pts[i][2] * 100) / 100);
+  }
+  d.stroke.p = flat;
+  d.stroke.pr = pr;
+  strokesFor(d.id).push(d.stroke);
+}
+
+/* The canvas rect is read once per stroke rather than per sample -- asking for
+   it on every pointer event forces a layout flush, hundreds of times a second,
+   which is exactly the sort of thing that turns a Pencil line into a staircase.
+   The one thing that can invalidate it mid-stroke is the lesson scrolling
+   underneath, so watch for that and for nothing else. */
+function follow() {
+  if (drawing) drawing.rect = drawing.canvas.getBoundingClientRect();
+}
+
 function begin(ev, card) {
   if (!on) return;
   var id = card.dataset.card;
   if (!id) return;
+  if (ev.pointerType === "pen") sawPen = true;
+  /* Once a pen has been seen, a finger is a palm. Same rule as the slate. */
+  if (sawPen && ev.pointerType === "touch") return;
   var canvas = layerOf(card);
-  var r = canvas.getBoundingClientRect();
+  size(card, canvas);
 
-  if (tool === "erase") {
-    remember(id);
-    drawing = { id: id, card: card, erasing: true };
-    rub(ev, r);
-    try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* not fatal */ }
-    ev.preventDefault();
-    return;
-  }
-
+  var d = {
+    id: id, card: card, canvas: canvas,
+    rect: canvas.getBoundingClientRect(),
+    raw: [], dense: [], built: 0, drawnTo: 0, sx: null, sy: null,
+    erasing: tool === "erase",
+    stroke: { c: pen.colour, w: pen.width, p: [], pr: [] },
+  };
   remember(id);
-  drawing = { id: id, card: card, stroke: { c: pen.colour, w: pen.width, p: [] } };
-  strokesFor(id).push(drawing.stroke);
-  add(ev, r);
+  drawing = d;
+
+  if (d.erasing) {
+    rub(ev);
+  } else {
+    feed(ev, d);
+    frame();
+  }
   try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* not fatal */ }
+  window.addEventListener("scroll", follow, true);
   ev.preventDefault();
 }
 
-function add(ev, r) {
-  if (!drawing) return;
-  var x = (ev.clientX - r.left) / Math.max(1, r.width);
-  var y = (ev.clientY - r.top) / Math.max(1, r.height);
-  drawing.stroke.p.push(Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y)));
-}
-
-function rub(ev, r) {
-  var x = (ev.clientX - r.left) / Math.max(1, r.width);
-  var y = (ev.clientY - r.top) / Math.max(1, r.height);
-  if (eraseAt(drawing.id, x, y)) {
-    dirty[drawing.id] = true;
-    draw(drawing.card);
+function rub(ev) {
+  var d = drawing;
+  if (!d) return;
+  var xy = at(ev, d);
+  var x = (xy[0] - PAD) / Math.max(1, d.canvas._w);
+  var y = (xy[1] - PAD) / Math.max(1, d.canvas._h);
+  if (eraseAt(d.id, x, y)) {
+    dirty[d.id] = true;
+    draw(d.card);
   }
 }
 
 function move(ev) {
-  if (!on || !drawing) return;
-  var canvas = layerOf(drawing.card);
-  if (drawing.erasing) {
-    rub(ev, canvas.getBoundingClientRect());
+  var d = drawing;
+  if (!on || !d) return;
+  if (d.erasing) {
+    rub(ev);
   } else {
-    add(ev, canvas.getBoundingClientRect());
-    draw(drawing.card);
+    feed(ev, d);
+    frame();
   }
   ev.preventDefault();
 }
 
 function end() {
-  if (!drawing) return;
-  var id = drawing.id;
-  if (!drawing.erasing && drawing.stroke.p.length < 4) {
-    strokesFor(id).pop();          /* a tap is not a mark */
-    past.pop();                    /* and it is not an undo step either */
+  var d = drawing;
+  if (!d) return;
+  window.removeEventListener("scroll", follow, true);
+  var id = d.id;
+  if (!d.erasing) {
+    if (d.raw.length < 3) {
+      past.pop();                  /* a tap is not a mark, or an undo step */
+      drawing = null;
+      draw(d.card);                /* clear whatever dot was painted live */
+      return;
+    }
+    store_stroke(d);
   }
   drawing = null;
   dirty[id] = true;
-  draw(document.querySelector('[data-card="' + id + '"]'));
+  draw(d.card);                    /* once, with the polished line */
   onChange();
 }
 

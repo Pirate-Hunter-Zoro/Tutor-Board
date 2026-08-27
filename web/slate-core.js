@@ -414,7 +414,7 @@ function create(opts) {
   function setZoom(k, cx, cy) {
     k = Math.max(view.fit * 0.5, Math.min(view.fit * 8, k));
     view.held = true;
-    var r = sheet.getBoundingClientRect();
+    var r = sheetRect();
     if (cx === undefined) { cx = r.width / 2; cy = r.height / 2; }
     var lx = (cx - view.ox) / view.k, ly = (cy - view.oy) / view.k;
     view.k = k;
@@ -443,11 +443,31 @@ function create(opts) {
     sheet.height = Math.round(h * dpr());
     cache.width = sheet.width;
     cache.height = sheet.height;
+    dropRect();
     invalidate();
   }
 
+  /* Where the sheet is, cached for the length of a frame.
+
+     `toLogical` is called once per SAMPLE, and a Pencil reports far faster than
+     the screen refreshes -- with coalesced events that is a couple of hundred
+     calls a second, each one a forced layout flush. On the board the layout
+     being flushed is the entire lesson sitting above the surface, so the cost
+     grows with the length of the lesson: the longer you had been taught, the
+     worse the ink felt. Nothing that matters can move within one frame except
+     the page scrolling underneath, so read it once per frame and once per
+     scroll. */
+  var rectAt = null;
+  function sheetRect() {
+    if (!rectAt) rectAt = sheet.getBoundingClientRect();
+    return rectAt;
+  }
+  function dropRect() { rectAt = null; }
+  window.addEventListener("scroll", dropRect, true);
+  window.addEventListener("resize", dropRect);
+
   function toLogical(ev) {
-    var r = sheet.getBoundingClientRect();
+    var r = sheetRect();
     return {
       x: (ev.clientX - r.left - view.ox) / view.k,
       y: (ev.clientY - r.top - view.oy) / view.k,
@@ -474,9 +494,16 @@ function create(opts) {
      paper: the same function draws the live canvas and the PNG, and the PNG is
      always white however dark the screen is. Reading the paper setting here
      would fix the marker on screen and lose it in the file. */
-  function paintStroke(c, s, onDark) {
+  function paintStroke(c, s, onDark, from) {
     var pts = s.dense || (s.dense = densify(s.pts));
     if (!pts.length) return;
+    /* `from` paints only the tail of a stroke that is still being drawn: the
+       part that has appeared since the last frame. Everything before it is
+       already on the canvas and painting it again is the whole per-frame cost
+       of a long stroke. */
+    if (from) {
+      if (from >= pts.length) { return; }
+    }
     c.save();
     if (s.hl) {
       /* A highlighter works by darkening what is under it, which is why it is
@@ -499,7 +526,7 @@ function create(opts) {
       c.restore();
       return;
     }
-    for (var i = 1; i < pts.length; i++) {
+    for (var i = Math.max(1, from || 1); i < pts.length; i++) {
       var a = pts[i - 1], b = pts[i];
       c.lineWidth = s.hl ? base : base * (0.5 + 0.85 * ((a[2] + b[2]) / 2));
       c.beginPath();
@@ -524,10 +551,37 @@ function create(opts) {
 
   function invalidate() { cacheValid = false; schedule(); }
 
-  function schedule() {
+  /* How much of the live stroke is already on the canvas. */
+  var livePainted = 0;
+  var fullNext = true;
+
+  function schedule(liveOnly) {
+    if (!liveOnly) fullNext = true;
     if (rafPending) return;
     rafPending = true;
-    requestAnimationFrame(function () { rafPending = false; draw(); });
+    requestAnimationFrame(function () {
+      rafPending = false;
+      dropRect();          /* a new frame may sit somewhere new */
+      if (fullNext) { fullNext = false; draw(); }
+      else drawLive();
+    });
+  }
+
+  /* The common frame while writing: nothing has changed except that the stroke
+     under the nib got longer. Clearing the sheet, blitting the cache and
+     repainting the whole live stroke -- which is what every frame used to do --
+     is work proportional to how long you have been drawing, sixty times a
+     second. Paint the new segments straight onto what is already there. */
+  function drawLive() {
+    if (!drawing || drawing === "erasing" || !cacheValid || lasso || sel) {
+      draw();
+      return;
+    }
+    if (!drawing.dense || drawing.dense.length <= livePainted + 1) return;
+    var d = dpr();
+    ctx.setTransform(d * view.k, 0, 0, d * view.k, d * view.ox, d * view.oy);
+    paintStroke(ctx, drawing, tool.paper === "black", livePainted + 1);
+    livePainted = drawing.dense.length - 1;
   }
 
   function draw() {
@@ -541,6 +595,9 @@ function create(opts) {
 
     if (drawing && drawing !== "erasing") {
       paintStroke(ctx, drawing, tool.paper === "black");
+      livePainted = (drawing.dense || []).length - 1;
+    } else {
+      livePainted = 0;
     }
 
     if (lasso && lasso.length > 1) {
@@ -635,6 +692,7 @@ function create(opts) {
     clearSelection();
     drawing = { c: tool.color, w: tool.width, hl: tool.mode === "hl",
                 pts: [[pt.x, pt.y, pt.p]], _sx: pt.x, _sy: pt.y, _sp: pt.p };
+    livePainted = 0;     /* nothing of this stroke is on the canvas yet */
   });
 
   sheet.addEventListener("pointermove", function (ev) {
@@ -644,7 +702,7 @@ function create(opts) {
       var ids = Object.keys(touches);
       if (ids.length === 2 && pinch) {
         var a = touches[ids[0]], b = touches[ids[1]];
-        var r = sheet.getBoundingClientRect();
+        var r = sheetRect();
         setZoom(pinch.k * (Math.hypot(a.x - b.x, a.y - b.y) / pinch.d),
                 (a.x + b.x) / 2 - r.left, (a.y + b.y) / 2 - r.top);
         return;
@@ -691,10 +749,31 @@ function create(opts) {
       drawing.pts.push([Math.round(drawing._sx * 10) / 10,
                         Math.round(drawing._sy * 10) / 10,
                         Math.round(drawing._sp * 100) / 100]);
-      drawing.dense = null;
     }
-    schedule();
+    extendLive();
+    schedule(true);
   });
+
+  /* Grow the live stroke's curve by whatever the new samples allow, instead of
+     recomputing the whole thing every frame. A Catmull-Rom segment needs the
+     point after its end, so the newest sample is held back by one -- invisible,
+     and it turns a cost that grew with the length of the stroke into a constant
+     one. */
+  function extendLive() {
+    var s = drawing;
+    if (!s || s === "erasing") return;
+    if (!s.dense) { s.dense = []; s._built = 0; }
+    var pts = s.pts;
+    while (s._built + 2 < pts.length) {
+      var i = s._built;
+      var p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+      if (!s.dense.length) s.dense.push(p1);
+      var dist = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+      var steps = Math.max(1, Math.min(24, Math.ceil(dist / RESAMPLE)));
+      for (var k = 1; k <= steps; k++) s.dense.push(catmullRom(p0, p1, p2, p3, k / steps));
+      s._built++;
+    }
+  }
 
   function endStroke(ev) {
     if (ev && touches[ev.pointerId]) {
@@ -723,6 +802,8 @@ function create(opts) {
       delete drawing._sx; delete drawing._sy; delete drawing._sp;
       drawing.pts = polish(drawing.pts, POLISH);
       drawing.dense = null;
+      delete drawing._built;
+      livePainted = 0;
       page().strokes.push(drawing);
     }
     drawing = null;
@@ -738,7 +819,7 @@ function create(opts) {
   sheet.addEventListener("wheel", function (e) {
     if (!(e.ctrlKey || e.metaKey)) return;
     e.preventDefault();
-    var r = sheet.getBoundingClientRect();
+    var r = sheetRect();
     setZoom(view.k * (e.deltaY < 0 ? 1.08 : 0.93), e.clientX - r.left, e.clientY - r.top);
   }, { passive: false });
 
@@ -1080,6 +1161,25 @@ function create(opts) {
 
 /* forPaper is exposed so the export rule can be asserted. There is no canvas
    backend in the test environment, so the only way to prove the PNG is legible
-   is to prove the colour mapping is. */
-window.Slate = { create: create, forPaper: forPaper };
+   is to prove the colour mapping is.
+
+   `ink` is exposed for the annotation layer over the lesson. That layer had its
+   own line drawing -- raw pointer samples joined by straight segments -- and it
+   looked exactly as bad as this file's opening comment says it would: faceted,
+   granular, and jagged wherever the hand moved quickly. Ink quality is one
+   problem and it should have one implementation, so the geometry lives here and
+   both surfaces use it. */
+window.Slate = {
+  create: create,
+  forPaper: forPaper,
+  ink: {
+    densify: densify,
+    polish: polish,
+    catmullRom: catmullRom,
+    SMOOTH: SMOOTH,
+    RESAMPLE: RESAMPLE,
+    MIN_STEP: MIN_STEP,
+    POLISH: POLISH,
+  },
+};
 })();

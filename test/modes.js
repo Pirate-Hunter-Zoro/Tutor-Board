@@ -28,6 +28,11 @@ function stub(tag) {
     hidden: false, disabled: false, value: '', textContent: '', innerHTML: '',
     children: [], childNodes: [], files: [], scrollHeight: 20,
     addEventListener() {}, appendChild() {}, removeChild() {}, after() {},
+    /* The lesson is reconciled in place -- moving only what moved, so a
+       card that has not changed keeps its node, its scroll position and its
+       entry animation unplayed. That means insertBefore, and a stub without
+       it reports a broken board as a working one. */
+    insertBefore() {}, firstChild: null,
     setPointerCapture() {}, releasePointerCapture() {}, remove() {}, type: '',
     querySelector: () => stub(), querySelectorAll: () => [],
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 900, height: 600 }),

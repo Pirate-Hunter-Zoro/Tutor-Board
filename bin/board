@@ -13,6 +13,8 @@ The assistant runs these. The student never does.
     board push ["message"]             commit and push this repository now
     board next [kind] [slug]           print the path of the next card to write
     board write <kind> <slug>          read a card body on stdin, write the card
+    board recap [--cards N|--all]      the lesson so far in ONE call: every card as
+                                       a line, the newest in full, their turns
     board inbox [--all]                what the student sent; marks it read
     board slate [--all]                paths of the pages written on the iPad
     board wait [--timeout N]           block until the student sends something
@@ -767,29 +769,151 @@ def cmd_slate(live, args):
     return 0
 
 
+def card_meta(raw):
+    """Front matter and body of a card, without pulling in a YAML parser."""
+    meta, text = {}, raw
+    if raw.startswith("---"):
+        end = raw.find("\n---", 3)
+        if end != -1:
+            for line in raw[3:end].splitlines():
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    meta[k.strip().lower()] = v.strip()
+            text = raw[end + 4:].lstrip("\n")
+    return meta, text
+
+
+def cmd_recap(live, args):
+    """The lesson so far, compactly, in ONE command.
+
+    This exists to be cheap. An assistant picking a course up cold used to be
+    told to read every card in `live/cards/` in order, which is one tool round
+    trip per card -- and on a model billed by the token every round trip resends
+    the whole conversation, so a twelve-card lesson costs twelve times the
+    growing context before a word of teaching is written. What it actually needs
+    is the shape of the lesson, the last thing it said, and the last thing the
+    student did.
+
+    So: one line per card, the newest cards in full, and the student's latest
+    turn with its file paths. `--cards N` widens the full window; `--all` prints
+    every card in full for the rare case where that is genuinely wanted.
+    """
+    names = live.card_names()
+    turns = read_turns(live)
+    st = live.state()
+
+    full = 1
+    if "--cards" in args:
+        try:
+            full = max(0, int(args[args.index("--cards") + 1]))
+        except (IndexError, ValueError):
+            pass
+    if "--all" in args:
+        full = len(names)
+
+    head = " — ".join(x for x in (st.get("course"), st.get("session"),
+                                  st.get("chapter")) if x)
+    print(head or "no session open")
+    hw = st.get("hw")
+    if hw:
+        print("homework set: %s" % hw)
+
+    # Newest revision per turn id: the file is append-only and a correction
+    # supersedes in place, so an older revision is not part of the lesson.
+    newest = {}
+    for t in turns:
+        tid = t.get("id")
+        if tid and t.get("rev", 1) >= newest.get(tid, {}).get("rev", 0):
+            newest[tid] = t
+    live_turns = sorted(newest.values(), key=lambda t: t.get("t") or 0)
+    answered = {t.get("answers") for t in live_turns if t.get("answers")}
+
+    if not names:
+        print("no cards yet — nothing has been taught in this session")
+    else:
+        print("%d card(s), %d student turn(s)\n" % (len(names), len(live_turns)))
+        for n in names:
+            with open(os.path.join(live.cards, n), "r", encoding="utf-8") as fh:
+                meta, _ = card_meta(fh.read())
+            cid = n[:4]
+            mark = ""
+            kind = (meta.get("kind") or "lesson").lower()
+            if kind == "question":
+                mark = "  <- answered" if cid in answered or n in answered \
+                       else "  <- OPEN, not answered yet"
+            print("  %s %-9s %s%s" % (cid, kind, meta.get("title", ""), mark))
+
+    for n in names[len(names) - full:] if full else []:
+        with open(os.path.join(live.cards, n), "r", encoding="utf-8") as fh:
+            raw = fh.read()
+        print("\n--- %s, in full ---\n%s" % (n, raw.strip()))
+
+    # What the student has actually done, one line each. A fresh session picking
+    # this lesson up needs to know where they went wrong three cards ago without
+    # re-reading three cards, and this is the cheap form of that.
+    if len(live_turns) > 1:
+        print("\ntheir turns so far:")
+        for t in live_turns[:-1]:
+            what = (t.get("text") or "").strip().replace("\n", " ")
+            if t.get("signal"):
+                what = "[%s] %s" % (t["signal"], what)
+            if t.get("png") and not what:
+                what = "handwriting"
+            print("  %-19s %-6s %s" % (t.get("iso") or "?",
+                                       ("-> " + t["answers"]) if t.get("answers") else "",
+                                       what[:96]))
+
+    if live_turns:
+        t = live_turns[-1]
+        print("\n--- their most recent turn (%s) ---" % (t.get("iso") or "?"))
+        if t.get("answers"):
+            print("answers card %s" % t["answers"])
+        if t.get("signal"):
+            print("signal: %s" % t["signal"])
+        if t.get("text"):
+            print(t["text"].strip())
+        if t.get("png"):
+            print("handwriting: %s" % os.path.join(live.dir, str(t["png"]).lstrip("/")))
+        for f in t.get("files", []) or []:
+            print("file: %s" % os.path.join(live.uploads, f))
+
+    unread = [m for m in read_messages(live) if not m.get("read")]
+    if unread:
+        print("\n%d unread message(s) in the inbox — `board inbox` has them"
+              % len(unread))
+    return 0
+
+
 def cmd_wait(live, args):
     """Block until the student sends something, then print it and exit.
 
     This is the wake-up primitive. Any agent that can run a shell command can use
     it: run it in the background and act when it exits, or call it in a loop with
     a timeout. It polls a file mtime and costs nothing while it waits.
+
+    **Anything already unread wakes it immediately.** It used to take the unread
+    count as a baseline and return only when that count grew, which meant a
+    message sent while no tutor was attached was invisible for ever -- and that
+    is exactly the cold start the `begin` button exists for: the student taps
+    *ask the tutor to begin*, a tutor is attached a minute later, and it sits
+    waiting for a second tap on a board that is already asking. Marking read is
+    what consumes a message, so unread is the whole test and a baseline can only
+    lose one.
     """
     timeout = 900.0
     if "--timeout" in args:
         timeout = float(args[args.index("--timeout") + 1])
 
-    path = os.path.join(live.inbox, "messages.jsonl")
-    before = len([m for m in read_messages(live) if not m.get("read")])
     start = time.time()
-    while time.time() - start < timeout:
+    while True:
+        if [m for m in read_messages(live) if not m.get("read")]:
+            return cmd_inbox(live, [])
+        if time.time() - start >= timeout:
+            break
         # A quarter second, not a whole one. This is dead time between the tap
         # and the assistant learning about it, on every single turn, and it
         # costs nothing to shorten: the loop is one small read of one file.
         time.sleep(0.25)
-        msgs = read_messages(live)
-        unread = [m for m in msgs if not m.get("read")]
-        if len(unread) > before:
-            return cmd_inbox(live, [])
     print("nothing sent in %.0fs" % timeout)
     return 2
 
@@ -1487,7 +1611,7 @@ COMMANDS = {
     "doctor": cmd_doctor, "slate": cmd_slate, "wait": cmd_wait,
     "net": cmd_net, "vpn": cmd_vpn, "init": cmd_init, "eyes": cmd_eyes,
     "finish": cmd_finish, "push": cmd_push, "history": cmd_history,
-    "hw": cmd_hw,
+    "hw": cmd_hw, "recap": cmd_recap,
 }
 
 

@@ -365,6 +365,94 @@ if (es && window.Annotate) {
   if (window.Annotate.colour() === '#6fc3f7') ok('the ink can be changed');
   else fail('the ink colour is fixed');
 
+  // --- the ink itself -----------------------------------------------------
+  // A mark about a line of prose is very often a ring around it, and a ring
+  // around something near an edge leaves the card. The layer used to clamp every
+  // sample into the card's own box, so the ring came back with a straight edge
+  // chopped across it. It was reported as the pen cutting out, and it was not
+  // the pen.
+  if (layer) {
+    var W = 600, H = 200;
+    card.getBoundingClientRect = function () {
+      return { left: 0, top: 0, width: W, height: H, right: W, bottom: H };
+    };
+    layer.getBoundingClientRect = function () {
+      return { left: -12, top: -12, width: W + 24, height: H + 24 };
+    };
+    layer.setPointerCapture = function () {};
+    layer.releasePointerCapture = function () {};
+    window.Annotate.setOn(true);
+    window.Annotate.setTool('pen');
+    window.Annotate.clear('0003');
+
+    var ink = function (type, x, y, pressure) {
+      var ev = new window.Event(type, { bubbles: true, cancelable: true });
+      Object.assign(ev, { pointerId: 7, pointerType: 'pen', isPrimary: true,
+                          pressure: pressure === undefined ? 0.5 : pressure,
+                          clientX: x, clientY: y });
+      ev.getCoalescedEvents = function () { return [ev]; };
+      layer.dispatchEvent(ev);
+    };
+
+    // A ring drawn around something at the very top of the card: it goes above
+    // the card's own box, which is the whole point.
+    ink('pointerdown', 100, 10, 0.4);
+    for (var a = 0; a < 24; a++) {
+      ink('pointermove', 100 + Math.cos(a / 3.8) * 40, 6 + Math.sin(a / 3.8) * 22, 0.6);
+    }
+    ink('pointerup', 100, 10, 0.4);
+
+    // Ink quality is one problem and it has one implementation. If the layer
+    // ever stops finding the slate's geometry it falls back to joining raw
+    // samples with straight lines -- which is the jagged line, back again, and
+    // silently.
+    if (window.Slate && window.Slate.ink
+        && typeof window.Slate.ink.densify === 'function'
+        && typeof window.Slate.ink.polish === 'function')
+      ok('the annotation layer shares the slate\'s ink pipeline');
+    else fail('the slate no longer exposes its ink geometry; the annotation '
+              + 'layer is drawing raw samples again');
+
+    var marks = window.Annotate.payload('0003').strokes;
+    var last = marks[marks.length - 1];
+    if (last && last.p && last.p.length >= 6) ok('a pen stroke lands on a card');
+    else fail('drawing on a card produced no stroke');
+
+    var above = false;
+    for (var q = 1; last && q < last.p.length; q += 2) if (last.p[q] < 0) above = true;
+    if (above) ok('and ink drawn past the edge of the card is kept, not clipped flat');
+    else fail('ink outside the card was clamped to its edge — a circle drawn '
+              + 'around anything near an edge comes back cut off');
+
+    if (last && last.pr && last.pr.length * 2 === last.p.length)
+      ok('pressure is recorded, so the line varies in width');
+    else fail('no pressure was recorded; every stroke is a constant-width line');
+
+    var padded = parseFloat(layer.style.width || '0');
+    if (padded > W) ok('the layer is larger than the card, so there is room to overshoot');
+    else fail('the layer is exactly the card, so anything drawn past it is lost');
+
+    // Smoothing: one sample thrown 24px sideways out of an otherwise straight
+    // line must not come back as a spike. Raw samples joined by straight
+    // segments is what "jagged" meant.
+    window.Annotate.clear('0003');
+    ink('pointerdown', 50, 100, 0.5);
+    for (var b = 1; b <= 20; b++) ink('pointermove', 50 + b * 10, b === 10 ? 124 : 100, 0.5);
+    ink('pointerup', 250, 100, 0.5);
+    var line = window.Annotate.payload('0003').strokes.pop();
+    var worst = 0;
+    for (var c = 1; line && c < line.p.length; c += 2) {
+      worst = Math.max(worst, Math.abs(line.p[c] * H - 100));
+    }
+    if (worst < 20) ok('a single wild sample is smoothed, not drawn as a spike ('
+                       + worst.toFixed(1) + 'px of 24)');
+    else fail('the raw samples are drawn as they arrive: ' + worst.toFixed(1)
+              + 'px spike survives, which is the jagged line');
+    window.Annotate.clear('0003');
+    window.Annotate.setOn(false);
+  }
+
+
   // The mode has an exit that is not the title bar.
   doc.getElementById('ann-done').onclick();
   if (annbar.hidden && !doc.body.classList.contains('annotating'))

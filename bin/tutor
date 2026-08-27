@@ -81,6 +81,21 @@ DEFAULT_CONFIG = {
     "headless_timeout": 900,
     # How long the wrap-up turn gets. It is one turn, but it writes files.
     "handoff_timeout": 600,
+    # How many turns one of the agent's own sessions is allowed to carry before
+    # the next turn starts a fresh one.
+    #
+    # Resuming is the cheap move up to a point: it saves re-reading the contract,
+    # the method and the lesson. But a resumed turn resends the entire
+    # conversation as input, so the cost of every turn grows with the length of
+    # the lesson -- by turn twenty the agent is paying for nineteen turns of
+    # history, most of it text it will never look at again. A fresh session pays
+    # the cold-start read once (contract, method, `board recap`) and then pays for
+    # nothing it has forgotten, because the lesson is on disk.
+    #
+    # So: resume for a while, then reset. 0 disables the reset and resumes for
+    # ever, which is right for a flat-rate subscription and wrong for a model
+    # billed by the token.
+    "session_turns": 12,
 }
 
 
@@ -261,6 +276,14 @@ everywhere and cannot drift.
 what the last session left for you: where the student got to, what they got
 wrong, and what comes next. Sessions end without warning — a switched course, a
 closed lid, an allocation that expired — so it is the only continuity there is.
+
+**`board recap` is how you read the lesson, not `live/cards/` one file at a
+time.** One command prints the session, every card as a line, the newest card in
+full and the student's own turns. Reading a twelve-card lesson card by card is
+twelve round trips for something you were handed in one, and on a model billed by
+the token every one of them is charged against the whole conversation. Read what
+you need once; do not re-read this brief, the contract or the method on later
+turns.
 """
 
 # Sessions do not end tidily. A course is switched on the iPad, a lid closes, an
@@ -269,17 +292,31 @@ closed lid, an allocation that expired — so it is the only continuity there is
 # opening cold and asking the student to recap their own lesson.
 HANDOFF_PROMPT = (
     "This session is ending now. You get one turn and nobody will read stdout.\n\n"
+    # This turn runs on the resumed session, so the lesson is already in front of
+    # it. It used to be told nothing of the sort and would re-read the cards, the
+    # contract and the old handoff before writing a word.
+    "You have this session in your context. Do not re-read the cards, the "
+    "contract, TEACHING.md or the old HANDOFF.md to write this. If the earlier "
+    "part of the lesson is missing from it, `board recap` gives you the whole "
+    "shape in one call.\n\n"
     "Write `HANDOFF.md` at the root of this repository -- replacing it, not "
-    "appending -- so that the next assistant can pick this course up cold. Keep "
-    "it short and concrete:\n\n"
+    "appending. **Keep it under 350 words.** It is read in full at the start of "
+    "every future session, so length here is a cost paid over and over, and a "
+    "long one gets skimmed. Short and concrete:\n\n"
     "- where the student got to, by topic, not by card number\n"
     "- what they got wrong, and what the misunderstanding actually was\n"
     "- what they got right, so it is not re-taught\n"
     "- the single next thing to teach, and why that one\n"
     "- anything about how this student works that took you a while to learn\n\n"
-    "If the course's own README or AI_INSTRUCTIONS.md drifted out of date during "
-    "the session, fix them too. Do not ask questions, do not start new teaching, "
-    "and do not write a card -- the student has already gone."
+    # Not a documentation review. "Fix anything that drifted" was read as an
+    # invitation to re-read and rewrite two long documents on the way out of
+    # every session, which is a whole turn's worth of tokens for nothing the
+    # student asked for.
+    "If something you wrote this session made a specific line in the course's "
+    "README or AI_INSTRUCTIONS.md actually false, fix that line. Do not review "
+    "either document for drift and do not rewrite sections.\n\n"
+    "Do not ask questions, do not start new teaching, and do not write a card -- "
+    "the student has already gone."
 )
 
 
@@ -297,24 +334,82 @@ import signal
 import threading
 import time
 
-HEADLESS_PROMPT = (
+# Two prompts, and the difference between them is most of what a headless course
+# costs. The first turn of a daemon's life has nothing in context, so it pays for
+# the contract, the method and the lesson once. Every turn after it runs with the
+# agent's own session resumed -- the recipe's `--continue` -- so it ALREADY holds
+# all of that, and the old single prompt told it to read the lot again anyway:
+# AI_INSTRUCTIONS.md, TEACHING.md, BRIEF.md, HANDOFF.md and every card in the
+# lesson, one tool call each. On a model billed by the token that is not a small
+# waste. Every round trip inside a turn resends the whole conversation, so a
+# re-read is charged again for the rest of the turn and again for the rest of the
+# session; a twelve-card lesson was paying twelve growing round trips before a
+# word of teaching was written. Nothing about teaching quality needed it.
+HEADLESS_FIRST_PROMPT = (
     "You are running headless: there is no terminal and nobody will read stdout. "
-    "The student is on the board. Read live/BRIEF.md, live/TEACHING.md and "
-    "AI_INSTRUCTIONS.md if you have not already. TEACHING.md is the method: "
-    "exercises first, a manageable few, one question per turn, then stop.\n\n"
-    # Assume nothing carried over. A turn may be a fresh process with no memory
-    # of the last one -- an agent's own history does not survive a node, a
-    # vendor, or a `-p` invocation -- so the lesson so far has to be read off
-    # disk, where it is, rather than recalled.
-    "Do not assume you remember this session. The lesson so far is on disk: read "
-    "the cards already in live/cards/ in order, and HANDOFF.md at the root if it "
-    "exists, so you continue the lesson instead of restarting it.\n\n"
+    "The student is on the board.\n\n"
+    "Read these once, in this order: AI_INSTRUCTIONS.md (the contract for this "
+    "course), live/TEACHING.md (the method -- the section's exercises first, a "
+    "manageable few, teach only what each needs, one question per turn, then "
+    "stop), and HANDOFF.md at the root if it exists (where the last session got "
+    "to and what not to re-teach).\n\n"
+    # One call instead of one per card. The lesson is a transcript and an
+    # assistant resuming it needs its shape, its last card and the student's last
+    # move -- not every card re-read in full.
+    "Then run `board recap`. That one command prints the session, every card as a "
+    "single line, the newest card in full and the student's latest turn with its "
+    "file paths. Do not read live/cards/ file by file; the recap is the lesson.\n\n"
     "They just sent this:\n\n%s\n\n"
-    "Run `board inbox` for the full detail including any file paths, open anything "
-    "they sent, and reply by writing ONE new card into live/cards/. Do not write "
-    "more than one card. Do not ask them to type in a terminal.\n\n"
-    "Write that card FIRST, before any verifying, filing or handoff. It appears on their board the instant the file exists, so everything else you do happens while they are reading rather than while they are staring at a blank page."
+    "That text is the inbox -- it already carries every file path, so do not run "
+    "`board inbox` as well; it has been marked read and will tell you nothing. "
+    "Open anything the text names (handwriting is a PNG and has to be looked at), "
+    "then reply by writing ONE new card into live/cards/. Do not write more than "
+    "one card. Do not ask them to type in a terminal.\n\n"
+    "Write that card FIRST, before any verifying, filing or handoff. It appears on "
+    "their board the instant the file exists, so everything else you do happens "
+    "while they are reading rather than while they are staring at a blank page.\n\n"
+    "What you have read stays in this session for the turns that follow. You will "
+    "not be asked to read it again."
 )
+
+HEADLESS_RESUME_PROMPT = (
+    "Same session, next turn. Your own conversation is resumed, so you already "
+    "hold the contract, the method, the handoff and every card you have written. "
+    "**Do not re-read AI_INSTRUCTIONS.md, live/TEACHING.md, live/BRIEF.md, "
+    "HANDOFF.md, or the cards in live/cards/.** Re-reading what is already in "
+    "front of you is the most expensive thing you can do here and it teaches "
+    "nothing.\n\n"
+    "They just sent this:\n\n%s\n\n"
+    "That text is the inbox and carries every file path, so do not run `board "
+    "inbox` as well. Open what it names -- handwriting is a PNG and has to be "
+    "looked at -- and reply by writing ONE new card into live/cards/. Write the "
+    "card FIRST; nothing else needs reading before it.\n\n"
+    "Teach the way you already read: locate the break in a wrong answer rather "
+    "than repairing it, one question, then stop. If you have genuinely lost the "
+    "thread, `board recap` gives you the whole lesson in one call -- reading the "
+    "cards one by one is never the answer."
+)
+
+
+def turn_plan(spec, carried, recycle):
+    """Which recipe and which prompt this turn gets, and whether it is fresh.
+
+    `carried` is how many turns the agent's current session already holds; 0
+    means there is nothing to resume. `recycle` is `session_turns` from the
+    config -- 0 resumes for ever.
+
+    Resuming saves re-reading the contract, the method and the lesson. It is not
+    free: a resumed turn resends the whole conversation as input, so turn twenty
+    pays for nineteen turns of history. Past a point a fresh session that reads
+    the contract once and the lesson back through `board recap` is cheaper than
+    carrying everything, so this is where the two are traded off.
+    """
+    recipe = spec.get("headless")
+    first = spec.get("headless_first") or recipe
+    fresh = carried == 0 or bool(recycle) and carried >= recycle
+    return (first if fresh else recipe,
+            HEADLESS_FIRST_PROMPT if fresh else HEADLESS_RESUME_PROMPT,
+            fresh)
 
 
 def agent_state(live, **kw):
@@ -580,6 +675,8 @@ def headless(cfg, course, agent_name, session):
     signal.signal(signal.SIGINT, bye)
 
     turns = 0
+    carried = 0          # turns the agent's current session is carrying
+    recycle = int(cfg.get("session_turns", 12) or 0)
     while running["go"]:
         running["waiter"] = subprocess.Popen(
             [sys.executable, BOARD, "wait", "--timeout", "300"], cwd=root,
@@ -617,8 +714,16 @@ def headless(cfg, course, agent_name, session):
         # agent's own session is worth keeping: without it every turn pays for
         # re-reading the contract, the method and the lesson before it can write
         # a word, which is most of what a turn costs.
-        use = recipe if turns > 1 else (spec.get("headless_first") or recipe)
-        prompt = HEADLESS_PROMPT % out.strip()
+        # A fresh session when there is nothing to resume, and again once the
+        # one we have has carried enough turns to be more expensive than
+        # starting over. Everything a fresh session needs is on disk: the
+        # contract, the method, and `board recap` for the lesson.
+        first = spec.get("headless_first") or recipe
+        use, template, fresh = turn_plan(spec, carried, recycle)
+        if fresh and carried:
+            log.write("-- starting a fresh session after %d turn(s); the lesson "
+                      "is read back with `board recap`\n" % carried)
+        prompt = template % out.strip()
         cmd = [a.replace("{prompt}", prompt) for a in use]
         try:
             p = subprocess.run(cmd, cwd=root, stdout=log, stderr=subprocess.STDOUT,
@@ -626,13 +731,18 @@ def headless(cfg, course, agent_name, session):
             err = None if p.returncode == 0 else "exit %d" % p.returncode
             # A resume that finds nothing to resume is not a broken turn; it is a
             # first turn wearing the wrong recipe. Try it once as one.
-            if err and use is not (spec.get("headless_first") or recipe):
+            if err and use is not first:
+                # A fresh session holds nothing, so the resume prompt -- which
+                # says "you already have the contract, the method and the lesson"
+                # -- would produce a card written against no contract at all.
+                # Retry as what it actually is: a first turn.
                 log.write("!! resume failed, retrying as a fresh turn\n")
-                cmd = [a.replace("{prompt}", prompt)
-                       for a in (spec.get("headless_first") or recipe)]
+                cmd = [a.replace("{prompt}", HEADLESS_FIRST_PROMPT % out.strip())
+                       for a in first]
                 p = subprocess.run(cmd, cwd=root, stdout=log, stderr=subprocess.STDOUT,
                                    timeout=cfg.get("headless_timeout", 900))
                 err = None if p.returncode == 0 else "exit %d" % p.returncode
+                fresh = True
         except subprocess.TimeoutExpired:
             err = "timed out"
         except OSError as exc:
@@ -644,6 +754,7 @@ def headless(cfg, course, agent_name, session):
             log.write("!! %s\n" % err)
             agent_state(live, state="listening", last_error=err)
         else:
+            carried = 1 if fresh else carried + 1
             agent_state(live, state="listening", last_error=None)
 
     # The last turn, and the only one the student never sees.
@@ -913,8 +1024,9 @@ def main(argv):
         return 1
 
     cmd = list(spec.get("cmd", []))
-    opener = ("Read AI_INSTRUCTIONS.md, live/BRIEF.md and live/TEACHING.md, then begin. "
-              "The board is already running; do not start another.")
+    opener = ("Read AI_INSTRUCTIONS.md, live/BRIEF.md and live/TEACHING.md, then run "
+              "`board recap` for the lesson so far and begin. The board is already "
+              "running; do not start another.")
     if spec.get("prompt") == "argv":
         cmd.append(opener)
     else:

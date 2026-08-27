@@ -232,6 +232,24 @@ Read `README.md` first.
   `tutorboard.json`, then the machine by hostname, then `default_agent`. Switching course on the
   hub moves it. Never tie an assistant's lifetime to a terminal session, and never make the student
   start one.
+- **A turn pays for what it needs and never for what it already has.** The tutor
+  may be a model billed by the token, and every round trip inside a turn resends
+  the whole conversation -- so a document re-read is charged again for the rest
+  of that turn and again for the rest of the session. Hence: two headless
+  prompts, not one (a cold turn reads the contract, the method and the handoff;
+  a resumed turn is told in as many words *not* to re-read them); `board recap`,
+  which hands back the whole lesson in one call instead of one round trip per
+  card; a capped handoff, because it is read in full at the start of every
+  future session; and `session_turns`, which starts a fresh session once
+  carrying the old one costs more than reading the lesson back off disk.
+  `test/tokens.py` holds all of it.
+- **Every change to how the tutor teaches is also a change to what it costs.**
+  A new rule in `TEACHING.md` is read by every session for ever, a new card kind
+  is more output on every turn, an extra instruction in a prompt is paid for on
+  every turn that carries it. Adding one is fine -- teaching quality comes first
+  -- but say what it costs and take the saving back somewhere else in the same
+  change. Never let a style note ship without the token pass; the two are one
+  piece of work, not a feature and an optimisation to do later.
 - **No session ends without a handoff.** Sessions end by being abandoned — a switched course, a
   closed lid, an expired allocation — so the departing assistant gets one last turn, with no student
   attached, to write `HANDOFF.md` at the course root. `SIGTERM` starts that wrap-up; nothing may

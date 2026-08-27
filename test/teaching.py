@@ -60,6 +60,13 @@ for phrase, why in [
     ("Never label a question", "a question is answered, not graded"),
     ("do not know how to start", "and not knowing where to start is a real answer"),
     ("has not produced", "no solution is invented for the student"),
+    # A concept that has only been read is not one the student can use, and the
+    # exercise is a bad place to discover that. Found the hard way: a card taught
+    # cosets, the index and normality, then went straight to the exercise.
+    ("hand-check", "every concept is worked by the student before the exercise"),
+    ("One concept per check", "one concept per check, not three in one card"),
+    ("Tiny", "a check is small enough to answer at once"),
+    ("can be skipped", "and a check can be declined like any other prompt"),
 ]:
     check("the method states: " + why, phrase.lower() in text.lower())
 

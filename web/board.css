@@ -211,8 +211,12 @@ body.annotating #btn-annotate { background: var(--ask); color: #fff; border-colo
 
 .card {
   margin: 0 0 2.1rem;
-  animation: rise .28s ease-out both;
 }
+/* The entry animation belongs to a card that has just ARRIVED, and to no other.
+   It used to be on every `.card`, which is only invisible for as long as nothing
+   re-inserts a card -- and the reconcile did, on every payload, so the whole
+   lesson slid and faded each time the board heard anything at all. `render`
+   already knows which cards are new; that is what `.fresh` means. */
 .card.fresh { animation: rise .28s ease-out both, glow 1.6s ease-out .28s both; }
 @keyframes rise { from { opacity: 0; transform: translateY(.5rem); } to { opacity: 1; transform: none; } }
 @keyframes glow {
@@ -317,8 +321,10 @@ body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180de
   border-radius: .7rem;
   padding: .6rem .9rem;
   font-size: .93rem;
-  animation: rise .28s ease-out both;
 }
+/* Same rule as the card: a turn animates when it arrives, not whenever the
+   board hears something. `render` marks the new ones `.fresh`. */
+.mine.fresh { animation: rise .28s ease-out both; }
 .mine .when {
   display: block; font-size: .68rem; color: var(--ink-3);
   font-family: var(--ui); margin-bottom: .15rem;
