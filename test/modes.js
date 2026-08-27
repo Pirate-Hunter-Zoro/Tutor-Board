@@ -26,7 +26,7 @@ function stub(tag) {
     style: { setProperty() {}, removeProperty() {} },
     classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
     hidden: false, disabled: false, value: '', textContent: '', innerHTML: '',
-    children: [], files: [], scrollHeight: 20,
+    children: [], childNodes: [], files: [], scrollHeight: 20,
     addEventListener() {}, appendChild() {}, removeChild() {}, after() {},
     setPointerCapture() {}, releasePointerCapture() {}, remove() {}, type: '',
     querySelector: () => stub(), querySelectorAll: () => [],

@@ -177,6 +177,26 @@ def slugify(s):
 
 
 # ---------------------------------------------------------------------------
+def install_teaching(live):
+    """Put the teaching method where this course's assistant will read it.
+
+    It lives in Tutor-Board and is copied into `live/` on every start, so every
+    repository teaches the same way and none of them can drift -- the alternative
+    is the same document pasted into a dozen AI_INSTRUCTIONS.md files, going out
+    of step one repository at a time. `live/` is gitignored, so this is a
+    delivery, not an edit to the course.
+    """
+    src = os.path.join(TOOL, "TEACHING.md")
+    if not os.path.exists(src):
+        return None
+    dest = live.path("TEACHING.md")
+    try:
+        shutil.copyfile(src, dest)
+    except OSError:
+        return None
+    return dest
+
+
 def cmd_start(live, args):
     info = live.info()
     if info and alive(info):
@@ -198,6 +218,8 @@ def cmd_start(live, args):
             print("start one here anyway with: board start --force")
             if "--force" not in args:
                 return 1
+
+    install_teaching(live)
 
     port = default_port(live.root)
     lan = False
@@ -713,7 +735,10 @@ def cmd_wait(live, args):
     before = len([m for m in read_messages(live) if not m.get("read")])
     start = time.time()
     while time.time() - start < timeout:
-        time.sleep(1.0)
+        # A quarter second, not a whole one. This is dead time between the tap
+        # and the assistant learning about it, on every single turn, and it
+        # costs nothing to shorten: the loop is one small read of one file.
+        time.sleep(0.25)
         msgs = read_messages(live)
         unread = [m for m in msgs if not m.get("read")]
         if len(unread) > before:

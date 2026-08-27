@@ -246,6 +246,12 @@ teaching turn as a card in `live/cards/` and keep the terminal to a line or two.
 Check `board inbox` at the start of every turn. When the session ends, run
 `board finish` so the board can offer to save and push.
 
+**Read `live/TEACHING.md` before your first card.** It is the method every course
+on this board is taught by, and it is not optional: pick the section's exercises
+first, choose a manageable few, teach only what each one needs, pose one question,
+and stop. It ships with the board rather than with the course, so it is the same
+everywhere and cannot drift.
+
 **Read `HANDOFF.md` before your first card** if the repository has one. It is
 what the last session left for you: where the student got to, what they got
 wrong, and what comes next. Sessions end without warning — a switched course, a
@@ -283,12 +289,14 @@ HANDOFF_PROMPT = (
 # no daemon -- the board shows whether anything is actually listening.
 # ---------------------------------------------------------------------------
 import signal
+import threading
 import time
 
 HEADLESS_PROMPT = (
     "You are running headless: there is no terminal and nobody will read stdout. "
-    "The student is on the board. Read live/BRIEF.md and AI_INSTRUCTIONS.md if you "
-    "have not already.\n\n"
+    "The student is on the board. Read live/BRIEF.md, live/TEACHING.md and "
+    "AI_INSTRUCTIONS.md if you have not already. TEACHING.md is the method: "
+    "exercises first, a manageable few, one question per turn, then stop.\n\n"
     # Assume nothing carried over. A turn may be a fresh process with no memory
     # of the last one -- an agent's own history does not survive a node, a
     # vendor, or a `-p` invocation -- so the lesson so far has to be read off
@@ -299,7 +307,8 @@ HEADLESS_PROMPT = (
     "They just sent this:\n\n%s\n\n"
     "Run `board inbox` for the full detail including any file paths, open anything "
     "they sent, and reply by writing ONE new card into live/cards/. Do not write "
-    "more than one card. Do not ask them to type in a terminal."
+    "more than one card. Do not ask them to type in a terminal.\n\n"
+    "Write that card FIRST, before any verifying, filing or handoff. It appears on their board the instant the file exists, so everything else you do happens while they are reading rather than while they are staring at a blank page."
 )
 
 
@@ -584,6 +593,20 @@ def headless(cfg, course, agent_name, session):
         agent_state(live, state="working", turns=turns)
         log.write("\n=== %s turn %d ===\n%s\n" % (time.strftime("%H:%M:%S"), turns, out))
 
+        # Keep saying so while the turn runs. The heartbeat used to be written
+        # only at these boundaries, so a turn that took longer than the board's
+        # two-minute window -- which a turn that reads a chapter and writes a
+        # card routinely does -- showed on the iPad as "assistant not
+        # responding" while the assistant was in the middle of teaching.
+        beating = threading.Event()
+
+        def beat():
+            while not beating.wait(30.0):
+                agent_state(live, state="working", turns=turns)
+
+        ticker = threading.Thread(target=beat, daemon=True)
+        ticker.start()
+
         cmd = [a.replace("{prompt}", HEADLESS_PROMPT % out.strip()) for a in recipe]
         try:
             p = subprocess.run(cmd, cwd=root, stdout=log, stderr=subprocess.STDOUT,
@@ -593,6 +616,8 @@ def headless(cfg, course, agent_name, session):
             err = "timed out"
         except OSError as exc:
             err = str(exc)
+        finally:
+            beating.set()
 
         if err:
             log.write("!! %s\n" % err)
@@ -767,7 +792,7 @@ def main(argv):
         return 1
 
     cmd = list(spec.get("cmd", []))
-    opener = ("Read AI_INSTRUCTIONS.md and live/BRIEF.md, then begin. "
+    opener = ("Read AI_INSTRUCTIONS.md, live/BRIEF.md and live/TEACHING.md, then begin. "
               "The board is already running; do not start another.")
     if spec.get("prompt") == "argv":
         cmd.append(opener)

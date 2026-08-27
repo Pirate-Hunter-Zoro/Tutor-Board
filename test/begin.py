@@ -191,6 +191,22 @@ try:
     check("and marks it stale once its process is gone",
           st and st["state"] == "stale")
 
+    # The defect a person found on the device: the heartbeat is written at turn
+    # boundaries, so a turn longer than the window reported a daemon busy
+    # teaching as dead. A turn that reads a chapter and writes a card routinely
+    # runs longer than two minutes.
+    write_agent(host=host, pid=os.getpid(), agent="claude", state="working",
+                turns=3, last_seen=_time.time() - 600)
+    st = serve.load_agent(repo)
+    check("a daemon mid-turn is not called dead for being slow",
+          st and st["state"] == "working")
+
+    write_agent(host=host, pid=999999, agent="claude", state="working",
+                turns=3, last_seen=_time.time())
+    st = serve.load_agent(repo)
+    check("but a daemon whose process is gone is stale even mid-turn",
+          st and st["state"] == "stale")
+
     write_agent(host="a-node-that-is-not-this-one", pid=os.getpid(), agent="claude",
                 state="attached", mode="interactive", cmd=sys.executable,
                 last_seen=_time.time())

@@ -22,6 +22,13 @@ var els = {
   begin: document.getElementById("begin"),
   noTutor: document.getElementById("no-tutor"),
   skip: document.getElementById("skip"),
+  notesend: document.getElementById("notesend"),
+  annotate: document.getElementById("btn-annotate"),
+  sendwhat: document.getElementById("sendwhat"),
+  sendWork: document.getElementById("send-work"),
+  sendNotes: document.getElementById("send-notes"),
+  sendBoth: document.getElementById("send-both"),
+  sendCancel: document.getElementById("send-cancel"),
   offline: document.getElementById("offline"),
   linkbad: document.getElementById("linkbad"),
   hwbar: document.getElementById("hwbar"),
@@ -363,6 +370,45 @@ function timeLabel(t) {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+
+/* Nodes inserted by the last reconcile, so only they get typeset. */
+var freshNodes = [];
+
+function reconcile(host, frag) {
+  var wanted = Array.prototype.slice.call(frag.childNodes);
+  var have = Object.create(null);
+  var i, node, key;
+
+  for (i = 0; i < host.childNodes.length; i++) {
+    node = host.childNodes[i];
+    key = node.dataset && node.dataset.key;
+    if (key) have[key] = node;
+  }
+
+  var out = document.createDocumentFragment();
+  for (i = 0; i < wanted.length; i++) {
+    node = wanted[i];
+    key = node.dataset && node.dataset.key;
+    var kept = key && have[key];
+    if (kept) {
+      /* Same content, already rendered, already typeset. Move it, do not
+         rebuild it -- and do not re-add it to the fresh list. */
+      delete have[key];
+      out.appendChild(kept);
+      /* The answer block lives among these nodes and must ride along. */
+    } else {
+      out.appendChild(node);
+      freshNodes.push(node);
+    }
+  }
+
+  /* Anything left in `have` is a node the payload no longer contains. */
+  for (key in have) {
+    if (have[key].parentNode === host) host.removeChild(have[key]);
+  }
+  host.appendChild(out);
+}
+
 function render(data) {
   /* A live frame that arrives while a past lesson is open is kept, not shown.
      Being yanked out of what you are reading because the tutor wrote something
@@ -382,14 +428,36 @@ function render(data) {
      answers. A revised answer keeps its original place -- it supersedes what
      was there rather than being appended to the end -- which is why the sort
      runs on when the turn STARTED, not when it was last edited. */
+  /* Order by position in the lesson, not by clock. Cards are numbered in the
+     order they were written, and that number is what fixes their place: sorting
+     them by mtime meant that correcting a typo in card three moved it to the end
+     of the transcript, after everything the student had since answered. A turn
+     sits immediately after the card it answers; a turn that answers nothing --
+     the opening "begin" -- falls back to where its time puts it. */
+  var ordered = (data.cards || []).slice().sort(function (a, b) {
+    return (a.id || "").localeCompare(b.id || "");
+  });
+  var at = Object.create(null);
+  ordered.forEach(function (c, n) { at[c.id] = n; });
+
   var items = [];
-  (data.cards || []).forEach(function (c) {
-    items.push({ t: c.mtime, key: "card:" + c.id, card: c });
+  ordered.forEach(function (c, n) {
+    items.push({ pos: n, sub: 0, t: c.mtime, key: "card:" + c.id, card: c });
   });
   (data.turns || []).forEach(function (t) {
-    items.push({ t: t.t0 || t.t, key: "turn:" + t.id, turn: t });
+    var when = t.t0 || t.t;
+    var pos;
+    if (t.answers && at[t.answers] !== undefined) {
+      pos = at[t.answers];
+    } else {
+      pos = -1;
+      ordered.forEach(function (c, n) { if (c.mtime <= when) pos = n; });
+    }
+    items.push({ pos: pos, sub: 1, t: when, key: "turn:" + t.id, turn: t });
   });
-  items.sort(function (a, b) { return a.t - b.t; });
+  items.sort(function (a, b) {
+    return (a.pos - b.pos) || (a.sub - b.sub) || (a.t - b.t);
+  });
 
   var atBottom = nearBottom();
   var frag = document.createDocumentFragment();
@@ -402,10 +470,14 @@ function render(data) {
     seenIds[stamp] = true;
 
     var node = document.createElement(item.card ? "article" : "div");
+    /* The key is identity plus version: a card edited in place, or a turn
+       revised, changes its key and is rebuilt; everything else is reused. */
+    node.dataset.key = stamp + (item.card ? ":m" + Math.round(item.card.mtime) : "");
     if (item.card) {
       var c = item.card;
       node.className = "card" + (fresh ? " fresh" : "");
       node.dataset.kind = c.kind;
+      node.dataset.card = c.id;      /* what an annotation is anchored to */
       var head = "";
       if (c.kind !== "lesson" || c.title) {
         head = '<div class="card-head">' +
@@ -423,6 +495,10 @@ function render(data) {
       if (m.answers) node.dataset.answers = m.answers;
       node.innerHTML = '<span class="when"></span><span class="text"></span>';
       var when = "you · " + timeLabel(m.t);
+      if (m.kind === "annotation") {
+        when += " · wrote on card " + (m.answers || "?");
+        if (m.where) when += " " + m.where;
+      }
       if ((m.rev || 1) > 1) when += " · revised";
       node.querySelector(".when").textContent = when;
       if (m.signal) {
@@ -474,8 +550,14 @@ function render(data) {
     frag.appendChild(node);
   });
 
-  els.cards.innerHTML = "";
-  els.cards.appendChild(frag);
+  /* Reconcile rather than rebuild. Every payload used to blow the lesson away
+     and construct it again: every card's markdown re-parsed, every formula
+     re-typeset by KaTeX, every compiled figure re-fetched and re-decoded. That
+     cost grows with the length of the lesson and is paid on every keystroke of
+     the tutor's, on an iPad, for cards that did not change. Nodes are keyed by
+     card id and revision, so an unchanged card is left exactly where it is --
+     which also keeps its scroll position and any selection inside it. */
+  reconcile(els.cards, frag);
 
   /* The way out stays open until the tutor has actually said something. Keyed on
      CARDS, not on the transcript: asking makes the transcript non-empty, so
@@ -485,19 +567,11 @@ function render(data) {
      board waiting to start. */
   var started = (data.cards || []).length > 0;
   els.empty.hidden = started || linkDead;
-  /* Leave the just-tapped label alone for a moment, or the payload the tap
-     itself provokes overwrites it before it has been read. Only the label --
-     everything else on the page still renders. */
-  if (!started && Date.now() - sentAt > 4000) {
-    var asked = (data.turns || []).some(function (t) { return t.signal === "begin"; });
-    els.emptyLead.textContent = asked ? "The tutor has not written anything yet."
-                                      : "Nothing on the board yet.";
-    els.begin.textContent = asked ? "ask again" : "ask the tutor to begin";
-    els.begin.disabled = false;
-  }
 
   paintSession(state, data.push, data.agent);
   paintHomework(data.hw);
+  if (!started) paintWaiting(data);
+  paintNotesSend();
 
   var codeMode = (state.mode || "math") === "code";
   document.body.dataset.mode2 = state.mode || "math";
@@ -554,7 +628,20 @@ function render(data) {
      that has already been filed. */
   placeWriter(owed && !data.archived, qNode);
   paintComposer(codeMode && !data.archived, data);
-  typeset(els.cards);
+  /* KaTeX walks the DOM it is handed. Handing it the whole lesson every frame
+     re-renders mathematics that was already rendered; hand it only what was
+     just inserted. */
+  freshNodes.forEach(typeset);
+  freshNodes.length = 0;
+
+  /* The ink layer is per card and idempotent: reconciled nodes keep the layer
+     they already had, new ones get one. Then the saved marks are laid back
+     over, without disturbing anything being drawn at this moment. */
+  if (window.Annotate) {
+    Array.prototype.forEach.call(els.cards.querySelectorAll("[data-card]"),
+                                 window.Annotate.attach);
+    window.Annotate.load(data.notes);
+  }
   renderScratch(data.uploads || []);
 
   if (firstPaint) {
@@ -571,6 +658,27 @@ function render(data) {
    the board rather than in a terminal: the person who has to answer, and the
    person who needs to know a push failed, is holding an iPad. */
 var pushDismissed = 0;
+
+/* Five minutes of "nothing is happening" is how a person concludes the thing is
+   broken and taps the button again -- which wakes the tutor a second time and
+   gets two opening cards written. A turn in progress is knowable, so say it. */
+function paintWaiting(data) {
+  /* Leave the just-tapped label alone for a moment, or the payload the tap
+     itself provokes overwrites it before it has been read. */
+  if (Date.now() - sentAt < 4000) return;
+  var asked = (data.turns || []).some(function (t) { return t.signal === "begin"; });
+
+  if (working) {
+    els.emptyLead.textContent = "The tutor is writing…";
+    els.begin.textContent = "the tutor is working";
+    els.begin.disabled = true;          /* asking again now writes a second card */
+    return;
+  }
+  els.emptyLead.textContent = asked ? "The tutor has not written anything yet."
+                                    : "Nothing on the board yet.";
+  els.begin.textContent = asked ? "ask again" : "ask the tutor to begin";
+  els.begin.disabled = false;
+}
 
 /* A homework sitting produces a document, and the state of that document lives
    in a .tex file nobody on an iPad can see. Which set, how much of it is written
@@ -629,7 +737,11 @@ function paintSession(state, push, agent) {
      reading. Somebody tapped "ask the tutor to begin", got a green connection
      dot, and waited on a session that did not exist. */
   els.agent.hidden = false;
+  /* Only a record the server has judged stale means nobody is there. "Working"
+     is emphatically attached: a turn in progress is the tutor doing its job, and
+     a five-minute turn used to read on the iPad as a death. */
   attached = !!agent && agent.state !== "stale";
+  working = !!agent && agent.state === "working";
   /* And say it where somebody about to tap is actually looking, not only in the
      chrome. An empty board with nothing attached is a dead end, and the person
      holding the iPad cannot be expected to infer that from a missing chip. */
@@ -646,7 +758,9 @@ function paintSession(state, push, agent) {
          in a terminal waiting for its person. "Attached" is the true word, and
          the useful one: somebody is on the other end. */
     : agent.state === "attached" ? (agent.agent || "assistant") + " attached"
-    : "assistant not responding";
+      /* Only reached when the record exists but nothing recognises its state --
+         a daemon whose process is gone. Say what that means for them. */
+    : "tutor stopped — nothing is reading the board";
   }
   var kind = state.session;
   els.session.hidden = !kind;
@@ -851,11 +965,112 @@ function closeViewer() {
   document.body.classList.remove("viewing");
 }
 
+
+/* ------------------------------------------------------- annotating a card */
+/* Marks over the tutor's own words. They save themselves shortly after the pen
+   lifts, so a reload never costs them, and they are sent as their own kind of
+   turn -- anchored to the card they sit on, because that is the question they
+   are asking about. */
+var noteSaveTimer = null;
+
+function saveNotes(send) {
+  if (!window.Annotate) return Promise.resolve([]);
+  var ids = send ? window.Annotate.marked() : window.Annotate.unsaved();
+  if (!ids.length) return Promise.resolve([]);
+  return Promise.all(ids.map(function (id) {
+    var body = window.Annotate.payload(id, send);
+    return fetch("/annotate/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }).then(function () { window.Annotate.clean(id); });
+  }));
+}
+
+function queueNoteSave() {
+  if (noteSaveTimer) clearTimeout(noteSaveTimer);
+  noteSaveTimer = setTimeout(function () { saveNotes(false); }, 900);
+}
+
+if (window.Annotate) {
+  window.Annotate.onChange(queueNoteSave);
+  /* A closing tab must not take the last stroke with it. */
+  window.addEventListener("pagehide", function () { saveNotes(false); });
+}
+
+els.annotate.onclick = function () {
+  if (!window.Annotate) return;
+  var next = !window.Annotate.isOn();
+  window.Annotate.setOn(next);
+  els.annotate.setAttribute("aria-pressed", next ? "true" : "false");
+  els.annotate.title = next ? "stop writing on the lesson"
+                            : "write on the lesson itself";
+};
+
+/* ------------------------------------------------------------ send chooser */
+/* Only asked when there is genuinely a choice: working on the slate AND marks
+   on the lesson. One of the two alone just sends. */
+var pendingSend = null;
+
+function haveNotes() {
+  return !!(window.Annotate && window.Annotate.marked().length);
+}
+
+function askWhatToSend(sendWork) {
+  if (!haveNotes()) { sendWork(); return; }
+  pendingSend = sendWork;
+  els.sendwhat.hidden = false;
+}
+
+function closeChooser() {
+  els.sendwhat.hidden = true;
+  pendingSend = null;
+}
+
+els.sendWork.onclick = function () {
+  var go = pendingSend;
+  closeChooser();
+  if (go) go();
+};
+els.sendNotes.onclick = function () {
+  closeChooser();
+  saveNotes(true);
+};
+els.sendBoth.onclick = function () {
+  var go = pendingSend;
+  closeChooser();
+  saveNotes(true).then(function () { if (go) go(); });
+};
+els.sendCancel.onclick = closeChooser;
+
+els.notesend.onclick = function () {
+  els.notesend.disabled = true;
+  saveNotes(true).then(function () {
+    els.notesend.disabled = false;
+    paintNotesSend();
+    toastSent();
+  }, function () { els.notesend.disabled = false; });
+};
+
+window.askWhatToSend = askWhatToSend;
+
+
+/* Marks can be made at any time -- on a card from ten minutes ago, with no
+   question owed and therefore no writing surface and no Send button anywhere on
+   the page. Without this they would sit there unsendable, which is the same dead
+   end the cold start had. */
+function paintNotesSend() {
+  var any = haveNotes();
+  var owedSurface = !els.writer.hidden;
+  els.notesend.hidden = !(any && !owedSurface);
+}
+
 /* ------------------------------------------------------------------ stream */
 var source = null;
 var linkDead = false;
 var everGotData = false;
 var attached = false;      /* is there a tutor on the other end at all */
+var working = false;       /* and is it in the middle of a turn right now */
 var sentAt = 0;            /* when begin was last tapped, so its label survives a frame */
 
 /* An unreachable board used to be indistinguishable from an empty one: the shell
@@ -927,6 +1142,9 @@ function placeWriter(owed, questionNode) {
                    answers: answering.question };
         },
         onSend: function () { toastSent(); },
+        /* Marks on the lesson are a second thing that can be sent. Ask which,
+           but only when both actually exist. */
+        beforeSend: askWhatToSend,
       });
       window.__writerDebug = writer.debug;
       restoreAnswer();

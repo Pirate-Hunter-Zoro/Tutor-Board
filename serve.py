@@ -63,8 +63,12 @@ class Repo:
         # it. The slate is a working surface and gets written over; a transcript
         # cannot be built out of a surface that changes underneath it.
         self.answers = os.path.join(self.live, "answers")
+        # Marks written on top of the tutor's own cards. Kept per card, because
+        # a card is the thing an annotation is about and the only anchor that
+        # survives the lesson reflowing at a different type size.
+        self.notes = os.path.join(self.live, "annotations")
         for d in (self.live, self.cards, self.inbox, self.uploads, self.tikz,
-                  self.archive, self.slate, self.answers):
+                  self.archive, self.slate, self.answers, self.notes):
             os.makedirs(d, exist_ok=True)
 
     @property
@@ -136,24 +140,47 @@ def extract_tikz(body, jobs, repo):
     return TIKZ_BLOCK.sub(sub, body)
 
 
+# Parsed cards, keyed by path, valid while (mtime, size) hold. The poll runs four
+# times a second and this home directory is a shared network filesystem, so
+# re-reading and re-parsing every card in the lesson on every tick is real cost
+# for files that have not changed -- and it grows with the length of the lesson.
+_CARD_CACHE = {}
+
+
 def load_cards(repo, jobs):
     cards = []
     try:
         names = sorted(os.listdir(repo.cards))
     except OSError:
         names = []
+    seen = set()
     for name in names:
         m = CARD_RE.match(name)
         if not m:
             continue
         path = os.path.join(repo.cards, name)
+        seen.add(path)
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        stamp = (st.st_mtime, st.st_size)
+        hit = _CARD_CACHE.get(path)
+        if hit and hit[0] == stamp:
+            # The figure placeholders carry compile status, which changes when a
+            # diagram finishes -- so the body is re-scanned even on a hit. It is
+            # a regex over a string already in memory, not a read and a parse.
+            card = dict(hit[1])
+            card["body"] = extract_tikz(hit[2], jobs, repo)
+            cards.append(card)
+            continue
         try:
             with open(path, "r", encoding="utf-8") as fh:
                 raw = fh.read()
         except OSError:
             continue
-        meta, body = parse_front_matter(raw)
-        body = extract_tikz(body, jobs, repo)
+        meta, rawbody = parse_front_matter(raw)
+        body = extract_tikz(rawbody, jobs, repo)
         cards.append({
             "id": m.group(1),
             "slug": m.group(2),
@@ -161,8 +188,11 @@ def load_cards(repo, jobs):
             "title": meta.get("title", ""),
             "tag": meta.get("tag", ""),
             "body": body,
-            "mtime": os.path.getmtime(path),
+            "mtime": st.st_mtime,
         })
+        _CARD_CACHE[path] = (stamp, dict(cards[-1]), rawbody)
+    for gone in [k for k in _CARD_CACHE if k not in seen and k.startswith(repo.cards)]:
+        del _CARD_CACHE[gone]
     return cards
 
 
@@ -268,8 +298,11 @@ def session_sense(repo):
     st = repo.state()
     kind = st.get("session") or "lecture"
     chapter = (st.get("chapter") or "").strip()
+    # In a headless session this line is the whole prompt, so it has to carry the
+    # pointer to the method as well as the pointer to the place.
+    how = "Follow live/TEACHING.md: the section's exercises first, a manageable few, teach only what each needs, one question per turn, then stop. "
     if chapter:
-        return ("This sitting is labelled %r and it is a %s. Start there."
+        return (how + "This sitting is labelled %r and it is a %s. Start there."
                 % (chapter, kind))
     # A course that follows a book says so on disk. Naming its actual first
     # chapter beats telling an assistant to work it out, which is what produced
@@ -277,14 +310,14 @@ def session_sense(repo):
     first = syllabus.opening(repo.root)
     if first:
         every = syllabus.chapters(repo.root)
-        return ("This sitting is a %s and carries no chapter label. This course "
+        return (how + "This sitting is a %s and carries no chapter label. This course "
                 "follows a book and orders itself in %d chapters; the first is "
                 "%s. Open there unless HANDOFF.md says otherwise, and name the "
                 "chapter you are opening in your first card. Do not start from "
                 "whatever you consider the foundation of the subject -- start "
                 "where the book starts."
                 % (kind, len(every), syllabus.label(first)))
-    return ("This sitting is a %s and carries no chapter label, so nothing here "
+    return (how + "This sitting is a %s and carries no chapter label, so nothing here "
             "says where to start. Do not guess from the subject: begin at the "
             "beginning of the course as the repository itself orders it, and say "
             "in your first card which chapter you are opening." % kind)
@@ -455,6 +488,26 @@ def load_hw(repo):
     except (OSError, ValueError):
         st["build"] = None
     return st
+
+
+def load_notes(repo):
+    """Every card's annotations, so a reload does not lose what was marked up."""
+    out = {}
+    try:
+        names = sorted(os.listdir(repo.notes))
+    except OSError:
+        return out
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(repo.notes, name), "r", encoding="utf-8") as fh:
+                rec = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if rec.get("card"):
+            out[rec["card"]] = rec.get("strokes") or []
+    return out
 
 
 def load_push(repo):
@@ -815,6 +868,7 @@ class Hub:
             "messages": load_messages(self.repo),
             "uploads": load_uploads(self.repo),
             "slate": load_slate(self.repo),
+            "notes": load_notes(self.repo),
             "push": load_push(self.repo),
             "agent": load_agent(self.repo),
             "history": len(list_archive(self.repo)),
@@ -1112,6 +1166,76 @@ class Handler(BaseHTTPRequestHandler):
                                    "detail": out.strip(),
                                    "agent": aout.strip() if acode == 0 else None,
                                    "agent_error": None if acode == 0 else aout.strip()[-300:]})
+
+        if path == "/annotate/save":
+            # Marks written over the tutor's own cards. Saving keeps them across
+            # a reload; sending makes them a turn. They are anchored to a card,
+            # in that card's own coordinates, so changing the type size or the
+            # reading face moves the ink with the words instead of leaving it
+            # stranded where the words used to be.
+            try:
+                payload = json.loads(self.read_body().decode("utf-8"))
+            except Exception:
+                return self.send_json({"ok": False, "error": "bad json"}, status=400)
+            card = str(payload.get("card") or "")
+            if not re.match(r"^\d{1,4}$", card):
+                return self.send_json({"ok": False, "error": "bad card"}, status=400)
+            strokes = payload.get("strokes") or []
+            with open(os.path.join(repo.notes, card + ".json"), "w", encoding="utf-8") as fh:
+                json.dump({"card": card, "strokes": strokes}, fh)
+
+            png = payload.get("png") or ""
+            marker = "base64,"
+            saved_png = None
+            if marker in png:
+                import base64
+                try:
+                    saved_png = os.path.join(repo.notes, card + ".png")
+                    with open(saved_png, "wb") as fh:
+                        fh.write(base64.b64decode(png.split(marker, 1)[1]))
+                except Exception:
+                    saved_png = None
+
+            if not payload.get("send"):
+                self.server.hub.worker.dirty.set()
+                return self.send_json({"ok": True, "card": card})
+
+            tid = payload.get("turn") or next_turn_id(repo)
+            rev = turn_revision(repo, tid)
+            base = "%s-r%d" % (tid, rev)
+            if saved_png:
+                try:
+                    shutil.copyfile(saved_png, os.path.join(repo.answers, base + ".png"))
+                except OSError:
+                    pass
+            with open(os.path.join(repo.answers, base + ".json"), "w", encoding="utf-8") as fh:
+                json.dump({"card": card, "strokes": strokes}, fh)
+            record = {
+                "id": tid, "rev": rev, "kind": "annotation",
+                "answers": card,
+                "t": time.time(),
+                "iso": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "from": "student",
+                "strokes": len(strokes),
+                "where": payload.get("where") or "",
+                "png": "/answers/" + base + ".png",
+                "ink": "/answers/" + base + ".json",
+                "read": False,
+            }
+            write_turn(repo, record)
+            msg = dict(record)
+            # The tutor wrote this card and can read it back off disk, so what it
+            # needs from here is which card was marked, roughly where, and the
+            # ink itself.
+            msg["text"] = ("[annotation] they wrote on your card %s%s. Open the image, "
+                           "read what they marked, and answer it against that card's own "
+                           "text in live/cards/."
+                           % (card, (", " + record["where"]) if record["where"] else ""))
+            msg["slate"] = os.path.join(repo.answers, base + ".png")
+            with open(repo.messages_path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(msg) + "\n")
+            self.server.hub.worker.dirty.set()
+            return self.send_json({"ok": True, "card": card, "turn": tid, "rev": rev})
 
         if path == "/slate/save":
             try:

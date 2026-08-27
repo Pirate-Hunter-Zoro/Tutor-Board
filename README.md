@@ -152,6 +152,63 @@ Because a signal has no sentence in it, the inbox line carries its own meaning r
 tag: a headless assistant is woken with *there is nothing on the board yet and they are waiting,
 open the session and write the first card*. `test/begin.py` drives that whole round trip.
 
+### How a lesson is taught
+
+The method lives in [`TEACHING.md`](./TEACHING.md) at this root — **not** in each
+course's contract — and `board start` copies it into that course's `live/` every
+time. The brief, the headless prompt and the cold-start line all point at it, so
+every assistant in every repository reads the same document and none of them can
+drift out of step.
+
+The shape, in a mathematics course:
+
+1. **Read the section's exercises first.** They are the specification for the
+   lesson; the prose is the means.
+2. **Choose a manageable few** — three to five, sometimes two — and say in the
+   opening card which ones and why each earned its place. Not all of them.
+3. **For each in turn:** teach the concept it needs, work a smaller example
+   yourself, then pose the exercise as a `question` card and stop.
+4. **Read what comes back.** A wrong answer gets its break located, not repaired.
+5. **When the chosen set is done, offer more** as a question — the student
+   answers, or taps **skip**, which means *move on*.
+
+Front-loading is the failure it exists to prevent: no chapter summary, no "here
+is everything we will cover". Teach toward the question the student is about to
+answer, and nothing else.
+
+Sections are archived, so nothing has to be crammed — **◷** reopens any of them
+with the student's own working still in it, and an exercise left undone is a note
+for the next sitting rather than a loss.
+
+In a code course the unit is a change made in the student's own editor, and the
+three signals — *ready to check*, *I need help*, *I'm confused* — do what skip
+does in mathematics. The rest of the discipline is identical.
+
+### Writing on the lesson itself
+
+A question about a lesson is nearly always a question about one *place* in it — this line,
+that step, the word "clearly". **✎ annotate** in the title bar turns the cards into
+something you can write on directly; tap it again to stop, and the lesson scrolls and
+selects exactly as before while it is off.
+
+Marks are anchored to the **card**, in that card's own coordinates, not to the page. The
+lesson reflows constantly — the type-size buttons, the reading face, the iPad rotating, a
+figure finishing its compile — and ink pinned to the page would end up somewhere else every
+time. Pinned to the card, it moves with the words it is about.
+
+They save themselves about a second after the pen lifts, so a reload never costs them.
+
+When you press **Send** and there is working on the slate *and* marks on the lesson, the
+board asks which: *my working*, *my annotations*, or *both*. With only one of the two, it
+just sends. Marks made when no answer is owed — on a card from ten minutes ago — get their
+own **send my annotations** button, because otherwise they would be stranded with no Send
+button anywhere on the page.
+
+What the tutor receives is the ink and the card it sits on, plus roughly where — *near the
+top*, *in the middle*. It wrote that card and reads it back off disk, so it does not need a
+picture of its own words, and nothing has to rasterise typeset mathematics in a browser.
+`test/annotate.py` drives the round trip; `test/link.js` drives the layer in a real DOM.
+
 ### Declining a prompt
 
 Teaching goes: explain, then ask for an example or a worked exercise. Not every one of those is
@@ -977,10 +1034,12 @@ wrapper.
 ```
 bin/board          the command line
 serve.py           the server: watches cards, pushes SSE, compiles TikZ, takes uploads and ink
+TEACHING.md        how to teach on this board -- copied into every course's live/
 boardlib.py        the handful of things that differ between machines
 homework.py        where a course keeps its problem sets, and how much of one is done
 web/               the hub   — home.html, home.css, home.js
                    the board — board.html, board.css, board.js, macros.js, vendored KaTeX
+                   the ink layer — annotate.js, over the tutor's own cards
                    the slate — slate.html, slate.css, slate.js
                    the app   — manifest.webmanifest, sw.js, icon-*.png (icon.tex makes them)
 test/              node test/markdown.js and node test/macros.js
@@ -1301,8 +1360,10 @@ node test/interactive.js drives the real board in a real DOM and writes on it
 node test/sizing.js      that every screen size opens at natural writing size
 node test/link.js        that an unreachable board says so instead of looking empty
 node test/theme.js       that the dark theme reaches the whole window, not just the content
+python3 test/annotate.py that marks on a card are anchored to it and can be sent
 python3 test/begin.py    that the first turn of a session can come from the device
 python3 test/homework.py that a sitting finds its problem set, in either layout
+python3 test/teaching.py that the teaching method reaches every course
 
 bash test/all.sh         all of the above, in order. The two real-DOM suites need
                          jsdom; this fetches it on first run and carries on

@@ -182,6 +182,24 @@ body { background: var(--paper); min-height: 100vh; min-height: 100dvh; }
 #hw-build[data-ok="yes"] { color: var(--good); }
 #hw-build[data-ok="no"] { color: var(--bad); font-family: var(--mono); }
 
+/* The ink layer sits over the card it belongs to, and is inert until annotate
+   mode is on -- otherwise it would eat every scroll and every text selection in
+   the lesson. */
+.card { position: relative; }
+canvas.ann-layer {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  touch-action: none;
+  z-index: 2;
+}
+body.annotating canvas.ann-layer { pointer-events: auto; }
+body.annotating .card {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ask) 35%, transparent);
+  border-radius: .4rem;
+}
+/* A mode you cannot tell you are in is a mode that eats your scrolling. */
+body.annotating #btn-annotate { background: var(--ask); color: #fff; border-color: var(--ask); }
+
 .card {
   margin: 0 0 2.1rem;
   animation: rise .28s ease-out both;
@@ -593,4 +611,43 @@ body.viewing { overflow: hidden; }
   #board { max-width: none; padding: 0; }
   .card { break-inside: avoid; animation: none; }
   .mine { background: #f2f2f2; }
+}
+
+/* ---------- send chooser ---------- */
+/* Docked above the tool bar, because that is where the hand and the Send button
+   already are, and a dialogue in the middle of the page is a dialogue that gets
+   dismissed by accident on a tablet. */
+.sendwhat {
+  position: fixed; z-index: 60;
+  left: 50%; transform: translateX(-50%);
+  bottom: calc(5.4rem + env(safe-area-inset-bottom));
+  display: flex; align-items: center; gap: .4rem; flex-wrap: wrap;
+  justify-content: center;
+  max-width: min(38rem, calc(100vw - 1.5rem));
+  padding: .6rem .7rem;
+  border-radius: .6rem;
+  border: 1px solid var(--rule);
+  background: var(--paper-2);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, .28);
+  font-family: var(--ui); font-size: .84rem;
+}
+#sendwhat-lead { font-weight: 650; margin-right: .2rem; }
+.sendwhat button {
+  font: inherit; cursor: pointer;
+  padding: .45rem .7rem; border-radius: .4rem;
+  border: 1px solid var(--rule); background: var(--paper); color: var(--ink);
+}
+.sendwhat button.primary { background: var(--note); border-color: var(--note); color: #fff; font-weight: 600; }
+.sendwhat button.quiet { border-color: transparent; color: var(--ink-3); }
+.sendwhat button:disabled { opacity: .45; cursor: default; }
+
+.notesend {
+  position: fixed; z-index: 55;
+  left: 50%; transform: translateX(-50%);
+  bottom: calc(1.1rem + env(safe-area-inset-bottom));
+  font: inherit; font-family: var(--ui); font-size: .82rem; font-weight: 600;
+  padding: .55rem .95rem; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--ask);
+  background: var(--ask); color: #fff;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, .25);
 }

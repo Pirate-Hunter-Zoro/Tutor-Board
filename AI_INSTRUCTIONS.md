@@ -96,6 +96,37 @@ Read `README.md` first.
   its own meaning: in a headless session that line is the prompt the assistant is woken with, and a
   bare tag tells it nothing. `test/begin.py` drives the round trip. Do not answer this hole with a
   composer.
+- **The teaching method ships with the board, not with the course.** `TEACHING.md`
+  at this root is the method every course is taught by, copied into `live/` on
+  every `board start` and pointed at by the brief, the headless prompt and the
+  cold-start line. The course owns its subject; this owns the shape of a turn,
+  because the shape is a property of the board. Do not paste it into a course's
+  `AI_INSTRUCTIONS.md` — the same document in a dozen repositories drifts one
+  repository at a time, and the one that drifts is the one noticed last.
+  `test/teaching.py` guards both the rules and the delivery.
+- **A lecture aims at an exercise.** Pick the section's exercises first, choose a
+  manageable few and say which and why, teach only what each one needs with a
+  worked example, pose one question, stop. Surveying a chapter and asking
+  something at the end is the shape this exists to prevent: it wastes the hour
+  and teaches to nothing.
+- **Annotations are anchored to a card, never to the page.** The lesson reflows on every
+  type-size change, typeface change, rotation and finished figure, so ink stored in page
+  coordinates ends up somewhere else every time. Strokes are fractions of their card's own
+  width and height and are redrawn from that. The layer is `pointer-events: none` until
+  annotate mode is on — an always-live overlay over the lesson is the drop-overlay defect
+  again, and it would eat every scroll and every selection. `test/annotate.py` and
+  `test/link.js` hold both halves.
+- **What the tutor gets is the ink and the card, not a picture of the lesson.** It wrote the
+  card and can read it back off disk. Flattening rendered HTML and KaTeX into an image needs
+  fonts inlined per send and cannot be verified without a browser; do not add it.
+- **The lesson is reconciled, not rebuilt.** Nodes are keyed by card id and revision, so an
+  unchanged card keeps its node — and with it its scroll position, its typeset mathematics
+  and its ink layer. Never go back to clearing and rebuilding the container: it re-parses
+  every card, re-typesets every formula and re-fetches every figure on every frame, and it
+  discards the annotation layers.
+- **Cards are ordered by their number, not by their mtime.** They are written in sequence and
+  that sequence is their place; sorting by modification time meant correcting a typo in card
+  three moved it after everything the student had since answered.
 - **A writing prompt must be declinable.** Teaching is explain, then ask for an example — and a
   prompt that cannot be refused is a prompt that gets answered badly to make it go away. The answer
   block carries *skip this one* in its own header, so it dies with the block. A skip is a turn: in

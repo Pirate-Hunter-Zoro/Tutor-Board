@@ -943,7 +943,14 @@ function create(opts) {
   bPrev.onclick = function () { goTo(current - 1); };
   bNext.onclick = function () { goTo(current + 1); };
   bAdd.onclick = function () { pages.push(blankPage()); goTo(pages.length - 1); };
-  bSend.onclick = function () { save(true); };
+  /* The host may want a word first -- on the board there can be marks on the
+     lesson as well as working on this page, and which of the two is being sent
+     is the student's decision, not a guess. Without a hook this sends, exactly
+     as it always did. */
+  bSend.onclick = function () {
+    var go = function () { save(true); };
+    if (opts.beforeSend) opts.beforeSend(go); else go();
+  };
 
   function goTo(n) {
     if (n < 0 || n >= pages.length) return;

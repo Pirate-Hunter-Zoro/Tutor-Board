@@ -37,6 +37,7 @@
     <span id="agent" class="agent" hidden></span>
   </div>
   <div class="bar-right">
+    <button id="btn-annotate" title="write on the lesson itself">✎ annotate</button>
     <a id="btn-slate" href="/slate" title="write with the Apple Pencil">✎ slate</a>
     <label id="btn-clip" for="file" title="attach a photo or a PDF">＋</label>
     <button id="btn-smaller" title="smaller type">A&minus;</button>
@@ -120,6 +121,21 @@
   </div>
 </main>
 
+<!-- Two things can be sent and they answer different questions: the working on
+     the slate, and the marks written over the tutor's own words. Asking which is
+     cheaper than guessing wrong, and it only appears when both exist. -->
+<!-- Marks can be made with no question owed, and then there is no writing
+     surface and no Send button anywhere on the page. This is the one for them. -->
+<button id="notesend" class="notesend" type="button" hidden>send my annotations</button>
+
+<div id="sendwhat" class="sendwhat" hidden>
+  <span id="sendwhat-lead">Send what?</span>
+  <button id="send-work" type="button">my working</button>
+  <button id="send-notes" type="button">my annotations</button>
+  <button id="send-both" type="button" class="primary">both</button>
+  <button id="send-cancel" type="button" class="quiet">cancel</button>
+</div>
+
 <button id="jump" class="jump" hidden>↓ new</button>
 
 <!-- Past lessons. A chapter you come back to should still have your own working
@@ -191,6 +207,7 @@
 <script src="/static/katex/auto-render.min.js"></script>
 <script src="/static/macros.js"></script>
 <script src="/static/slate-core.js"></script>
+<script src="/static/annotate.js"></script>
 <script src="/static/board.js"></script>
 </body>
 </html>

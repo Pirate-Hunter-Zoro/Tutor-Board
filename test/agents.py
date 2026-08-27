@@ -101,9 +101,25 @@ check("a record for a live process on this node is believed",
 # and judging that by a heartbeat is why the board's indicator never once turned
 # green in an ordinary `tutor` session: nothing outside headless ever wrote one.
 
-write_agent(host=host, pid=os.getpid(), agent="claude", state="listening",
+# A daemon records its own pid, and a process either exists or it does not.
+# The heartbeat is written at turn boundaries, so a daemon in the middle of a
+# long turn goes silent while working perfectly well -- and a teaching turn
+# routinely runs past two minutes. That silence used to read as death: the board
+# said "assistant not responding" while the tutor was writing the card.
+write_agent(host=host, pid=os.getpid(), agent="claude", state="working",
             last_seen=time.time() - 600)
-check("a headless daemon that stopped heartbeating is not believed",
+st = tutor.agent_live(tmp)
+check("a daemon mid-turn is not declared dead for going quiet",
+      bool(st) and st.get("state") == "working")
+
+write_agent(host=host, pid=999999, agent="claude", state="working",
+            last_seen=time.time())
+check("but a daemon whose process is gone is not believed, heartbeat or not",
+      tutor.agent_live(tmp) is None)
+
+# Only a record with no pid at all has nothing better to go on.
+write_agent(host=host, agent="claude", state="listening", last_seen=time.time() - 600)
+check("a pidless record still expires on its heartbeat",
       tutor.agent_live(tmp) is None)
 
 write_agent(host=host, pid=os.getpid(), agent="claude", state="attached",

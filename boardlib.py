@@ -113,10 +113,13 @@ def agent_is_attached(record, host):
         return False
     if record.get("mode") == "interactive":
         return pid_alive(record.get("pid"), record.get("cmd"))
-    # A daemon has to satisfy both: a heartbeat can be fresh from a process that
-    # has since been killed, and a pid can be alive and belong to a stranger.
-    if record.get("pid") and not pid_alive(record["pid"]):
-        return False
+    # A daemon records its own pid, and a process either exists or it does not --
+    # which is a better answer than a heartbeat and cannot go stale mid-thought.
+    # The heartbeat used to be the only test, and since it is written at turn
+    # boundaries, any turn longer than the window reported a daemon busy teaching
+    # as dead. A teaching turn routinely takes longer than two minutes.
+    if record.get("pid"):
+        return pid_alive(record["pid"])
     return (time.time() - record.get("last_seen", 0)) <= 120
 
 
