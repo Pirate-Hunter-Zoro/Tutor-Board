@@ -33,10 +33,11 @@
     <span id="dot" class="dot" title="connection"></span>
     <span id="course">board</span>
     <span id="chapter" class="muted"></span>
-    <span id="session" class="session" hidden></span>
+    <button id="session" class="session" type="button" hidden title="lecture or homework"></button>
     <span id="agent" class="agent" hidden></span>
   </div>
   <div class="bar-right">
+    <button id="btn-save" title="save this work and push it">⤓ save</button>
     <button id="btn-annotate" title="write on the lesson itself">✎ annotate</button>
     <a id="btn-slate" href="/slate" title="write with the Apple Pencil">✎ slate</a>
     <label id="btn-clip" for="file" title="attach a photo or a PDF">＋</label>
@@ -54,11 +55,14 @@
 <!-- End of session. Asked here, because the person answering is on an iPad. -->
 <div id="finish" class="finish" hidden>
   <div class="finish-text">
-    <strong>Session finished.</strong>
-    <span>Save this work and push it to GitHub?</span>
+    <strong id="finish-lead">Session finished.</strong>
+    <span id="finish-sub">Save this work and push it to GitHub?</span>
   </div>
   <div class="finish-acts">
     <button id="finish-no" type="button">Not now</button>
+    <!-- Only in the leaving flow: going without committing has to be a choice
+         somebody makes, not something that happens by walking away. -->
+    <button id="finish-leave" type="button" hidden>Leave without saving</button>
     <button id="finish-yes" type="button" class="primary">Push</button>
   </div>
 </div>
@@ -124,9 +128,38 @@
 <!-- Two things can be sent and they answer different questions: the working on
      the slate, and the marks written over the tutor's own words. Asking which is
      cheaper than guessing wrong, and it only appears when both exist. -->
+<!-- Annotating has its own tools. The tool strip below belongs to the slate --
+     it draws on the answer surface, not on the lesson -- so pointing its eraser
+     and its undo at a card did nothing at all, which reads as broken rather
+     than as out of scope. -->
+<div id="annbar" class="annbar" hidden>
+  <button id="ann-pen" type="button" class="anntool on">Pen</button>
+  <button id="ann-erase" type="button" class="anntool">Erase</button>
+  <span class="ann-inks">
+    <button type="button" class="ann-ink on" data-ink="#e0b45c" title="amber"></button>
+    <button type="button" class="ann-ink" data-ink="#e8746c" title="red"></button>
+    <button type="button" class="ann-ink" data-ink="#6fc3f7" title="blue"></button>
+    <button type="button" class="ann-ink" data-ink="#7fc79a" title="green"></button>
+  </span>
+  <button id="ann-undo" type="button" title="undo">↶</button>
+  <button id="ann-redo" type="button" title="redo">↷</button>
+  <button id="ann-clear" type="button" title="remove every mark">clear</button>
+  <button id="ann-done" type="button" class="primary">done</button>
+</div>
+
 <!-- Marks can be made with no question owed, and then there is no writing
      surface and no Send button anywhere on the page. This is the one for them. -->
 <button id="notesend" class="notesend" type="button" hidden>send my annotations</button>
+
+<!-- Which kind of sitting this is, chosen here rather than in a terminal. A
+     student who wants help with a problem set should not have to find a keyboard
+     to say so. -->
+<div id="kind" class="sendwhat" hidden>
+  <span id="kind-lead">This sitting:</span>
+  <button id="kind-lecture" type="button">lecture</button>
+  <span id="kind-sets"></span>
+  <button id="kind-cancel" type="button" class="quiet">cancel</button>
+</div>
 
 <div id="sendwhat" class="sendwhat" hidden>
   <span id="sendwhat-lead">Send what?</span>

@@ -23,6 +23,13 @@ var els = {
   noTutor: document.getElementById("no-tutor"),
   skip: document.getElementById("skip"),
   notesend: document.getElementById("notesend"),
+  annbar: document.getElementById("annbar"),
+  annPen: document.getElementById("ann-pen"),
+  annErase: document.getElementById("ann-erase"),
+  annUndo: document.getElementById("ann-undo"),
+  annRedo: document.getElementById("ann-redo"),
+  annClear: document.getElementById("ann-clear"),
+  annDone: document.getElementById("ann-done"),
   annotate: document.getElementById("btn-annotate"),
   sendwhat: document.getElementById("sendwhat"),
   sendWork: document.getElementById("send-work"),
@@ -40,8 +47,20 @@ var els = {
   scratchList: document.getElementById("scratch-list"),
   writer: document.getElementById("writer"),
   session: document.getElementById("session"),
+  kind: document.getElementById("kind"),
+  kindLecture: document.getElementById("kind-lecture"),
+  kindSets: document.getElementById("kind-sets"),
+  kindCancel: document.getElementById("kind-cancel"),
   agent: document.getElementById("agent"),
   finish: document.getElementById("finish"),
+  finishLead: document.getElementById("finish-lead"),
+  finishSub: document.getElementById("finish-sub"),
+  save: document.getElementById("btn-save"),
+  home: document.getElementById("btn-home"),
+  finishLeave: document.getElementById("finish-leave"),
+  finishYes: document.getElementById("finish-yes"),
+  finishNo: document.getElementById("finish-no"),
+  saveDot: null,
   pushed: document.getElementById("pushed"),
   pushedIcon: document.getElementById("pushed-icon"),
   pushedText: document.getElementById("pushed-text"),
@@ -572,6 +591,8 @@ function render(data) {
   paintHomework(data.hw);
   if (!started) paintWaiting(data);
   paintNotesSend();
+  paintSave(data.unsaved);
+  if (data.sets) knownSets = data.sets;
 
   var codeMode = (state.mode || "math") === "code";
   document.body.dataset.mode2 = state.mode || "math";
@@ -686,6 +707,7 @@ function paintWaiting(data) {
    did not, because "the build failed" without the reason is a message that
    sends someone to a laptop. */
 function paintHomework(hw) {
+  currentSet = hw && hw.name ? hw.name : null;
   if (!hw) { els.hwbar.hidden = true; return; }
   els.hwbar.hidden = false;
 
@@ -762,13 +784,24 @@ function paintSession(state, push, agent) {
          a daemon whose process is gone. Say what that means for them. */
     : "tutor stopped — nothing is reading the board";
   }
-  var kind = state.session;
-  els.session.hidden = !kind;
-  if (kind) {
-    els.session.textContent = kind;
-    els.session.dataset.kind = kind;
+  var kind = state.session || "lecture";
+  sittingKind = kind;
+  els.session.hidden = false;
+  els.session.textContent = kind;
+  els.session.dataset.kind = kind;
+  els.session.title = "tap to switch between lecture and homework";
+  if (leavingTo) return;              /* a decision is in front of the student */
+  if (state.finished) {
+    els.finishLead.textContent = "Session finished.";
+    els.finishSub.textContent = "Save this work and push it to GitHub?";
+    els.finishYes.textContent = "Push";
+    els.finishNo.textContent = "Not now";
+    els.finishLeave.hidden = true;
+    els.finish.hidden = false;
+  } else if (els.finish.hidden !== false || !savePrompted()) {
+    /* Leave a prompt the student raised themselves standing. */
+    if (!savePrompted()) els.finish.hidden = true;
   }
-  els.finish.hidden = !state.finished;
 
   if (!push || push.at <= pushDismissed) {
     els.pushed.hidden = true;
@@ -785,13 +818,20 @@ function paintSession(state, push, agent) {
   }
 }
 
+/* Is the standing prompt one the student raised, rather than the end of a
+   session? Then a payload arriving must not sweep it away mid-decision. */
+function savePrompted() {
+  return !els.finish.hidden && /^Save this work/.test(els.finishLead.textContent || "");
+}
+
 function doPush() {
   els.finish.hidden = true;
+  els.finishLeave.hidden = true;
   els.pushed.hidden = false;
   els.pushed.className = "pushed";
   els.pushedIcon.textContent = "…";
   els.pushedText.textContent = "saving and pushing…";
-  fetch("/push", {
+  return fetch("/push", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({})
@@ -804,9 +844,28 @@ function doPush() {
     });
 }
 
-document.getElementById("finish-yes").onclick = doPush;
-document.getElementById("finish-no").onclick = function () {
+/* Pushing from the leaving flow goes on to leave; from anywhere else it just
+   pushes and the lesson carries on. */
+els.finishYes.onclick = function () {
+  var go = !!leavingTo;
+  var done = doPush();
+  if (go && done && done.then) done.then(goLeave, goLeave);
+};
+
+/* Saving must not depend on the tutor. Sessions end by being abandoned -- a lid
+   closes, an allocation expires, somebody puts the iPad down -- and until now
+   the only way to the push was a prompt that only `board finish` could raise.
+   Work that is not committed is one bad night's sleep from gone. */
+els.save.onclick = function () {
+  els.finishLead.textContent = "Save this work?";
+  els.finishSub.textContent = "Commit everything so far and push it to GitHub. "
+                            + "The lesson stays open.";
+  els.finish.hidden = false;
+};
+els.finishNo.onclick = function () {
   els.finish.hidden = true;
+  els.finishLeave.hidden = true;
+  leavingTo = null;
   fetch("/dismiss-finish", { method: "POST" }).catch(function () {});
 };
 document.getElementById("pushed-close").onclick = function () {
@@ -993,19 +1052,58 @@ function queueNoteSave() {
 }
 
 if (window.Annotate) {
-  window.Annotate.onChange(queueNoteSave);
+  window.Annotate.onChange(function () {
+    queueNoteSave();
+    paintAnnTools();
+    paintNotesSend();
+  });
   /* A closing tab must not take the last stroke with it. */
   window.addEventListener("pagehide", function () { saveNotes(false); });
 }
 
-els.annotate.onclick = function () {
+function setAnnotating(next) {
   if (!window.Annotate) return;
-  var next = !window.Annotate.isOn();
   window.Annotate.setOn(next);
+  els.annbar.hidden = !next;
   els.annotate.setAttribute("aria-pressed", next ? "true" : "false");
   els.annotate.title = next ? "stop writing on the lesson"
                             : "write on the lesson itself";
+  paintAnnTools();
+}
+
+els.annotate.onclick = function () {
+  setAnnotating(!window.Annotate.isOn());
 };
+
+/* The tools are only meaningful while the mode is on, and a control that looks
+   available but does nothing is worse than one that is plainly disabled. */
+function paintAnnTools() {
+  if (!window.Annotate) return;
+  var erasing = window.Annotate.tool() === "erase";
+  els.annPen.classList.toggle("on", !erasing);
+  els.annErase.classList.toggle("on", erasing);
+  els.annUndo.disabled = !window.Annotate.canUndo();
+  els.annRedo.disabled = !window.Annotate.canRedo();
+  els.annClear.disabled = !window.Annotate.marked().length;
+  Array.prototype.forEach.call(document.querySelectorAll(".ann-ink"), function (b) {
+    b.style.background = b.dataset.ink;
+    b.classList.toggle("on", b.dataset.ink === window.Annotate.colour());
+  });
+}
+
+els.annPen.onclick = function () { window.Annotate.setTool("pen"); paintAnnTools(); };
+els.annErase.onclick = function () { window.Annotate.setTool("erase"); paintAnnTools(); };
+els.annUndo.onclick = function () { window.Annotate.undo(); paintAnnTools(); };
+els.annRedo.onclick = function () { window.Annotate.redo(); paintAnnTools(); };
+els.annClear.onclick = function () { window.Annotate.clearCurrent(); paintAnnTools(); };
+els.annDone.onclick = function () { setAnnotating(false); };
+Array.prototype.forEach.call(document.querySelectorAll(".ann-ink"), function (b) {
+  b.onclick = function () {
+    window.Annotate.setPen(b.dataset.ink);
+    window.Annotate.setTool("pen");
+    paintAnnTools();
+  };
+});
 
 /* ------------------------------------------------------------ send chooser */
 /* Only asked when there is genuinely a choice: working on the slate AND marks
@@ -1064,6 +1162,135 @@ function paintNotesSend() {
   var owedSurface = !els.writer.hidden;
   els.notesend.hidden = !(any && !owedSurface);
 }
+
+
+/* --------------------------------------------------- something to save yet? */
+/* Leaving is silent. An app is swiped away, a lid closes, a lesson is put down
+   mid-thought -- and none of those raise anything. So the state of the working
+   tree is on the board: if there is uncommitted work, the save says so before
+   you go, and if you come back to a session you left with work outstanding, the
+   offer is put in front of you once rather than waiting to be found. */
+var unsaved = 0;
+var offeredOnReturn = false;
+
+function paintSave(n) {
+  unsaved = (typeof n === "number") ? n : 0;
+  var has = unsaved > 0;
+  els.save.classList.toggle("dirty", has);
+  els.save.textContent = has ? "⤓ save " + unsaved : "⤓ save";
+  els.save.title = has
+    ? unsaved + " file(s) not yet committed — tap to save and push"
+    : "everything here is committed";
+}
+
+function offerSaveOnReturn() {
+  /* Only when there is genuinely something to lose, only once per return, and
+     never on top of a decision already in front of the student. */
+  if (!unsaved || offeredOnReturn || !els.finish.hidden) return;
+  offeredOnReturn = true;
+  els.finishLead.textContent = "Save this work?";
+  els.finishSub.textContent = "You left with " + unsaved
+    + " file(s) uncommitted. Commit and push them now — the lesson stays open.";
+  els.finish.hidden = false;
+}
+
+document.addEventListener("visibilitychange", function () {
+  if (document.hidden) offeredOnReturn = false;    /* arm it for the next return */
+  else setTimeout(offerSaveOnReturn, 600);         /* after the first payload lands */
+});
+
+
+/* ------------------------------------------------------------ leaving here */
+/* The back arrow is the ordinary way out of a lesson, and walking out of a
+   lesson is exactly when uncommitted work gets left behind. The session itself
+   is safe -- cards, turns and answers are files, and they are still here when
+   you come back -- but what is on disk is not what is pushed. So the way out
+   asks, every time, rather than only when the board happens to know something is
+   outstanding. */
+var leavingTo = null;
+
+function askBeforeLeaving(href) {
+  leavingTo = href;
+  els.finishLead.textContent = "Leaving this lesson.";
+  els.finishSub.textContent = (unsaved > 0
+      ? unsaved + " file(s) are not committed. "
+      : "Everything here is already committed. ")
+    + "The lesson is kept either way — it is still here when you come back.";
+  els.finishYes.textContent = unsaved > 0 ? "Save and push" : "Push anyway";
+  els.finishNo.textContent = "Stay";
+  els.finishLeave.hidden = false;
+  els.finish.hidden = false;
+}
+
+function goLeave() {
+  var to = leavingTo || "/";
+  leavingTo = null;
+  els.finish.hidden = true;
+  els.finishLeave.hidden = true;
+  /* Announced before the page tears down: anything that needs a last word --
+     an autosave of ink in progress, and whatever comes later -- gets it here
+     rather than racing the navigation. */
+  try {
+    window.dispatchEvent(new CustomEvent("board:leave", { detail: { to: to } }));
+  } catch (e) { /* an old engine without CustomEvent still leaves */ }
+  saveNotes(false);
+  window.location.href = to;
+}
+
+els.home.addEventListener("click", function (e) {
+  e.preventDefault();
+  askBeforeLeaving(els.home.getAttribute("href") || "/");
+});
+
+els.finishLeave.onclick = goLeave;
+
+
+/* ------------------------------------------------------- lecture or homework */
+/* Which kind of sitting this is was a terminal-only decision, so a student who
+   wanted help with a problem set had to find a keyboard to say so. The badge in
+   the title bar already names the kind; making it the control is the whole
+   change. The sets offered are the ones the repository actually has -- nothing
+   is typed, so nothing invented can reach the filesystem. */
+var knownSets = [];
+var sittingKind = "lecture";
+
+function paintKindChooser() {
+  els.kindLecture.classList.toggle("on", sittingKind === "lecture");
+  els.kindSets.innerHTML = "";
+  if (!knownSets.length) {
+    var none = document.createElement("span");
+    none.className = "muted";
+    none.textContent = "no problem sets in this course";
+    els.kindSets.appendChild(none);
+    return;
+  }
+  knownSets.forEach(function (name) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.textContent = name;
+    if (sittingKind === "homework" && currentSet === name) b.classList.add("on");
+    b.onclick = function () { setSitting("homework", name); };
+    els.kindSets.appendChild(b);
+  });
+}
+
+var currentSet = null;
+
+function setSitting(kind, name) {
+  els.kind.hidden = true;
+  fetch("/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session: kind, hw: name || null })
+  }).catch(function () { /* the payload will say what actually happened */ });
+}
+
+els.session.onclick = function () {
+  paintKindChooser();
+  els.kind.hidden = false;
+};
+els.kindLecture.onclick = function () { setSitting("lecture"); };
+els.kindCancel.onclick = function () { els.kind.hidden = true; };
 
 /* ------------------------------------------------------------------ stream */
 var source = null;

@@ -124,6 +124,56 @@ try:
     check("marking the same card again revises that turn", len(turns) == 1)
     check("and the revision is recorded", turns[0]["rev"] == 2)
 
+    # --- saving mid-session must not end the session --------------------------
+    # `board push` from a terminal archives a code session, because a commit is
+    # what "we got this working" means there. The board's own save is a
+    # different act: somebody putting the iPad down and wanting their work
+    # committed. It must leave the lesson exactly where it was.
+    before_cards = sorted(os.listdir(repo.cards))
+    before_turns = len(serve.load_turns(repo))
+    serve.run_push(repo, "a mid-session save")
+    check("a board save leaves the cards where they are",
+          sorted(os.listdir(repo.cards)) == before_cards)
+    check("and the transcript intact", len(serve.load_turns(repo)) == before_turns)
+    check("and nothing archived out from under the student",
+          not os.listdir(repo.archive))
+    check("while still recording what happened, pass or fail",
+          os.path.isfile(os.path.join(repo.live, "push.json")))
+
+    # --- choosing the kind of sitting from the board --------------------------
+    # This was a terminal-only decision, so a student who wanted help with a
+    # problem set had to find a keyboard to say so.
+    os.makedirs(os.path.join(tmp, "homework", "hw01", "assignment"), exist_ok=True)
+    open(os.path.join(tmp, "homework", "hw01", "hw01.tex"), "w").write(
+        "\\begin{problem}{1}\nStatement.\n\\end{problem}\n"
+        "% ===== SOLUTION 1 =====\n% TODO\n% ===== END SOLUTION 1 =====\n")
+    open(os.path.join(tmp, "homework", "hw01", "assignment", "sheet.pdf"), "wb").write(b"%PDF-1.4\n")
+
+    status, body = post("/session", {"session": "homework", "hw": "hw01"})
+    check("the sitting can be switched to homework from the board",
+          status == 200 and body.get("ok"))
+    st = repo.state()
+    check("and the set is bound to it", st.get("hw") == "homework/hw01/hw01.tex")
+    check("and the badge will read homework", st.get("session") == "homework")
+
+    sense = serve.session_sense(repo)
+    check("the tutor is pointed at the assignment sheet itself",
+          "sheet.pdf" in sense)
+    check("and told the problems are not its to choose",
+          "not yours to choose" in sense)
+    check("and told to do all of them, in order", "all of them, in order" in sense)
+    check("and not told to pick a manageable few, which is a lecture behaviour",
+          "manageable few" not in sense)
+
+    status, _ = post("/session", {"session": "homework", "hw": "hw99"})
+    check("a set this course does not have is refused", status == 400)
+    status, _ = post("/session", {"session": "seminar"})
+    check("and so is a kind that does not exist", status == 400)
+
+    status, body = post("/session", {"session": "lecture"})
+    check("switching back to a lecture unbinds the set",
+          status == 200 and not repo.state().get("hw"))
+
     # --- rubbish is refused ---------------------------------------------------
     status, _ = post("/annotate/save", {"card": "../../etc/passwd", "strokes": []})
     check("a card id cannot escape the annotations directory", status == 400)

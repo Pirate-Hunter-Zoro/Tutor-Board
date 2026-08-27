@@ -127,6 +127,26 @@ Read `README.md` first.
 - **Cards are ordered by their number, not by their mtime.** They are written in sequence and
   that sequence is their place; sorting by modification time meant correcting a typo in card
   three moved it after everything the student had since answered.
+- **The student can save without the tutor, and saving is not ending.** `⤓ save`
+  in the title bar raises the push offer at any moment, in either mode. The board's
+  push commits and records the outcome; it does **not** archive, so a code session
+  is not ended by it — only `board push` from a terminal does that, where a commit
+  is the session boundary. Sessions end by being abandoned far more often than they
+  end tidily, and until this existed the only route to a commit was a prompt that
+  only `board finish` could raise. `test/link.js` and `test/annotate.py` hold both
+  halves.
+- **The way out of a lesson asks.** The back arrow offers save-and-push, leave-without-saving,
+  or stay — every time, not only when the board happens to know something is outstanding. The
+  session survives either way (it is files), but what is on disk is not what is pushed, and
+  walking away is exactly when that gets forgotten. The board also shows the uncommitted count
+  on the save itself, from a `git status` cached for eight seconds, and re-offers once when a
+  session is returned to with work outstanding.
+- **The kind of sitting is chosen on the board, and only from what exists.** The badge is the
+  control; `/session` accepts `lecture` or `homework` plus a set name matched against the
+  repository's own sets, so a name from a request never reaches the filesystem. A homework
+  sitting is woken with the path to its assignment sheet and told the problems are not its to
+  choose — the one thing that differs from a lecture. Do not let a homework prompt inherit the
+  lecture's "pick a manageable few".
 - **A writing prompt must be declinable.** Teaching is explain, then ask for an example — and a
   prompt that cannot be refused is a prompt that gets answered badly to make it go away. The answer
   block carries *skip this one* in its own header, so it dies with the block. A skip is a turn: in

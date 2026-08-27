@@ -52,6 +52,11 @@ for phrase, why in [
     ("HANDOFF.md", "the session ends in writing"),
     ("code course", "a code course is a different shape and says so"),
     ("Write the card before", "the card lands before the turn's other work"),
+    ("board hw", "an agreed answer is typeset into the course's own file"),
+    ("board finish", "the session ends by offering the push"),
+    ("assignment sheet", "a homework sitting reads the sheet it was set"),
+    ("not yours", "and does not choose its own problems there"),
+    ("has not produced", "no solution is invented for the student"),
 ]:
     check("the method states: " + why, phrase.lower() in text.lower())
 

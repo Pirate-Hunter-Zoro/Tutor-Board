@@ -131,7 +131,51 @@ function png(id) {
   try { return out.toDataURL("image/png"); } catch (e) { return ""; }
 }
 
+/* Undo has to cover erasing and clearing too, not just strokes, or the eraser is
+   a one-way door over the tutor's own words. Snapshots, because a card carries a
+   handful of strokes and the simple thing is correct. */
+var past = [], future = [];
+var HISTORY = 60;
+
+function snapshot(id) {
+  return { id: id, strokes: (store[id] || []).map(function (s) {
+    return { c: s.c, w: s.w, p: s.p.slice() };
+  }) };
+}
+
+function remember(id) {
+  past.push(snapshot(id));
+  if (past.length > HISTORY) past.shift();
+  future.length = 0;
+}
+
+function restore(snap) {
+  store[snap.id] = snap.strokes;
+  dirty[snap.id] = true;
+  draw(document.querySelector('[data-card="' + snap.id + '"]'));
+  onChange();
+}
+
+var tool = "pen";        /* pen | erase */
 var drawing = null;
+
+/* Within this many card-widths of a stroke counts as touching it. Generous,
+   because the target is a pen line over prose on a tablet. */
+var ERASE_NEAR = 0.02;
+
+function eraseAt(id, x, y) {
+  var all = store[id] || [];
+  var kept = all.filter(function (s) {
+    for (var i = 0; i < s.p.length; i += 2) {
+      var dx = s.p[i] - x, dy = s.p[i + 1] - y;
+      if (dx * dx + dy * dy < ERASE_NEAR * ERASE_NEAR) return false;
+    }
+    return true;
+  });
+  if (kept.length === all.length) return false;
+  store[id] = kept;
+  return true;
+}
 
 function begin(ev, card) {
   if (!on) return;
@@ -139,6 +183,17 @@ function begin(ev, card) {
   if (!id) return;
   var canvas = layerOf(card);
   var r = canvas.getBoundingClientRect();
+
+  if (tool === "erase") {
+    remember(id);
+    drawing = { id: id, card: card, erasing: true };
+    rub(ev, r);
+    try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* not fatal */ }
+    ev.preventDefault();
+    return;
+  }
+
+  remember(id);
   drawing = { id: id, card: card, stroke: { c: pen.colour, w: pen.width, p: [] } };
   strokesFor(id).push(drawing.stroke);
   add(ev, r);
@@ -153,18 +208,34 @@ function add(ev, r) {
   drawing.stroke.p.push(Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y)));
 }
 
+function rub(ev, r) {
+  var x = (ev.clientX - r.left) / Math.max(1, r.width);
+  var y = (ev.clientY - r.top) / Math.max(1, r.height);
+  if (eraseAt(drawing.id, x, y)) {
+    dirty[drawing.id] = true;
+    draw(drawing.card);
+  }
+}
+
 function move(ev) {
   if (!on || !drawing) return;
   var canvas = layerOf(drawing.card);
-  add(ev, canvas.getBoundingClientRect());
-  draw(drawing.card);
+  if (drawing.erasing) {
+    rub(ev, canvas.getBoundingClientRect());
+  } else {
+    add(ev, canvas.getBoundingClientRect());
+    draw(drawing.card);
+  }
   ev.preventDefault();
 }
 
 function end() {
   if (!drawing) return;
   var id = drawing.id;
-  if (drawing.stroke.p.length < 4) strokesFor(id).pop();   /* a tap is not a mark */
+  if (!drawing.erasing && drawing.stroke.p.length < 4) {
+    strokesFor(id).pop();          /* a tap is not a mark */
+    past.pop();                    /* and it is not an undo step either */
+  }
   drawing = null;
   dirty[id] = true;
   draw(document.querySelector('[data-card="' + id + '"]'));
@@ -191,8 +262,13 @@ window.Annotate = {
   load: function (notes) {
     if (!notes) return;
     Object.keys(notes).forEach(function (id) {
-      /* Never overwrite marks the student is in the middle of making. */
-      if (!dirty[id]) store[id] = notes[id] || [];
+      /* The payload is for restoring marks after a reload, and for nothing else.
+         This device's copy is authoritative while it is drawing on it: the save
+         is a round trip, and a stroke drawn during that round trip is not in the
+         copy that comes back -- so accepting the server's version a moment later
+         silently truncated whatever had been drawn since. It looked like the end
+         of a stroke being bitten off a second after finishing it. */
+      if (!(id in store)) store[id] = notes[id] || [];
     });
     window.Annotate.redrawAll();
   },
@@ -201,6 +277,32 @@ window.Annotate = {
     document.body.classList.toggle("annotating", on);
   },
   isOn: function () { return on; },
+  setTool: function (t) { tool = (t === "erase") ? "erase" : "pen"; },
+  tool: function () { return tool; },
+  undo: function () {
+    var snap = past.pop();
+    if (!snap) return false;
+    future.push(snapshot(snap.id));
+    restore(snap);
+    return true;
+  },
+  redo: function () {
+    var snap = future.pop();
+    if (!snap) return false;
+    past.push(snapshot(snap.id));
+    restore(snap);
+    return true;
+  },
+  canUndo: function () { return past.length > 0; },
+  canRedo: function () { return future.length > 0; },
+  clearCurrent: function () {
+    var ids = window.Annotate.marked();
+    ids.forEach(function (id) { remember(id); store[id] = []; dirty[id] = true;
+                                draw(document.querySelector('[data-card="' + id + '"]')); });
+    if (ids.length) onChange();
+    return ids.length;
+  },
+  colour: function () { return pen.colour; },
   setPen: function (colour, width) {
     if (colour) pen.colour = colour;
     if (width) pen.width = width;
@@ -210,6 +312,7 @@ window.Annotate = {
   unsaved: function () { return Object.keys(dirty); },
   clean: function (id) { delete dirty[id]; },
   clear: function (id) {
+    remember(id);
     store[id] = [];
     dirty[id] = true;
     draw(document.querySelector('[data-card="' + id + '"]'));

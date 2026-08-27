@@ -719,6 +719,31 @@ retype their own proof teaches nothing.
 
 The kind shows as a badge on the board, so there is never a question about which sitting this is.
 
+### Switching between a lecture and homework
+
+The **LECTURE / HOMEWORK** badge in the title bar is the control. Tap it, and it offers
+*lecture* or any problem set the repository actually has — `hw01`, `hw02`, `ch07`. Nothing is
+typed, so nothing invented can reach the filesystem, and switching to homework binds the set
+in one action. Switching back to a lecture unbinds it.
+
+This was a terminal-only decision until it wasn't: `board open … --homework`. A student who
+wanted help with a problem set had to find a keyboard to say so, which is the ceremony this
+whole tool exists to remove.
+
+**The two sittings differ in exactly one thing: who chooses the problems.**
+
+| | lecture | homework |
+|---|---|---|
+| The problem list | the tutor picks a manageable few from the section's exercises | the assignment sheet chose them; all of them, in order |
+| Leaving some undone | fine — sections are archived and can be returned to | not fine; a skipped problem is a lost mark |
+| Everything else | identical | identical |
+
+In a homework sitting the tutor is woken with the path to the sheet itself — for Probability
+that is `homework/hw01/assignment/Prob.Homework1.2026.pdf` — and told to read it and do
+exactly what it assigns. If no sheet is filed, it is told to ask rather than to infer a
+problem list from the chapter. Statements are transcribed into the set's `.tex` first, then
+the problems are taught one at a time exactly as in a lecture.
+
 ### A homework sitting is bound to a problem set
 
 The teaching loop is the same as a lecture's — a card states the problem, the answer block takes
@@ -785,6 +810,28 @@ the branch, or a red one carrying the actual error text. A failed push is never 
 hub shows the last result too.
 
 `board push "message"` does it from the terminal without asking.
+
+**You can save without the tutor, at any point.** `⤓ save` in the title bar raises the
+same offer, worded as what it is — *Save this work? … The lesson stays open.* Sessions end
+by being abandoned far more often than they end tidily: a lid closes, an allocation
+expires, somebody puts the iPad down. Until this existed the only route to a commit was a
+prompt only `board finish` could raise, so leaving mid-session meant leaving the work
+uncommitted.
+
+**And the way out asks, every time.** The back arrow (`‹`) does not simply leave: it offers
+*Save and push*, *Leave without saving*, or *Stay*, and says plainly that the lesson is kept
+either way — cards, answers and annotations are files, and they are all still there when you
+come back. Leaving without committing is a choice somebody makes, not something that happens
+by walking away.
+
+The save also shows what is at stake before you go: with uncommitted work it reads **⤓ save 4**
+in amber rather than a quiet `⤓ save`. `git status` is asked at most once every eight seconds
+and cached, so the poll loop stays cheap. And if you come back to a session you left with work
+outstanding, the offer is put in front of you once rather than waiting to be noticed.
+
+It behaves identically in a code repository, with one deliberate difference from the
+terminal: `board push` there *ends* the session, because a commit is what "we got this
+working" means — the board's save does not. It commits and the lesson carries on.
 
 The script is deliberately ordinary — `git add -A`, commit, push — and lives in each repository so
 it works with or without this tool:

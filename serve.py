@@ -300,7 +300,23 @@ def session_sense(repo):
     chapter = (st.get("chapter") or "").strip()
     # In a headless session this line is the whole prompt, so it has to carry the
     # pointer to the method as well as the pointer to the place.
-    how = "Follow live/TEACHING.md: the section's exercises first, a manageable few, teach only what each needs, one question per turn, then stop. "
+    how = ("Follow live/TEACHING.md: teach only what the problem in front of them "
+           "needs, one question per turn, then stop. "
+           if kind == "homework" else
+           "Follow live/TEACHING.md: the section's exercises first, a manageable few, "
+           "teach only what each needs, one question per turn, then stop. ")
+    if kind == "homework":
+        st_hw = homework.status(repo.root, st)
+        if st_hw and st_hw.get("name"):
+            sheet = st_hw.get("assignment") or []
+            where = ("The assignment sheet is at %s -- read it and do exactly the "
+                     "problems it assigns, all of them, in order." % sheet[0]) if sheet else (
+                     "No assignment sheet is filed under %s; ask which problems are "
+                     "assigned before teaching anything." % os.path.dirname(st_hw["rel"]))
+            return (how + "This is a HOMEWORK sitting on %s (%s). The problems are "
+                    "assigned, not yours to choose. %s Transcribe each statement "
+                    "before you teach it." % (st_hw["name"], st_hw["rel"], where))
+
     if chapter:
         return (how + "This sitting is labelled %r and it is a %s. Start there."
                 % (chapter, kind))
@@ -481,6 +497,7 @@ def load_hw(repo):
     if not st:
         return None
     st["ambiguous"] = st.get("ambiguous", [])[:8]
+    st["sets"] = [x["name"] for x in homework.sets(repo.root)][:40]
     st.pop("dir", None)          # an absolute path on this machine is no use to a browser
     try:
         with open(os.path.join(repo.live, "hw.json"), "r", encoding="utf-8") as fh:
@@ -508,6 +525,40 @@ def load_notes(repo):
         if rec.get("card"):
             out[rec["card"]] = rec.get("strokes") or []
     return out
+
+
+# Whether this repository has work that is not committed. Asked on every poll,
+# answered from a cache: `git status` on a network filesystem is not something to
+# run four times a second, and the answer does not change that fast.
+_DIRTY = {"at": 0.0, "value": None}
+DIRTY_TTL = 8.0
+
+
+def repo_dirty(repo):
+    """How many files are uncommitted here, or None if that cannot be told.
+
+    This exists so the board can show that there is something to save. Leaving a
+    session is silent -- a lid closes, an app is swiped away -- and the student
+    should be able to see, before they go, that going now loses something.
+    """
+    now = time.time()
+    if _DIRTY["value"] is not None and now - _DIRTY["at"] < DIRTY_TTL:
+        return _DIRTY["value"]
+    value = None
+    if os.path.isdir(os.path.join(repo.root, ".git")):
+        try:
+            p = subprocess.run(["git", "status", "--porcelain"], cwd=repo.root,
+                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                               timeout=10)
+            if p.returncode == 0:
+                lines = [l for l in p.stdout.decode("utf-8", "replace").splitlines()
+                         if l.strip()]
+                value = len(lines)
+        except (OSError, subprocess.TimeoutExpired):
+            value = None
+    _DIRTY["at"] = now
+    _DIRTY["value"] = value
+    return value
 
 
 def load_push(repo):
@@ -869,6 +920,7 @@ class Hub:
             "uploads": load_uploads(self.repo),
             "slate": load_slate(self.repo),
             "notes": load_notes(self.repo),
+            "unsaved": repo_dirty(self.repo),
             "push": load_push(self.repo),
             "agent": load_agent(self.repo),
             "history": len(list_archive(self.repo)),
@@ -876,8 +928,18 @@ class Hub:
         # Only in a homework sitting, and read from the .tex itself rather than
         # from a record the board keeps: the file is the truth, the assistant
         # edits it directly, and two sources of truth drift.
-        if state.get("session") == "homework":
+        # In a homework sitting, always. In a lecture, once a set has been bound
+        # to it -- a lecture that works through a section's exercises is writing
+        # them up into the same file, and the state of that file is exactly as
+        # invisible from an iPad either way.
+        if state.get("session") == "homework" or state.get("hw"):
             data["hw"] = load_hw(self.repo)
+        # The names alone, always: the board offers them when switching, and a
+        # lecture has no `hw` block to carry them in. A glob, not a parse.
+        try:
+            data["sets"] = [x["name"] for x in homework.sets(self.repo.root)][:40]
+        except Exception:
+            data["sets"] = []
         return data
 
     def poll_loop(self):
@@ -1121,6 +1183,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 payload = {}
             record = run_push(repo, (payload.get("message") or "").strip() or None)
+            _DIRTY["value"] = None      # ask again now, not in eight seconds
             # Clear the end-of-session offer either way; a failure shows as a
             # banner with the reason rather than as a standing prompt.
             st = repo.state()
@@ -1166,6 +1229,37 @@ class Handler(BaseHTTPRequestHandler):
                                    "detail": out.strip(),
                                    "agent": aout.strip() if acode == 0 else None,
                                    "agent_error": None if acode == 0 else aout.strip()[-300:]})
+
+        if path == "/session":
+            # Which kind of sitting this is, chosen from the board. It was a
+            # terminal-only decision, which meant a student who wanted help with
+            # a problem set had to find a keyboard to say so.
+            try:
+                payload = json.loads(self.read_body().decode("utf-8") or "{}")
+            except Exception:
+                return self.send_json({"ok": False, "error": "bad json"}, status=400)
+            kind = (payload.get("session") or "").strip().lower()
+            if kind not in ("lecture", "homework"):
+                return self.send_json({"ok": False, "error": "bad session"}, status=400)
+            want = (payload.get("hw") or "").strip()
+            st = repo.state()
+            st["session"] = kind
+            if kind == "homework":
+                # Only a set this repository actually has. A name from the
+                # request never reaches the filesystem.
+                every = {x["name"]: x for x in homework.sets(repo.root)}
+                chosen = every.get(want)
+                if want and not chosen:
+                    return self.send_json({"ok": False, "error": "no such set"}, status=400)
+                if chosen:
+                    st["hw"] = chosen["rel"]
+                    st["chapter"] = chosen["name"]
+            else:
+                st.pop("hw", None)
+            with open(repo.state_path, "w", encoding="utf-8") as fh:
+                json.dump(st, fh, indent=2)
+            self.server.hub.worker.dirty.set()
+            return self.send_json({"ok": True, "session": kind, "hw": st.get("hw")})
 
         if path == "/annotate/save":
             # Marks written over the tutor's own cards. Saving keeps them across

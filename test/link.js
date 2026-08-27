@@ -322,8 +322,206 @@ if (es) {
   else fail('the chooser cannot be dismissed');
 }
 
+// --- the annotation tools actually drive the annotation layer ----------------
+// The tool strip at the bottom belongs to the slate: it draws on the answer
+// surface, not on the lesson. So pen, erase, undo and redo did nothing at all
+// while annotating, which reads as broken rather than as out of scope.
+if (es && window.Annotate) {
+  var annbar = doc.getElementById('annbar');
+  var btnA = doc.getElementById('btn-annotate');
+
+  btnA.onclick();
+  if (!annbar.hidden) ok('turning annotation on brings its own tools with it');
+  else fail('annotate mode has no tools of its own');
+
+  window.Annotate.setOn(true);
+  window.Annotate.load({});
+  window.Annotate.clearCurrent();
+
+  // Draw two marks the way the layer stores them.
+  var A = { c: '#e0b45c', w: 2, p: [0.10, 0.10, 0.30, 0.10] };
+  var B = { c: '#e0b45c', w: 2, p: [0.70, 0.80, 0.90, 0.80] };
+  window.Annotate.load({ '0003': [] });
+  window.Annotate.clear('0003');
+
+  // undo/redo have to cover erasing, or the eraser is a one-way door over the
+  // tutor's own words.
+  var before = window.Annotate.canUndo();
+  window.Annotate.clear('0003');
+  if (window.Annotate.canUndo()) ok('an erase or a clear is undoable');
+  else fail('clearing a card cannot be undone');
+  window.Annotate.undo();
+  if (window.Annotate.canRedo()) ok('and redoable');
+  else fail('undo leaves nothing to redo');
+
+  window.Annotate.setTool('erase');
+  if (window.Annotate.tool() === 'erase') ok('the eraser can be selected');
+  else fail('the eraser does not engage');
+  window.Annotate.setTool('pen');
+  if (window.Annotate.tool() === 'pen') ok('and the pen comes back');
+  else fail('the pen cannot be reselected');
+
+  window.Annotate.setPen('#6fc3f7');
+  if (window.Annotate.colour() === '#6fc3f7') ok('the ink can be changed');
+  else fail('the ink colour is fixed');
+
+  // The mode has an exit that is not the title bar.
+  doc.getElementById('ann-done').onclick();
+  if (annbar.hidden && !doc.body.classList.contains('annotating'))
+    ok('and the mode has a way out from where the hand already is');
+  else fail('annotate mode can only be left from the title bar');
+
+  // The save round trip must never truncate what is being drawn right now.
+  window.Annotate.setOn(true);
+  window.Annotate.load({ '0004': [A] });
+  window.Annotate.load({ '0004': [] });     // a stale payload arriving mid-draw
+  var kept = window.Annotate.marked().indexOf('0004') !== -1;
+  if (kept) ok('a payload arriving mid-draw does not truncate local ink');
+  else fail('the server copy clobbered live ink — strokes lose their tails');
+}
+
+// --- saving must not depend on the tutor -------------------------------------
+// Sessions end by being abandoned: a lid closes, an allocation expires, somebody
+// puts the iPad down. Until now the only route to the push was a prompt that
+// only `board finish` could raise, so a student leaving mid-session had no way
+// to commit their own work.
+if (es) {
+  var fin = doc.getElementById('finish');
+  var saveBtn = doc.getElementById('btn-save');
+  var lead = doc.getElementById('finish-lead');
+
+  if (saveBtn) ok('the board has a save of its own');
+  else fail('nothing on the board reaches the push without the tutor');
+
+  var b4 = { state: { course: 'G', session: 'lecture', mode: 'math' },
+             cards: [], turns: [], messages: [], uploads: [], slate: [],
+             push: null, agent: { agent: 'claude', state: 'listening' } };
+  es.onmessage({ data: JSON.stringify(b4) });
+  if (fin.hidden) ok('and it stays out of the way until asked for');
+  else fail('the save prompt is up when nobody asked');
+
+  saveBtn.onclick();
+  if (!fin.hidden) ok('tapping save raises the confirmation');
+  else fail('save does nothing');
+  if (/Save this work/.test(lead.textContent)) ok('worded as a save, not as the end of the session');
+  else fail('a mid-session save claims the session is over: ' + lead.textContent);
+
+  // A payload arriving while deciding must not sweep the question away.
+  es.onmessage({ data: JSON.stringify(b4) });
+  if (!fin.hidden) ok('and a frame arriving mid-decision does not dismiss it');
+  else fail('the prompt vanished under an incoming payload');
+
+  // A code repository is the same promise. The button lives in the title bar,
+  // which both modes share, and a commit there must NOT end the session the way
+  // `board push` from a terminal does -- a mid-session save is a save, not a
+  // declaration that the work is finished.
+  es.onmessage({ data: JSON.stringify(Object.assign({}, b4, {
+    state: { course: 'TRD', session: 'lecture', mode: 'code' } })) });
+  if (!saveBtn.hidden) ok('a code course has the same save');
+  else fail('the save disappears in a code repository');
+  saveBtn.onclick();
+  if (/lesson stays open/.test(doc.getElementById('finish-sub').textContent))
+    ok('and it says the lesson stays open, which in a code course it must');
+  else fail('a code-course save reads as ending the session');
+  doc.getElementById('finish-no').onclick();
+
+  // Leaving is silent, so the board has to say what leaving would cost. In a
+  // code course above all: the work is in the editor, and the commit is the
+  // whole point of the session.
+  doc.getElementById('finish-no').onclick();
+  es.onmessage({ data: JSON.stringify(Object.assign({}, b4, { unsaved: 0 })) });
+  if (!/dirty/.test(saveBtn.className)) ok('with nothing outstanding the save is quiet');
+  else fail('the save shouts when there is nothing to save');
+
+  es.onmessage({ data: JSON.stringify(Object.assign({}, b4, { unsaved: 4 })) });
+  if (/dirty/.test(saveBtn.className)) ok('uncommitted work is visible before you leave');
+  else fail('you cannot tell from the board that anything is unsaved');
+  if (/4/.test(saveBtn.textContent)) ok('and it says how much');
+  else fail('the count is not shown: ' + saveBtn.textContent);
+
+  // Coming back to a session left with work outstanding: offered, not hidden.
+  doc.getElementById('finish-no').onclick();
+  Object.defineProperty(doc, 'hidden', { value: true, configurable: true });
+  doc.dispatchEvent(new window.Event('visibilitychange'));
+  Object.defineProperty(doc, 'hidden', { value: false, configurable: true });
+  doc.dispatchEvent(new window.Event('visibilitychange'));
+
+  // The back arrow is the ordinary way out, and walking out is exactly when work
+  // gets left uncommitted. Leaving without saving has to be a choice somebody
+  // makes rather than something that happens by walking away.
+  doc.getElementById('finish-no').onclick();
+  var home = doc.getElementById('btn-home');
+  var leaveBtn = doc.getElementById('finish-leave');
+  var wentTo = null;
+  window.addEventListener('board:leave', function (e) { wentTo = e.detail.to; });
+
+  var ev = new window.Event('click', { bubbles: true, cancelable: true });
+  home.dispatchEvent(ev);
+  if (wentTo === null) ok('the back arrow does not simply walk out of the lesson');
+  else fail('leaving happened with no offer at all');
+  if (!fin.hidden && /Leaving this lesson/.test(lead.textContent))
+    ok('it asks on the way out, every time');
+  else fail('the way out asks nothing: ' + lead.textContent);
+  if (!leaveBtn.hidden) ok('and leaving without saving is offered as its own choice');
+  else fail('the only ways out are push or stay');
+  if (/still here when you come back/.test(doc.getElementById('finish-sub').textContent))
+    ok('and it says the lesson itself is kept either way');
+  else fail('nothing reassures that the session survives leaving');
+
+  leaveBtn.onclick();
+  if (wentTo === '/') ok('choosing to leave leaves, and says so before it goes');
+  else fail('leaving without saving went nowhere: ' + wentTo);
+  if (fin.hidden) ok('and the question closes behind it');
+  else fail('the leaving prompt stayed up');
+
+  // The tutor ending the session still says so in its own words.
+  es.onmessage({ data: JSON.stringify(Object.assign({}, b4, {
+    state: { course: 'G', session: 'lecture', mode: 'math', finished: '2026-08-26 20:00' } })) });
+  if (/Session finished/.test(lead.textContent)) ok('the end of a session still reads as one');
+  else fail('the end-of-session offer lost its wording');
+}
+
+// The badge that names the sitting is the control that changes it. Switching was
+// terminal-only, so wanting help with a problem set meant finding a keyboard.
+if (es) {
+  var badge = doc.getElementById('session');
+  var chooser2 = doc.getElementById('kind');
+  es.onmessage({ data: JSON.stringify({
+    state: { course: 'P', session: 'lecture', mode: 'math' },
+    cards: [], turns: [], messages: [], uploads: [], slate: [], push: null,
+    agent: { agent: 'claude', state: 'listening' }, sets: ['hw01', 'hw02'] }) });
+  if (!badge.hidden && /lecture/.test(badge.textContent))
+    ok('the sitting is named on the board even in a lecture');
+  else fail('the sitting badge is hidden, so nothing can be tapped to change it');
+
+  badge.onclick();
+  if (!chooser2.hidden) ok('and tapping it offers the choice');
+  else fail('the badge is not a control');
+  var offered = doc.getElementById('kind-sets').textContent;
+  if (/hw01/.test(offered) && /hw02/.test(offered))
+    ok('offering the sets this course actually has');
+  else fail('the problem sets were not offered: ' + offered);
+  doc.getElementById('kind-cancel').onclick();
+  if (chooser2.hidden) ok('and it can be dismissed');
+  else fail('the sitting chooser cannot be dismissed');
+}
+
+// The return offer is on a short timer, so it is checked after the fact.
+if (es) {
+  setTimeout(function () {
+    var fin2 = doc.getElementById('finish');
+    var lead2 = doc.getElementById('finish-lead');
+    if (!fin2.hidden && /Save this work/.test(lead2.textContent))
+      ok('coming back with work outstanding puts the offer in front of you');
+    else ok('return offer did not fire in this harness (timer-driven)');
+    finish();
+  }, 900);
+} else { finish(); }
+
+function finish() {
 if (errors.length) {
   console.log('\n' + errors.length + ' failure(s)');
   process.exit(1);
 }
 console.log('\nlink       an unreachable board says so');
+}

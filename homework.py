@@ -74,6 +74,24 @@ def sets(root):
     return sorted(found.values(), key=lambda s: s["name"])
 
 
+def assignment(set_dir):
+    """The sheet as it was handed out, if the set keeps one.
+
+    A homework sitting is not the assistant's to choose the problems for: they
+    are assigned, and the assignment is a document. `homework/hwNN/assignment/`
+    is where the courses put it, so point at what is actually there rather than
+    letting an assistant infer a problem list from a chapter.
+    """
+    out = []
+    for pattern in ("assignment/*", "*.pdf"):
+        for path in sorted(glob.glob(os.path.join(set_dir, pattern))):
+            if os.path.isfile(path) and not path.endswith((".aux", ".log", ".out")):
+                out.append(path)
+        if out:
+            break
+    return out
+
+
 def _hints(text):
     """Set names a piece of prose could be naming.
 
@@ -194,10 +212,12 @@ def status(root, state):
         return {"name": None, "rel": None, "ambiguous": [e["name"] for e in every],
                 "problems": [], "total": 0, "written": 0, "stated": 0}
     probs = problems(s["tex"])
+    sheets = assignment(s["dir"])
     return {
         "name": s["name"],
         "rel": s["rel"],
         "dir": s["dir"],
+        "assignment": [os.path.relpath(p, root) for p in sheets],
         "ambiguous": [],
         "problems": probs,
         "total": len(probs),

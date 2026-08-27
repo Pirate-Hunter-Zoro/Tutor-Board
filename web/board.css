@@ -651,3 +651,53 @@ body.viewing { overflow: hidden; }
   background: var(--ask); color: #fff;
   box-shadow: 0 6px 22px rgba(0, 0, 0, .25);
 }
+
+/* ---------- annotation tools ---------- */
+/* Docked at the bottom, like every other pen control on this page. When the
+   answer surface is also open its tool strip owns the bottom edge, so this sits
+   above it rather than on top of it. */
+.annbar {
+  position: fixed; z-index: 58;
+  left: 50%; transform: translateX(-50%);
+  bottom: calc(1rem + env(safe-area-inset-bottom));
+  display: flex; align-items: center; gap: .35rem; flex-wrap: wrap;
+  justify-content: center;
+  max-width: min(40rem, calc(100vw - 1rem));
+  padding: .45rem .55rem;
+  border-radius: .6rem;
+  border: 1px solid var(--rule);
+  background: var(--paper-2);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, .3);
+  font-family: var(--ui); font-size: .8rem;
+}
+body.tools-out .annbar { bottom: calc(5.6rem + env(safe-area-inset-bottom)); }
+.annbar button {
+  font: inherit; cursor: pointer;
+  padding: .4rem .6rem; border-radius: .4rem;
+  border: 1px solid var(--rule); background: var(--paper); color: var(--ink);
+}
+.annbar button.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.annbar button.primary { background: var(--note); border-color: var(--note); color: #fff; font-weight: 600; }
+.annbar button:disabled { opacity: .4; cursor: default; }
+.ann-inks { display: inline-flex; gap: .25rem; align-items: center; margin: 0 .15rem; }
+.annbar .ann-ink {
+  width: 1.35rem; height: 1.35rem; padding: 0; border-radius: 50%;
+  border: 2px solid transparent;
+}
+.annbar .ann-ink.on { border-color: var(--ink); }
+
+/* A save with something waiting behind it has to look different from one with
+   nothing to do, or there is no way to tell before leaving. */
+#btn-save.dirty {
+  color: var(--ask);
+  border-color: color-mix(in srgb, var(--ask) 55%, transparent);
+  font-weight: 650;
+}
+
+/* The sitting badge is a control now, not a label. */
+#session { cursor: pointer; border: 1px solid transparent; font-family: var(--ui); }
+#session:hover { border-color: var(--rule); }
+#kind-sets { display: inline-flex; gap: .3rem; flex-wrap: wrap; }
+#kind-sets button.on, #kind-lecture.on {
+  background: var(--note); border-color: var(--note); color: #fff; font-weight: 600;
+}
