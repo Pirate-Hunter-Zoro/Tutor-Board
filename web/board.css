@@ -562,9 +562,59 @@ body.tools-out { padding-bottom: 5.5rem; }
 }
 #btn-clip:hover { background: var(--paper-2); color: var(--ink); }
 
-.jump { bottom: 1.5rem; }
+/* It floats over the lesson, which it was never actually told to do: it carried
+   a `bottom` and nothing to make `bottom` mean anything, so it sat in the flow
+   at the end of the document where nobody scrolled past to find it. */
+.jump {
+  position: fixed; z-index: 56;
+  right: max(1.1rem, env(safe-area-inset-right));
+  bottom: 1.5rem;
+  cursor: pointer;
+  font: 600 .78rem var(--ui);
+  padding: .45rem .8rem;
+  border-radius: 1.4rem;
+  border: 1px solid var(--accent);
+  background: var(--accent); color: var(--paper);
+  box-shadow: 0 6px 18px rgba(0,0,0,.22);
+}
 /* Clear of the tool bar, which owns the bottom of the window while writing. */
 body.tools-out .jump { bottom: calc(6.5rem + env(safe-area-inset-bottom)); }
+
+/* ---------- the way back ----------
+   Small, dim, and always somewhere on the glass. Everything about where it sits
+   is set from JavaScript -- see `panicPlace` -- because CSS cannot see the
+   magnification: `position: fixed` pins to the layout viewport, and pinching
+   moves the visual one. Left and top stay at zero and the transform does the
+   work, including a counter-scale so the button is the same size under a thumb
+   however far the page has been zoomed in. */
+#panic {
+  position: fixed; left: 0; top: 0; z-index: 62;
+  transform-origin: 0 0;
+  width: 2.6rem; height: 2.6rem; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--rule);
+  background: color-mix(in srgb, var(--paper) 76%, transparent);
+  backdrop-filter: blur(8px);
+  color: var(--ink-3);
+  opacity: .4;
+  cursor: grab;
+  /* The drag is ours; the browser must not take the gesture as a scroll. */
+  touch-action: none;
+  -webkit-user-select: none; user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: opacity .18s, color .18s, box-shadow .18s;
+}
+#panic svg { width: 1.2rem; height: 1.2rem; display: block; }
+#panic:hover { opacity: 1; color: var(--ink); }
+/* Held down: it has become a thing being moved, and must look like one before
+   the finger travels, or the first drag reads as a tap that did nothing. */
+#panic.holding {
+  opacity: 1; color: var(--ink); cursor: grabbing;
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--ask) 28%, transparent);
+}
+/* Tapped: acknowledge it, because most of what the tap does happens off screen. */
+#panic.hit { opacity: 1; color: var(--accent); }
 
 /* ---------- what the student said, in the lesson ---------- */
 .mine .signal {
@@ -741,7 +791,7 @@ body.viewing { overflow: hidden; }
 /* ---------- print ---------- */
 @media print {
   #bar, #drawbar, #composer, #scratch, .jump, .drop, .finish, .pushed,
-  #viewer { display: none !important; }
+  #panic, #viewer { display: none !important; }
   body { background: #fff; color: #000; }
   #board { max-width: none; padding: 0; }
   .card { break-inside: avoid; animation: none; }

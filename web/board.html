@@ -191,6 +191,21 @@
 
 <button id="jump" class="jump" hidden>↓ new</button>
 
+<!-- The way back, from anywhere.
+     It is positioned from JavaScript against the VISUAL viewport rather than
+     from CSS, because `position: fixed` is fixed to the layout viewport and the
+     layout viewport does not move when the page is pinch-zoomed -- so a button
+     placed by CSS alone pans off the glass at exactly the moment it is needed.
+     `panicPlace` in board.js. A tap re-centres; a press and hold moves it. -->
+<button id="panic" type="button" aria-label="re-centre the board"
+        title="tap to re-centre · press and hold to move">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+       stroke-linecap="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="4.4"/>
+    <path d="M12 1.6v4M12 18.4v4M1.6 12h4M18.4 12h4"/>
+  </svg>
+</button>
+
 <!-- Past lessons. A chapter you come back to should still have your own working
      in it; a transcript that only survives until the next lesson opens is not a
      transcript. -->

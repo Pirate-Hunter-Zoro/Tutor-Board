@@ -32,6 +32,15 @@ which kind of subject it is and the board adapts.
 > a person's account of using it.** Not teaching the subject — that is the other session's job,
 > in the course repository, and it does not know or care about this one.
 >
+> **Since then, 28 August, later still:** the fix above had a defect of its own, found within
+> the hour and by the worst possible route — the person using it. Moving the scroll destination
+> from the bottom of the document to the newest card's first line turned a harmless no-op into a
+> screenful of movement on every heartbeat, so the board dragged itself away from the writing
+> surface every thirty seconds while nobody was touching it. Nothing arriving now means nothing
+> moves, and a hand mid-answer outranks a card arriving. The same sitting produced palm rejection
+> that survives a pause mid-stroke, and `#panic` — a small movable button that is always on the
+> glass and puts the magnification and the lesson back.
+>
 > **Since then, 28 August, later:** three sittings on Exercise 1.3 exposed the reading order.
 > Every reply the tutor had written stayed open, so the newest one — the only one about the ink
 > actually on screen — was the third of three; and the board scrolled past all of it to the
@@ -197,6 +206,10 @@ these tests fail, the test is right.
 | The board scrolled to the bottom of the document when a card arrived, and the bottom of the document is the writing surface — so the feedback that had just been waited for went off the top of the screen and a blank slate arrived in its place | `revealNewest` parks the newest card's first line under the bar, and `following()` decides whether to; `test/feedback.js` |
 | The writing surface ran to both edges of the glass, so on the screenful it occupied there was nowhere to put a thumb and scroll the lesson | `--gap` on `#writer` in `board.css`, which is a margin to scroll in, not decoration |
 | Pinch-zooming the *page* grew the writing surface past every visible edge, and the surface eats touches by design, so the only pinch left available was the slate's own — the page could not be zoomed back out without quitting the app. `vw`, `svh` and `rem` cannot see the problem: they measure the layout viewport, which does not move when you pinch | `fitWriter` caps the surface against `window.visualViewport`, in CSS pixels, on every magnification change; `test/feedback.js` |
+| A cap is a guess at a number, and being wrong about it strands somebody mid-proof with nothing left to pinch on. There is now a button as well, and the button is the guarantee | `#panic`, placed against the visual viewport and counter-scaled so it cannot pan off the glass; a tap re-centres, a press and hold moves it; `test/panic.js` |
+| The board scrolled itself a screenful every thirty seconds while nobody was touching it: the rule was "if they were at the bottom, scroll to the bottom", which is a no-op on a board already at the bottom — so it survived every review until the destination changed to the newest card's first line, and then the tutor's heartbeat started dragging the page | nothing arriving means nothing moves; `anythingNew` gates the scroll, `test/feedback.js` |
+| A palm resting on the glass panned the plane out from under a stroke that was still being drawn, and the next sample of that stroke landed at the new offset — so the page appeared to scroll away and a straight line streaked across the working to catch up. The suppression was a timer since the pen last *reported*, and a pen held still mid-word reports nothing | `penDown` and `handAtWork()` in `slate-core.js`: while the nib is on the glass a hand does nothing at all; plus contact-size rejection and disowning a stroke a touch began before the pen arrived; `test/plane.js` |
+| The "↓ new" button carried a `bottom` and nothing to make `bottom` mean anything, so it sat in the flow at the end of the document where nobody scrolled past to find it | `.jump` is positioned; `test/feedback.js` presses it |
 
 The pattern in most of them: a stub that returns a plausible object for everything will report that
 a broken page loads fine. `test/interactive.js` and `test/sizing.js` use a real DOM for that

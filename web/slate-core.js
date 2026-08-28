@@ -251,6 +251,28 @@ function create(opts) {
      any pen activity -- which is what palm rejection actually is. */
   var lastPenAt = 0;
   var PALM_MS = 500;
+  /* Is the nib on the glass right now. A timer alone was not enough: `lastPenAt`
+     only moves when the pen REPORTS, and a pen held still mid-stroke -- which is
+     what pausing to think looks like -- reports nothing. Half a second later the
+     resting palm was free to pan the plane out from under a stroke that had not
+     finished, and the next sample of that same stroke then landed somewhere
+     completely different: the page appeared to scroll away and a straight line
+     streaked across the working to the new position. One stroke, two symptoms,
+     one cause. While the pen is down, a hand does nothing at all. */
+  var penDown = false;
+  /* Contacts already judged to be a hand. A palm is judged once, when it lands,
+     and stays judged for as long as it is on the glass -- re-deciding it on
+     every move is how a palm that outlives a pause becomes a finger. */
+  var palms = {};
+  /* A fingertip's contact patch is around 10-25 CSS pixels across; a palm is far
+     wider. `width`/`height` on a pointer event are that patch. A browser that
+     does not measure it reports 1, which reads as a finger -- the right way
+     round to be wrong, since the cost is a missed palm and not a dead pen. */
+  var PALM_SIZE = 34;
+
+  function handAtWork() {
+    return penDown || (Date.now() - lastPenAt < PALM_MS);
+  }
   var saveTimer = null, liveTimer = null, rafPending = false;
   var touches = {}, pinch = null;
 
@@ -828,11 +850,36 @@ function create(opts) {
   }
 
   sheet.addEventListener("pointerdown", function (ev) {
-    if (ev.pointerType === "pen") lastPenAt = Date.now();
+    if (ev.pointerType === "pen") {
+      lastPenAt = Date.now();
+      penDown = true;
+      /* The pen is the authority, and it arrives second: a hand is on the glass
+         before the nib is. So anything a touch had started is a palm by
+         hindsight. Throw it away rather than leave half a streak lying across
+         the working, and drop any pan or pinch it had begun. */
+      if (drawing && drawing !== "erasing" && drawing._touch) {
+        drawing = null;
+        livePainted = 0;
+        invalidate();
+      }
+      /* And anything already on the glass when the nib arrives is a hand, for
+         as long as it stays there. Clearing `touches` alone was not enough:
+         a contact that is merely forgotten is a contact that gets re-read as a
+         fresh finger by the next move it makes. */
+      Object.keys(touches).forEach(function (id) { palms[id] = true; });
+      touches = {};
+      pinch = null;
+    }
     ev.preventDefault();
     sheet.setPointerCapture(ev.pointerId);
 
     if (ev.pointerType === "touch") {
+      /* Judged when it lands, rather than after it has already moved something.
+         Either signal is enough on its own. */
+      if (handAtWork() || Math.max(ev.width || 0, ev.height || 0) >= PALM_SIZE) {
+        palms[ev.pointerId] = true;
+        return;
+      }
       touches[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
       var ids = Object.keys(touches);
       if (ids.length === 2) {
@@ -852,12 +899,14 @@ function create(opts) {
 
     clearSelection();
     drawing = { c: tool.color, w: tool.width, hl: tool.mode === "hl",
-                pts: [[pt.x, pt.y, pt.p]], _sx: pt.x, _sy: pt.y, _sp: pt.p };
+                pts: [[pt.x, pt.y, pt.p]], _sx: pt.x, _sy: pt.y, _sp: pt.p,
+                _touch: ev.pointerType === "touch" };
     livePainted = 0;     /* nothing of this stroke is on the canvas yet */
   });
 
   sheet.addEventListener("pointermove", function (ev) {
     if (ev.pointerType === "pen") lastPenAt = Date.now();
+    if (palms[ev.pointerId]) return;
     if (touches[ev.pointerId]) {
       var prev = touches[ev.pointerId];
       touches[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
@@ -865,7 +914,7 @@ function create(opts) {
       /* The heel of a hand is a touch. With a finger set to scroll it would drag
          the canvas out from under the nib mid-word, so anything the hand does is
          ignored for a moment after the pen last reported. */
-      if (Date.now() - lastPenAt < PALM_MS) return;
+      if (handAtWork()) return;
       if (ids.length === 2 && pinch) {
         var a = touches[ids[0]], b = touches[ids[1]];
         var r = sheetRect();
@@ -965,6 +1014,8 @@ function create(opts) {
   }
 
   function endStroke(ev) {
+    if (ev && ev.pointerType === "pen") penDown = false;
+    if (ev && palms[ev.pointerId]) { delete palms[ev.pointerId]; return; }
     if (ev && touches[ev.pointerId]) {
       delete touches[ev.pointerId];
       if (Object.keys(touches).length < 2) pinch = null;
@@ -1384,6 +1435,14 @@ function create(opts) {
   /* The plane, the crop and the finger rule, so all three can be asserted --
      none of them is visible from the outside otherwise, and the last time a
      surface behaviour was untestable it shipped broken for two days. */
+  /* Is a hand in the middle of something. The board asks before it moves the
+     page: a card arriving while somebody is drawing a diagram is not a reason to
+     scroll the diagram out from under them. The tail is generous on purpose --
+     the gap between two words of a proof is longer than it feels. */
+  api.busy = function () {
+    return !!drawing || !!lasso || !!dragging || penDown ||
+           (Date.now() - lastPenAt < 2500);
+  };
   api.reach = reach;
   api.inkBox = inkBox;
   api.pngBox = function () { return pngBox(page()); };

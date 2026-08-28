@@ -175,8 +175,27 @@ slate.finger() === 'scroll' ? ok('a finger scrolls by default') : fail('the fing
     : fail('a resting hand still moves the surface while writing');
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// A contact with a patch the size of a palm, rather than a fingertip. Safari
+// reports the contact size on a pointer event; this is what a heel of a hand
+// looks like on the wire.
+const heel = (type, x, y, id) => {
+  const ev = new window.Event(type, { bubbles: true, cancelable: true });
+  Object.assign(ev, { pointerId: id, pointerType: 'touch', pressure: 0.5,
+                      clientX: x, clientY: y, width: 58, height: 46, isPrimary: false });
+  ev.getCoalescedEvents = () => [ev];
+  sheet.dispatchEvent(ev);
+};
+const heelSwipe = (id, x, y, dx, dy) => {
+  heel('pointerdown', x, y, id);
+  for (let i = 0; i < 20; i++) heel('pointermove', x + dx * i, y + dy * i, id);
+  heel('pointerup', x + dx * 20, y + dy * 20, id);
+};
+
 // And once the hand has had a moment, a deliberate swipe scrolls.
-setTimeout(function () {
+(async function () {
+  await sleep(650);
   const before = slate.strokes();
   const v0 = slate.view();
   swipe(9, 400, 300, -6, -4);
@@ -207,8 +226,91 @@ setTimeout(function () {
     ? ok('and both directions round-trip through storage')
     : fail('the setting does not persist');
 
+  // ------------------------------------------------------------------ palms
+  //
+  // The complaint, in the words it arrived in: "my palm rests on the writing
+  // block and then I get scrolled way up with a vertical line streaking upward".
+  // Two symptoms, one cause. The suppression was a timer since the pen last
+  // REPORTED, and a pen held still reports nothing -- so pausing mid-stroke to
+  // think ran the timer out while the nib was still on the glass. The resting
+  // heel then panned the plane, and the next sample of the very same stroke was
+  // converted against the new offset: the page appeared to scroll away, and the
+  // stroke drew a straight line across the working to catch up.
+  slate.finger('scroll');
+  {
+    pen('pointerdown', 200, 200, 3);
+    pen('pointermove', 220, 210, 3);
+    await sleep(700);                    // thinking about the next line, nib down
+    const v0 = slate.view();
+    const n0 = slate.strokes();
+    swipe(31, 600, 400, -8, -5);         // the heel shifts where it rests
+
+    const v1 = slate.view();
+    (v1.ox === v0.ox && v1.oy === v0.oy)
+      ? ok('a pen paused mid-stroke still suppresses the hand resting beside it')
+      : fail('the plane panned under a stroke in progress — this is the streak');
+
+    pen('pointermove', 240, 220, 3);
+    pen('pointerup', 240, 220, 3);
+    slate.strokes() === n0 + 1
+      ? ok('and the stroke it was in the middle of finishes as one line')
+      : fail('the paused stroke did not survive the hand');
+  }
+
+  // Size is the other signal, and the only one available when no pen has been
+  // near: a fingertip is 10-25 CSS pixels across and a palm is not.
+  {
+    await sleep(700);
+    const v0 = slate.view();
+    const n0 = slate.strokes();
+    heelSwipe(41, 500, 300, -8, -5);
+    const v1 = slate.view();
+    (v1.ox === v0.ox && v1.oy === v0.oy && slate.strokes() === n0)
+      ? ok('a contact the size of a palm is ignored even with no pen in sight')
+      : fail('a palm-sized contact still drove the surface');
+  }
+
+  // A fingertip must survive that test, or the scroll gesture is gone.
+  {
+    const v0 = slate.view();
+    swipe(43, 500, 300, -8, -5);
+    const v1 = slate.view();
+    (v1.ox !== v0.ox || v1.oy !== v0.oy)
+      ? ok('while an ordinary fingertip still pans, so the gesture is not lost')
+      : fail('palm rejection ate the finger scroll as well');
+  }
+
+  // And the usual order of events: the hand lands BEFORE the nib does, so a
+  // stroke a touch has started is a palm by hindsight the moment a pen arrives.
+  {
+    slate.finger('write');
+    await sleep(700);
+    const n0 = slate.strokes();
+    touch('pointerdown', 700, 100, 51);
+    for (let i = 0; i < 8; i++) touch('pointermove', 700 - i * 5, 100 + i * 9, 51);
+    pen('pointerdown', 300, 300, 5);
+    touch('pointermove', 650, 190, 51);
+    touch('pointerup', 650, 190, 51);
+    slate.strokes() === n0
+      ? ok('a line a hand had started is discarded when the nib arrives')
+      : fail('the hand\'s stroke was kept: ' + (slate.strokes() - n0) + ' extra');
+
+    pen('pointermove', 320, 320, 5);
+    pen('pointerup', 320, 320, 5);
+    slate.strokes() === n0 + 1
+      ? ok('and the pen\'s own stroke is the only thing that lands')
+      : fail('the pen stroke did not land after the hand was disowned');
+    slate.finger('scroll');
+  }
+
+  // The board asks the surface whether a hand is mid-answer before it moves the
+  // page. A surface that cannot answer is a page that scrolls under a pen.
+  typeof slate.busy === 'function'
+    ? ok('and the surface can say whether a hand is in the middle of something')
+    : fail('nothing can ask the slate whether it is being written on');
+
   console.log(errors.length ? '\n' + errors.length + ' FAILURES'
                             : '\nthe surface is a plane, and a finger is not a pen');
   window.close();
   process.exit(errors.length ? 1 : 0);
-}, 650);
+})();

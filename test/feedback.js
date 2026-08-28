@@ -78,6 +78,19 @@ for (const f of ['typeface.js', 'macros.js', 'slate-core.js', 'annotate.js']) {
   try { window.eval(fs.readFileSync(path.join(WEB, f), 'utf8')); }
   catch (e) { fail(f + ': ' + e.message); }
 }
+
+// Whether a hand is mid-answer is the slate's to say, and saying it in jsdom
+// means no pen. Wrap the real surface rather than teach the board a test-only
+// hook: what is under test is the board asking, not the slate answering.
+const realCreate = window.Slate && window.Slate.create;
+if (realCreate) {
+  window.Slate.create = function (opts) {
+    const api = realCreate(opts);
+    api.busy = () => !!window.__slateBusy;
+    return api;
+  };
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 try { window.eval(fs.readFileSync(path.join(WEB, 'board.js'), 'utf8')); }
 catch (e) { fail('board.js: ' + e.message); }
 
@@ -170,13 +183,19 @@ const nodeFor = (id) => doc.querySelector('[data-card="' + id + '"]');
     : fail('the older reply stayed open once another arrived');
 }
 
+(async function () {
+await sleep(30);
+
 // 4. Where the eye lands. The writing surface is the last thing in the lesson,
 //    so the bottom of the document is the wrong answer by construction.
+const withNew = Object.assign({}, lesson, {
+  cards: lesson.cards.concat([card('0005', 'lesson', 'what a normal subgroup is', 5),
+                              card('0006', 'wrong', 'still not the coset', 6),
+                              card('0007', 'wrong', 'nearly', 7)]),
+});
 {
   scrolls.length = 0;
-  es.onmessage({ data: JSON.stringify(Object.assign({}, lesson, {
-    cards: lesson.cards.concat([card('0005', 'wrong', 'nearly', 5)]),
-  })) });
+  es.onmessage({ data: JSON.stringify(withNew) });
   scrolls.length
     ? ok('a new reply scrolls the board')
     : fail('a new reply arrived and the board did not move at all');
@@ -186,12 +205,53 @@ const nodeFor = (id) => doc.querySelector('[data-card="' + id + '"]');
     : fail('the board still scrolls past the feedback to the writing surface');
 
   // The newest card's own top, less the bar it would otherwise hide under.
-  const live = nodeFor('0005').getBoundingClientRect();
+  const live = nodeFor('0007').getBoundingClientRect();
   const bar = doc.getElementById('bar').getBoundingClientRect();
   asked > live.top - bar.height - 20 && asked <= live.top - bar.height
     ? ok('it scrolls to the first line of the new reply, clear of the bar')
-    : fail('the scroll landed at ' + asked + ', not at the top of card 0005 ('
+    : fail('the scroll landed at ' + asked + ', not at the top of card 0007 ('
            + (live.top - bar.height) + ')');
+}
+
+// 5. A payload is not a card. This is the one that got out: the destination
+//    changed from the bottom of the document to the newest card's first line,
+//    and the rule was still "if they were at the bottom, go to the bottom" --
+//    which had been a no-op for as long as the two were the same place. The
+//    tutor's heartbeat lands every thirty seconds, so the board dragged itself
+//    a screenful, over and over, while nobody was touching it.
+{
+  scrolls.length = 0;
+  es.onmessage({ data: JSON.stringify(Object.assign({}, withNew, {
+    agent: { agent: 'claude', state: 'working', turns: 3 },
+  })) });
+  !scrolls.length
+    ? ok('a heartbeat with no new card does not move the page at all')
+    : fail('the board scrolled for a payload that carried nothing new — '
+           + scrolls.length + ' time(s)');
+
+  es.onmessage({ data: JSON.stringify(Object.assign({}, withNew, { unsaved: 4 })) });
+  !scrolls.length
+    ? ok('and neither does the uncommitted count changing')
+    : fail('an unrelated payload moved the page');
+}
+
+// 6. A hand mid-answer outranks a card arriving. Scrolling the page out from
+//    under a pen is not a thing to do to somebody drawing a diagram.
+{
+  const jump = doc.getElementById('jump');
+  window.__slateBusy = true;
+  scrolls.length = 0;
+  jump.hidden = true;
+  es.onmessage({ data: JSON.stringify(Object.assign({}, withNew, {
+    cards: withNew.cards.concat([card('0008', 'wrong', 'the last line', 8)]),
+  })) });
+  !scrolls.length
+    ? ok('a card arriving while the pen is down does not move the page')
+    : fail('the board scrolled out from under a pen that was mid-stroke');
+  !jump.hidden
+    ? ok('and the way to it is offered instead, to be taken when ready')
+    : fail('the card arrived with nothing to say it had');
+  window.__slateBusy = false;
 }
 
 // 5. The board reads the visual viewport, not the layout, when sizing the
@@ -218,3 +278,4 @@ const nodeFor = (id) => doc.querySelector('[data-card="' + id + '"]');
 console.log(errors.length ? '\n' + errors.length + ' FAILURES'
                           : '\nthe newest reply is the one under the working');
 process.exit(errors.length ? 1 : 0);
+})();

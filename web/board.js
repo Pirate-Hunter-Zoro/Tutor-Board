@@ -41,6 +41,7 @@ var els = {
   hwCount: document.getElementById("hw-count"),
   hwBuild: document.getElementById("hw-build"),
   jump: document.getElementById("jump"),
+  panic: document.getElementById("panic"),
   scratch: document.getElementById("scratch"),
   scratchList: document.getElementById("scratch-list"),
   writer: document.getElementById("writer"),
@@ -810,11 +811,29 @@ function render(data) {
        again once the page has settled, unless a hand has since intervened. */
     window.requestAnimationFrame(function () { if (!handled) revealNewest(false); });
     setTimeout(function () { if (!handled) revealNewest(false); }, 400);
-  } else if (wasFollowing) {
+  } else if (!anythingNew) {
+    /* NOTHING ARRIVED. Do not move the page.
+
+       A payload lands for all sorts of reasons that are not a card: the tutor's
+       heartbeat every thirty seconds, the uncommitted count changing, a figure
+       finishing. The old rule was "if they were at the bottom, scroll to the
+       bottom", which on a board already at the bottom is a no-op -- so this was
+       invisible for as long as the destination was the bottom. The moment the
+       destination became the newest card's first line, every heartbeat yanked
+       the page a screenful while nobody was doing anything at all. */
+  } else if (wasFollowing && !penBusy()) {
     revealNewest(true);
-  } else if (anythingNew) {
+  } else {
     els.jump.hidden = false;
   }
+}
+
+/* A hand mid-answer is not to be moved. The tutor writing a second card while
+   the student is still writing on the first is ordinary, and scrolling the page
+   out from under a pen is not a thing to do to somebody drawing a diagram --
+   they get the button instead, and take it when they are ready. */
+function penBusy() {
+  return !!(writer && writer.busy && writer.busy());
 }
 
 /* The end-of-session offer, and the outcome of the last push. Both belong on
@@ -2209,6 +2228,142 @@ els.jump.onclick = function () {
   revealNewest(true);
   els.jump.hidden = true;
 };
+
+/* --------------------------------------------------------- the way back ----
+
+   A pinch-zoomed page has no reverse gear that can be relied on. The surface is
+   capped so it cannot swallow the glass -- see `fitWriter` -- but a cap is a
+   guess at a number, and being wrong about it strands somebody mid-proof with
+   no way out but quitting the app. So there is also a button, and the button is
+   the guarantee: one tap puts the magnification back and the newest card back
+   under the bar.
+
+   Two things about it are not ordinary.
+
+   It is placed from here rather than from CSS. `position: fixed` is fixed to
+   the LAYOUT viewport, and pinching moves the visual one, so a control placed
+   by CSS alone slides off the glass exactly when it is wanted. Its position is
+   kept as a fraction of what can be SEEN, re-applied on every visual-viewport
+   event, and counter-scaled so it stays the same size under a thumb.
+
+   And it moves. A control that is always on top is a control that is sooner or
+   later on top of the one line you are trying to read, and where that is
+   depends on the hand holding the tablet. A press and hold picks it up; a tap
+   does the thing. The distinction is time, not distance, because a tap on a
+   tablet always travels a little. */
+var PANIC_KEY = "board.panic";
+/* Hard against the right edge and below the bar: at normal magnification that
+   is the strip of page beside the writing surface, so it starts out covering
+   neither the prose nor anywhere the pen goes. */
+var panicAt = { x: .975, y: .2 };     /* of the visible window, its centre */
+var panicHold = null;
+
+function panicPlace() {
+  if (!els.panic || els.panic.hidden) return;
+  var vv = window.visualViewport;
+  var w = vv ? vv.width : window.innerWidth;
+  var h = vv ? vv.height : window.innerHeight;
+  var ox = vv ? vv.offsetLeft : 0;
+  var oy = vv ? vv.offsetTop : 0;
+  var k = (vv && vv.scale) ? vv.scale : 1;
+  /* The button is drawn at 1/k, so the room it takes in the page's own units is
+     its CSS size divided by the magnification. */
+  var span = (els.panic.offsetWidth || 42) / k;
+  var pad = 6 / k;
+  var x = ox + panicAt.x * w - span / 2;
+  var y = oy + panicAt.y * h - span / 2;
+  x = Math.min(Math.max(x, ox + pad), ox + w - span - pad);
+  y = Math.min(Math.max(y, oy + pad), oy + h - span - pad);
+  els.panic.style.transform =
+    "translate(" + x + "px," + y + "px) scale(" + (1 / k) + ")";
+}
+
+/* There is no way to set the page's magnification directly -- it is the user's,
+   and rightly so. What a browser does honour is a change to the viewport
+   declaration: clamping the maximum scale to 1 makes it zoom out to fit. The
+   clamp is lifted again a moment later, or the page could never be zoomed in
+   again, which would be a cure worse than the disease. Best effort: on anything
+   that ignores it the scroll still happens, which is most of the value. */
+function panicUnzoom() {
+  var meta = document.querySelector('meta[name="viewport"]');
+  if (!meta) return;
+  var was = meta.getAttribute("content") || "";
+  if (/maximum-scale/.test(was)) return;         /* a reset is already running */
+  meta.setAttribute("content", was + ", maximum-scale=1");
+  setTimeout(function () { meta.setAttribute("content", was); }, 450);
+}
+
+function panicRecentre() {
+  panicUnzoom();
+  revealNewest(true);
+  if (els.jump) els.jump.hidden = true;
+  els.panic.classList.add("hit");
+  setTimeout(function () { els.panic.classList.remove("hit"); }, 420);
+  /* The magnification settles over the next few frames and every one of them
+     moves what "the visible window" means. */
+  [0, 120, 300, 500].forEach(function (ms) { setTimeout(panicPlace, ms); });
+}
+
+if (els.panic) {
+  try {
+    var saved = JSON.parse(localStorage.getItem(PANIC_KEY) || "null");
+    if (saved && typeof saved.x === "number" && typeof saved.y === "number") {
+      panicAt = { x: saved.x, y: saved.y };
+    }
+  } catch (e) { /* a corrupt preference is not worth a broken board */ }
+
+  els.panic.addEventListener("pointerdown", function (ev) {
+    ev.preventDefault();
+    try { els.panic.setPointerCapture(ev.pointerId); } catch (e) {}
+    panicHold = {
+      id: ev.pointerId, x: ev.clientX, y: ev.clientY, drag: false,
+      timer: setTimeout(function () {
+        if (!panicHold) return;
+        panicHold.drag = true;
+        els.panic.classList.add("holding");
+        if (navigator.vibrate) { try { navigator.vibrate(8); } catch (e) {} }
+      }, 380),
+    };
+  });
+
+  els.panic.addEventListener("pointermove", function (ev) {
+    if (!panicHold || ev.pointerId !== panicHold.id || !panicHold.drag) return;
+    var vv = window.visualViewport;
+    var w = vv ? vv.width : window.innerWidth;
+    var h = vv ? vv.height : window.innerHeight;
+    var ox = vv ? vv.offsetLeft : 0;
+    var oy = vv ? vv.offsetTop : 0;
+    /* clientX is in the layout viewport's units, which is what the offsets
+       convert out of. */
+    panicAt.x = Math.min(Math.max((ev.clientX - ox) / w, 0), 1);
+    panicAt.y = Math.min(Math.max((ev.clientY - oy) / h, 0), 1);
+    panicPlace();
+  });
+
+  var panicRelease = function (ev) {
+    if (!panicHold || ev.pointerId !== panicHold.id) return;
+    clearTimeout(panicHold.timer);
+    var dragged = panicHold.drag;
+    panicHold = null;
+    els.panic.classList.remove("holding");
+    if (dragged) {
+      try { localStorage.setItem(PANIC_KEY, JSON.stringify(panicAt)); } catch (e) {}
+      return;
+    }
+    if (ev.type !== "pointercancel") panicRecentre();
+  };
+  els.panic.addEventListener("pointerup", panicRelease);
+  els.panic.addEventListener("pointercancel", panicRelease);
+
+  ["resize", "scroll"].forEach(function (ev) {
+    if (window.visualViewport) window.visualViewport.addEventListener(ev, panicPlace);
+    window.addEventListener(ev, panicPlace, { passive: true });
+  });
+  window.addEventListener("orientationchange", function () {
+    setTimeout(panicPlace, 120);
+  });
+  panicPlace();
+}
 window.addEventListener("scroll", function () {
   /* `following` reads a rectangle, which forces layout, and this fires for
      every frame of a flick. It is only ever asked while there is a button to
