@@ -300,6 +300,21 @@ body.annotating #btn-annotate { background: var(--ask); color: #fff; border-colo
   padding: .08rem .32rem;
 }
 
+/* Every question keeps a way back to it. A proof is worked over hours and the
+   tutor asks other things in between; going back to add a line to an earlier one
+   is ordinary work, and it used to be impossible -- the surface only ever
+   answered the newest question, and arriving at a new one wiped the old page. */
+.card-pen {
+  display: inline-block; margin-top: .8rem;
+  font: 600 .74rem var(--ui); cursor: pointer;
+  padding: .35rem .75rem; border-radius: 1.2rem;
+  border: 1px dashed var(--rule);
+  background: transparent; color: var(--ink-3);
+}
+.card-pen:hover { border-style: solid; border-color: var(--ask); color: var(--ask); }
+.card.superseded .card-pen { display: none; }
+.card.superseded.open .card-pen { display: inline-block; }
+
 .card[data-kind="question"] { --accent: var(--ask); }
 .card[data-kind="correct"]  { --accent: var(--good); }
 .card[data-kind="wrong"]    { --accent: var(--bad); }

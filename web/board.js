@@ -410,11 +410,15 @@ var KIND_LABEL = {
   recap: "recap"
 };
 
-/* Which kinds are a reply to a piece of working, as opposed to teaching. A
-   lesson, an aside or a recap after a question is new material and stands on
-   its own; these three answer something the student handed in, and so are the
-   ones that can be made obsolete by a later one. */
-var REPLY_KIND = { wrong: 1, correct: 1, review: 1 };
+/* Which kinds are a reply to a piece of working, as opposed to new teaching.
+
+   `note` is in here, and leaving it out was most of why folding did nothing on a
+   real lesson: an evening on one exercise produced five `note` cards -- "no, and
+   it is a name collision", "the symbol is fixed, which element is h?" -- every
+   one of them an answer to something the student had just written, and every one
+   of them left open. A `lesson` or a `recap` is material that stands on its own
+   and is never folded. */
+var REPLY_KIND = { wrong: 1, correct: 1, review: 1, note: 1 };
 
 function timeLabel(t) {
   var d = new Date(t * 1000);
@@ -489,6 +493,7 @@ function render(data) {
      is worse than finding it when you come back. */
   if (!data.archived) {
     lastLive = data;
+    if (!pagesLoaded) { pagesLoaded = true; loadPages(); }
     document.getElementById("btn-history").hidden = !(data.history > 0);
     if (reading) { els.jump.hidden = false; return; }
   }
@@ -526,13 +531,20 @@ function render(data) {
      open again on a tap -- a transcript keeps both halves and this removes
      nothing. */
   var superseded = Object.create(null);
-  var afterQ = -1;
-  ordered.forEach(function (c, n) { if (c.kind === "question") afterQ = n; });
-  var replies = [];
+  /* Per question, not merely after the newest one. A question stays open for as
+     long as it takes -- one exercise ran to eleven cards and two hours -- and
+     the rule was "replies after the NEWEST question card", so for all of that
+     time there was no newest question after them and nothing folded at all. A
+     reply belongs to the question it follows, and it is superseded by the next
+     reply to that same question. */
+  var runs = [];
   ordered.forEach(function (c, n) {
-    if (n > afterQ && REPLY_KIND[c.kind]) replies.push(c.id);
+    if (c.kind === "question" || !runs.length) runs.push([]);
+    if (REPLY_KIND[c.kind]) runs[runs.length - 1].push(c.id);
   });
-  replies.slice(0, -1).forEach(function (id) { superseded[id] = true; });
+  runs.forEach(function (run) {
+    run.slice(0, -1).forEach(function (id) { superseded[id] = true; });
+  });
 
   var items = [];
   ordered.forEach(function (c, n) {
@@ -765,10 +777,20 @@ function render(data) {
 
   /* Which answer the panel is editing. An ink turn already sent against the
      current question is the one to correct; anything else starts a new one. */
+  /* Which question is being answered. Usually the newest one; whichever the
+     student picked, if they went back to an earlier one. A question that has
+     scrolled off the top of the transcript is still a question, and going back
+     to add a line to the proof under it is ordinary work, not an edge case. */
+  var qids = ordered.filter(function (c) { return c.kind === "question"; })
+                    .map(function (c) { return c.id; });
+  if (workingOn && qids.indexOf(workingOn) === -1) workingOn = null;
+  var onQ = workingOn || newestQ;
+
   var mine = (data.turns || []).filter(function (t) {
-    return t.kind === "ink" && t.answers === newestQ;
+    return t.kind === "ink" && t.answers === onQ;
   });
-  answering = { question: newestQ, turn: mine.length ? mine[mine.length - 1] : null };
+  answering = { question: onQ, turn: mine.length ? mine[mine.length - 1] : null };
+  if (workingOn) owed = !codeMode && !data.archived;
 
   /* The writing surface goes at the END of the transcript, under whatever the
      last thing in it is. That is what makes a correction work the way a person
@@ -779,17 +801,35 @@ function render(data) {
      surface stays where it is and says so underneath itself -- see paintSent.
      What it must never do is sit under a frozen copy of the very ink still
      showing on the surface: that is the same thing twice, one above the other. */
-  var qNode = null;
-  var kids = els.cards.children;
-  for (var q = kids.length - 1; q >= 0; q--) {
-    if (kids[q] !== els.writer && kids[q].dataset && kids[q].dataset.key) {
-      qNode = kids[q];
-      break;
+  /* The surface goes at the end of the QUESTION'S OWN run -- after the last card
+     written before the next question was asked. For the newest question that is
+     the end of the transcript, which is where it has always gone; for an earlier
+     one it is directly under the feedback that question got, which is the same
+     rule and the same reason. */
+  var runEnd = null;
+  var seenQ = false;
+  ordered.forEach(function (c) {
+    if (c.id === onQ) { seenQ = true; runEnd = c.id; return; }
+    if (!seenQ) return;
+    if (c.kind === "question") { seenQ = false; return; }
+    runEnd = c.id;
+  });
+  var qNode = runEnd
+    ? els.cards.querySelector('[data-card="' + runEnd + '"]')
+    : null;
+  if (!qNode) {
+    var kids = els.cards.children;
+    for (var q = kids.length - 1; q >= 0; q--) {
+      if (kids[q] !== els.writer && kids[q].dataset && kids[q].dataset.key) {
+        qNode = kids[q];
+        break;
+      }
     }
   }
   /* A past lesson is read only: no pen, no box, nothing to send into a session
      that has already been filed. */
   placeWriter(owed && !data.archived, qNode);
+  paintQuestionPens(qids, onQ, codeMode || !!data.archived || !!reading);
   /* Offered exactly when there is no surface to write on: in a maths lesson the
      tutor has written something, and nothing is owed. */
   if (els.reopen) {
@@ -1831,6 +1871,63 @@ var loadedTurn = null;
 /* Which question the student asked for the surface back on, or null for "not
    asked". Empty string means "asked, on a lesson with no open question". */
 var reopenedFor = null;
+/* Which question they are answering, if they went back to an earlier one. */
+var workingOn = null;
+/* Which slate page belongs to which question.
+ 
+   One page per question, and no page is ever destroyed. The surface used to be
+   cleared whenever a new question arrived -- with the reasoning that the next
+   answer should not start on top of the last one, which is true, and with the
+   consequence that a page of somebody's proof was deleted because the tutor
+   asked something else, which is not acceptable. Two hours of Exercise 1.3 went
+   that way. Kept per course, because the pages are. */
+var PAGES_KEY = "board.pages";
+var questionPage = {};
+var pagesLoaded = false;
+
+function pagesKey() {
+  var st = (lastLive && lastLive.state) || {};
+  return PAGES_KEY + ":" + (st.course || "?") + ":" + (st.chapter || "-");
+}
+
+function loadPages() {
+  try { questionPage = JSON.parse(localStorage.getItem(pagesKey()) || "{}") || {}; }
+  catch (e) { questionPage = {}; }
+}
+
+function savePages() {
+  try { localStorage.setItem(pagesKey(), JSON.stringify(questionPage)); } catch (e) {}
+}
+
+/* The button under every question that is not the one being answered: go back
+   and write on that one. This is what "each board has its own send" means in
+   practice -- the surface docks under the question you picked, on that
+   question's own page, and Send answers it. */
+function paintQuestionPens(qids, onQ, off) {
+  Array.prototype.forEach.call(els.cards.querySelectorAll("[data-card]"),
+                               function (node) {
+    var id = node.dataset.card;
+    var wanted = !off && qids.indexOf(id) !== -1 && id !== onQ;
+    var pen = node.querySelector(".card-pen");
+    if (!wanted) { if (pen) pen.remove(); return; }
+    if (pen) return;
+    pen = document.createElement("button");
+    pen.type = "button";
+    pen.className = "card-pen";
+    pen.textContent = "write on this one";
+    pen.onclick = function () {
+      workingOn = id;
+      reopenedFor = null;
+      if (lastLive) render(lastLive);
+      setTimeout(function () {
+        if (!els.writer.hidden && els.writer.scrollIntoView) {
+          els.writer.scrollIntoView({ block: "center", behavior: "smooth" });
+        }
+      }, 60);
+    };
+    node.appendChild(pen);
+  });
+}
 
 var SIGNAL_LABEL = { done: "ready to check", help: "needs help", confused: "confused",
                      begin: "asked the tutor to begin", skip: "skipped this one" };
@@ -1924,9 +2021,12 @@ function placeCodeAnswer(owed, questionNode, card) {
   els.codeanswer.hidden = !owed;
   if (!owed) return;
   els.codeanswer.dataset.card = card || "";
-  if (questionNode && questionNode.nextSibling !== els.codeanswer) {
-    questionNode.parentNode.insertBefore(els.codeanswer, questionNode.nextSibling);
-  } else if (!questionNode && els.codeanswer.parentNode !== els.cards) {
+  /* Same as the writing surface: the anchor is a node found by card id, so it
+     has to be in the lesson before anything is inserted beside it. */
+  var host = questionNode && questionNode.parentNode;
+  if (host && questionNode.nextSibling !== els.codeanswer) {
+    host.insertBefore(els.codeanswer, questionNode.nextSibling);
+  } else if (!host && els.codeanswer.parentNode !== els.cards) {
     els.cards.appendChild(els.codeanswer);
   }
   paintNotesSend();
@@ -1954,9 +2054,13 @@ function placeWriter(owed, questionNode) {
   document.body.classList.toggle("tools-out", !!owed);
   if (!owed) return;
 
-  if (questionNode && questionNode.nextSibling !== els.writer) {
-    questionNode.parentNode.insertBefore(els.writer, questionNode.nextSibling);
-  } else if (!questionNode && els.writer.parentNode !== els.cards) {
+  /* The anchor is looked up by card id now, so it can be any node in the lesson
+     rather than only the last child -- which means checking it is actually IN
+     the lesson before inserting beside it. */
+  var host = questionNode && questionNode.parentNode;
+  if (host && questionNode.nextSibling !== els.writer) {
+    host.insertBefore(els.writer, questionNode.nextSibling);
+  } else if (!host && els.writer.parentNode !== els.cards) {
     els.cards.appendChild(els.writer);
   }
 
@@ -1994,16 +2098,47 @@ function placeWriter(owed, questionNode) {
   }
 }
 
-/* Put a previously sent answer back under the pen when the tutor has commented
-   on it, and clear the surface when a new question arrives so the next answer
-   does not start on top of the last one. */
+/* Put the right page under the pen for whichever question is being answered, and
+   put a previously sent answer back on it when the tutor has commented.
+ 
+   Nothing is ever wiped. Each question gets a page of its own, and a page that
+   has been written on stays written on for the life of the sitting -- the ⋯ menu
+   walks them, and going back to an earlier question comes back here and returns
+   to its page with the working still on it. */
 function restoreAnswer() {
   if (!writer) return;
+
+  if (answering.question && writer.fresh) {
+    var want = questionPage[answering.question];
+    if (want === undefined || want >= writer.pages()) {
+      /* First time on this question. A blank page at the end, unless the page in
+         hand is still blank -- in which case it is already the right one, and
+         adding another would leave an empty page behind on every question. */
+      want = writer.fresh();
+      questionPage[answering.question] = want;
+      savePages();
+    } else if (want !== writer.at()) {
+      writer.go(want);
+      /* A different page is a different answer: whatever was loaded is not on
+         this one. */
+      loadedTurn = null;
+    }
+  }
+
   var id = answering.turn ? answering.turn.id + ":r" + answering.turn.rev : null;
   if (id === loadedTurn) return;
   if (!answering.turn) {
-    if (loadedTurn) writer.clear();
+    /* Nothing sent against this question yet. The page is either blank or holds
+       working in progress, and both are right -- there is nothing to restore and
+       nothing to destroy. */
     loadedTurn = null;
+    return;
+  }
+  /* And only when the page is empty. Once there is ink on this question's page
+     it IS the answer, newer than anything the server can hand back, and
+     replacing it would throw away everything written since the last send. */
+  if (writer.inkOn && writer.inkOn() > 0) {
+    loadedTurn = id;
     return;
   }
   var mark = id;
@@ -2262,6 +2397,7 @@ if (els.reopen) {
       if (c.kind === "question") q = c.id;
     });
     reopenedFor = q || "";
+    workingOn = null;
     els.reopen.hidden = true;
     if (lastLive) render(lastLive);
     /* Straight to it: the button was pressed because there was something to

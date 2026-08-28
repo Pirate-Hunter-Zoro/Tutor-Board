@@ -95,6 +95,7 @@ try { window.eval(fs.readFileSync(path.join(WEB, 'board.js'), 'utf8')); }
 catch (e) { fail('board.js: ' + e.message); }
 
 const doc = window.document;
+const els = { get writer() { return doc.getElementById('writer'); } };
 const es = window.__es;
 if (!es) { console.log('FAIL board.js never opened a stream'); process.exit(1); }
 
@@ -165,6 +166,35 @@ const nodeFor = (id) => doc.querySelector('[data-card="' + id + '"]');
   !n.classList.contains('open')
     ? ok('and tapping it again folds it back')
     : fail('an opened reply cannot be folded again');
+}
+
+// 2b. A question stays open for as long as it takes, and every reply to it
+//     belongs to it. The rule was "replies after the NEWEST question card", and
+//     a real evening on Exercise 1.3 ran to eleven cards under ONE question — so
+//     for two hours there was no newer question after them, nothing folded, and
+//     the board was a wall of every reply ever written. Five of those cards were
+//     `note`, which was not counted as a reply at all.
+{
+  const long = Object.assign({}, lesson, {
+    cards: [
+      card('0101', 'question', 'Exercise 1.3', 1),
+      card('0102', 'wrong', 'the Note that line', 2),
+      card('0105', 'note', 'you cannot prove it', 3),
+      card('0106', 'note', 'a name collision', 4),
+      card('0108', 'correct', 'the cancellation lands', 5),
+      card('0111', 'note', 'which element is h', 6),
+    ],
+  });
+  es.onmessage({ data: JSON.stringify(long) });
+  const open = ['0102', '0105', '0106', '0108', '0111']
+    .filter((id) => nodeFor(id) && !nodeFor(id).classList.contains('superseded'));
+  open.length === 1 && open[0] === '0111'
+    ? ok('with one question open all evening, only its newest reply stays open')
+    : fail('the wall of feedback is back: ' + open.length + ' cards open ('
+           + open.join(', ') + ')');
+  nodeFor('0105') && nodeFor('0105').classList.contains('superseded')
+    ? ok('and an aside is a reply too — five of them were the bulk of the wall')
+    : fail('`note` cards are not folded, which was most of the problem');
 }
 
 // 3. Teaching is not feedback. A lesson card after a question is new material
@@ -327,6 +357,55 @@ const withNew = Object.assign({}, lesson, {
   !writer.hidden
     ? ok('a new question opens it on its own account')
     : fail('a new question left no surface to answer it on');
+}
+
+// 6c2. Every question keeps a surface, and no page is ever destroyed.
+//
+// The surface only ever answered the NEWEST question, and arriving at a new one
+// called `clear` — which is a page of somebody's proof, deleted, because the
+// tutor asked something else. Two hours of Exercise 1.3 went that way.
+{
+  const two = Object.assign({}, lesson, {
+    cards: [
+      card('0001', 'question', 'Exercise 1.3', 1),
+      card('0011', 'note', 'which element is h', 2),
+      card('0012', 'question', 'write the set in braces', 3),
+    ],
+  });
+  es.onmessage({ data: JSON.stringify(two) });
+
+  const js = fs.readFileSync(path.join(WEB, 'board.js'), 'utf8');
+  const restore = (js.match(/function restoreAnswer\(\)[\s\S]*?\n\}/) || [''])[0];
+  !/writer\.clear\(\)/.test(restore)
+    ? ok('arriving at a new question never wipes the surface')
+    : fail('the surface is still cleared when a new question arrives — that is a '
+           + 'page of working, deleted, because the tutor asked something else');
+  /writer\.fresh\(\)/.test(restore) && /questionPage\[/.test(restore)
+    ? ok('each question gets a page of its own instead')
+    : fail('there is no page per question, so answers still share one surface');
+  /inkOn\(\)\s*>\s*0/.test(restore)
+    ? ok('and a page with ink on it is never overwritten from the server')
+    : fail('the server can still replace working written since the last send');
+
+  // And an earlier question can be gone back to.
+  const back = nodeFor('0001') && nodeFor('0001').querySelector('.card-pen');
+  back
+    ? ok('an earlier question offers a way back to writing on it')
+    : fail('once the tutor asks something else, the previous question can never '
+           + 'be answered again');
+  !(nodeFor('0012') && nodeFor('0012').querySelector('.card-pen'))
+    ? ok('and the one being answered does not offer it, being already here')
+    : fail('the current question offers to switch to itself');
+
+  if (back) {
+    back.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    !els.writer.hidden
+      ? ok('and taking it opens the surface')
+      : fail('going back to a question left nothing to write on');
+    nodeFor('0001') && !nodeFor('0001').querySelector('.card-pen')
+      ? ok('on that question, which now stops offering')
+      : fail('the board did not actually switch questions');
+  }
 }
 
 // 6d. And a picture can be handed over from the device. The file input has been

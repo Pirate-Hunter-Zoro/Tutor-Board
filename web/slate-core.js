@@ -1633,6 +1633,34 @@ function create(opts) {
     fitPage();
     return true;
   };
+  /* Pages, from outside.
+
+     The board keeps one page per question, so that answering a new question
+     never destroys the working on the old one. It used to call `clear` for that
+     -- which is a page of somebody's proof, deleted, because the tutor asked
+     something else. */
+  api.pages = function () { return pages.length; };
+  api.at = function () { return current; };
+  api.go = function (n) {
+    if (n === current || n < 0 || n >= pages.length) return current;
+    goTo(n);
+    return current;
+  };
+  /* A new blank page at the end, and go to it. Returns its index, which is what
+     the host records against the question it belongs to. */
+  api.fresh = function () {
+    if (pages.length && !pages[pages.length - 1].strokes.length) {
+      goTo(pages.length - 1);
+      return current;
+    }
+    pages.push(blankPage());
+    goTo(pages.length - 1);
+    return current;
+  };
+  api.inkOn = function (n) {
+    var p = pages[n === undefined ? current : n];
+    return p ? p.strokes.length : 0;
+  };
   api.clear = function () {
     var p = page();
     if (!p) return;
