@@ -256,6 +256,29 @@ body.annotating #btn-annotate { background: var(--ask); color: #fff; border-colo
 .card-title { font-size: 1.02rem; font-weight: 640; color: var(--ink); }
 .card-num { font-size: .7rem; color: var(--ink-3); margin-left: auto; flex: none; }
 
+/* Feedback that a later card has replaced: folded to its heading, one line, and
+   opened again by tapping it. Not hidden -- a transcript keeps everything -- but
+   out of the reading path, so the reply that is actually live is the one under
+   the working. */
+.card.superseded { margin-bottom: .6rem; opacity: .62; }
+.card.superseded > .body { display: none; }
+.card.superseded.open > .body { display: block; }
+.card.superseded.open { opacity: 1; margin-bottom: 2.1rem; }
+/* Marks are stored as fractions of the card they are on, so a folded card would
+   squash a circle drawn round a line of algebra into its heading. The ink goes
+   with the body and comes back with it. */
+.card.superseded > .ann-layer { display: none; }
+.card.superseded.open > .ann-layer { display: block; }
+.card.superseded > .card-head { cursor: pointer; margin-bottom: 0; }
+.card.superseded.open > .card-head { margin-bottom: .5rem; }
+.card-older {
+  font-size: .62rem; font-weight: 700;
+  letter-spacing: .11em; text-transform: uppercase;
+  color: var(--ink-3); flex: none;
+  border: 1px solid var(--rule); border-radius: .3rem;
+  padding: .08rem .32rem;
+}
+
 .card[data-kind="question"] { --accent: var(--ask); }
 .card[data-kind="correct"]  { --accent: var(--good); }
 .card[data-kind="wrong"]    { --accent: var(--bad); }
@@ -483,8 +506,12 @@ body.tools-out { padding-bottom: 5.5rem; }
    thing you would notice. `--room` caps how far it may go, so a 27-inch display
    does not get a four-foot writing surface; an iPad is inside the cap and
    therefore goes edge to edge. */
+/* `--gap` is the strip of page left uncovered down each side. It is not
+   decoration: the surface swallows every touch that lands on it, so with the
+   surface running to the edge of the glass there was nowhere on that screenful
+   to put a thumb and scroll the lesson. It is the margin you scroll in. */
 #writer {
-  --gap: max(.5rem, env(safe-area-inset-left));
+  --gap: max(2.5rem, var(--gap-zoom, 0px), env(safe-area-inset-left));
   --room: 22rem;
   --bleed: min(0px, max(calc(50% - 50vw + var(--gap)), calc(-1 * var(--room))));
   margin: .5rem var(--bleed) 2.2rem;
@@ -519,9 +546,13 @@ body.tools-out { padding-bottom: 5.5rem; }
    anything sized in it spends its first screenful underneath the browser chrome.
    The `vh` line stays as the fallback for anything that does not know `svh` --
    a browser that ignores the second declaration keeps the first. */
+/* `--slate-cap` is set from the visual viewport -- see `fitWriter` -- and is
+   how the surface is kept smaller than what can actually be seen once the page
+   has been pinch-zoomed. It defaults to a value that never binds, so a browser
+   with no visual-viewport API gets exactly the old height. */
 #writer #slate {
   height: clamp(18rem, 68vh, 60rem);
-  height: clamp(18rem, 74svh, 60rem);
+  height: min(clamp(18rem, 74svh, 60rem), var(--slate-cap, 400vh));
 }
 
 #btn-clip {

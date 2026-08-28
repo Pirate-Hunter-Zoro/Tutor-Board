@@ -32,6 +32,13 @@ which kind of subject it is and the board adapts.
 > a person's account of using it.** Not teaching the subject — that is the other session's job,
 > in the course repository, and it does not know or care about this one.
 >
+> **Since then, 28 August, later:** three sittings on Exercise 1.3 exposed the reading order.
+> Every reply the tutor had written stayed open, so the newest one — the only one about the ink
+> actually on screen — was the third of three; and the board scrolled past all of it to the
+> writing surface. Replaced replies now fold to one line, the board lands on the first line of
+> the newest one, and the surface no longer runs to both edges of the glass or grows past them
+> when the page is pinch-zoomed. `test/feedback.js` holds all four.
+>
 > **Since then, 28 August:** sending from the board was found to be broken outright, and it
 > had been broken the whole time. Pressing **Send** on the writing surface issued no request
 > at all whenever there were marks anywhere on the lesson — it raised the *Send what?* chooser
@@ -186,6 +193,10 @@ these tests fail, the test is right.
 | A finger swipe wrote a line instead of scrolling, on every fresh load: the rule was a latch ("a finger draws until a pen has been seen"), and a latch is a variable | `tool.finger`, persisted; `test/plane.js` |
 | Zooming out found a hard edge one screen away, because the page was a box and the view was clamped to it | `reach()` in `slate-core.js`, `test/plane.js` |
 | The export rasterised the whole page at one pixel per logical unit, which only ever worked because the page was the size of the screen — on a plane it is unbounded work and an unbounded upload | `pngBox` crops to the ink and caps, `test/plane.js` |
+| Three "not quite" cards sat in a row under a single attempt: an answer is versioned and shows only its newest revision, so three sends read as one, but the cards that replied to the first two were not versioned and stayed open beside the third — the reading order said they were three live objections to the working on screen | `superseded` in `board.js`, folded to one line each and reopened by a tap; `test/feedback.js` |
+| The board scrolled to the bottom of the document when a card arrived, and the bottom of the document is the writing surface — so the feedback that had just been waited for went off the top of the screen and a blank slate arrived in its place | `revealNewest` parks the newest card's first line under the bar, and `following()` decides whether to; `test/feedback.js` |
+| The writing surface ran to both edges of the glass, so on the screenful it occupied there was nowhere to put a thumb and scroll the lesson | `--gap` on `#writer` in `board.css`, which is a margin to scroll in, not decoration |
+| Pinch-zooming the *page* grew the writing surface past every visible edge, and the surface eats touches by design, so the only pinch left available was the slate's own — the page could not be zoomed back out without quitting the app. `vw`, `svh` and `rem` cannot see the problem: they measure the layout viewport, which does not move when you pinch | `fitWriter` caps the surface against `window.visualViewport`, in CSS pixels, on every magnification change; `test/feedback.js` |
 
 The pattern in most of them: a stub that returns a plausible object for everything will report that
 a broken page loads fine. `test/interactive.js` and `test/sizing.js` use a real DOM for that

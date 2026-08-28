@@ -85,6 +85,16 @@ var els = {
 
 var seenIds = Object.create(null);
 var firstPaint = true;
+/* Has a hand touched the page yet. The opening scroll is repeated once the
+   mathematics has typeset and the images have decoded, and repeating a scroll
+   under somebody who has already started reading is worse than landing in the
+   wrong place. A real gesture -- not our own scrollTo, which also fires a
+   scroll event -- retires the repeat. */
+var handled = false;
+["wheel", "touchstart", "pointerdown", "keydown"].forEach(function (ev) {
+  window.addEventListener(ev, function () { handled = true; },
+                          { passive: true, once: true });
+});
 
 /* ---------------------------------------------------------------- markdown */
 /* Math and code are pulled out first so markdown never mangles a subscript or
@@ -395,6 +405,12 @@ var KIND_LABEL = {
   recap: "recap"
 };
 
+/* Which kinds are a reply to a piece of working, as opposed to teaching. A
+   lesson, an aside or a recap after a question is new material and stands on
+   its own; these three answer something the student handed in, and so are the
+   ones that can be made obsolete by a later one. */
+var REPLY_KIND = { wrong: 1, correct: 1, review: 1 };
+
 function timeLabel(t) {
   var d = new Date(t * 1000);
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -493,6 +509,26 @@ function render(data) {
   var at = Object.create(null);
   ordered.forEach(function (c, n) { at[c.id] = n; });
 
+  /* Feedback supersedes feedback. An answer is versioned and only its newest
+     revision is rendered -- three goes at Exercise 1.3 show as one attempt --
+     but the cards that replied to the first two were never versioned, so they
+     stayed open beside the third. Three "not quite" cards then sat in a row
+     under a single piece of working, and the reading order said they were
+     three live objections to what is on screen now, when two of them were
+     about ink that had already been rewritten. It is the reply, not the
+     lesson, that has been replaced: only the newest reply to the open question
+     stays open. The ones it replaced fold to their heading, one line each, and
+     open again on a tap -- a transcript keeps both halves and this removes
+     nothing. */
+  var superseded = Object.create(null);
+  var afterQ = -1;
+  ordered.forEach(function (c, n) { if (c.kind === "question") afterQ = n; });
+  var replies = [];
+  ordered.forEach(function (c, n) {
+    if (n > afterQ && REPLY_KIND[c.kind]) replies.push(c.id);
+  });
+  replies.slice(0, -1).forEach(function (id) { superseded[id] = true; });
+
   var items = [];
   ordered.forEach(function (c, n) {
     items.push({ pos: n, sub: 0, t: c.mtime, key: "card:" + c.id, card: c });
@@ -525,7 +561,7 @@ function render(data) {
     items.pop();
   }
 
-  var atBottom = nearBottom();
+  var wasFollowing = following();
   /* What is on screen already, by key. A payload arrives for all sorts of
      reasons that have nothing to do with the lesson -- the tutor's heartbeat
      lands every thirty seconds while it writes, the uncommitted count changes, a
@@ -643,6 +679,7 @@ function render(data) {
      card id and revision, so an unchanged card is left exactly where it is --
      which also keeps its scroll position and any selection inside it. */
   reconcile(els.cards, wanted);
+  paintSuperseded(superseded);
 
   /* The way out stays open until the tutor has actually said something. Keyed on
      CARDS, not on the transcript: asking makes the transcript non-empty, so
@@ -766,9 +803,15 @@ function render(data) {
 
   if (firstPaint) {
     firstPaint = false;
-    window.scrollTo(0, document.body.scrollHeight);
-  } else if (atBottom) {
-    window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+    revealNewest(false);
+    /* Mathematics is typeset and answer images decode after this frame, and
+       both change the height of everything above the newest card -- so the
+       place we just scrolled to is not where that card ends up. Land on it
+       again once the page has settled, unless a hand has since intervened. */
+    window.requestAnimationFrame(function () { if (!handled) revealNewest(false); });
+    setTimeout(function () { if (!handled) revealNewest(false); }, 400);
+  } else if (wasFollowing) {
+    revealNewest(true);
   } else if (anythingNew) {
     els.jump.hidden = false;
   }
@@ -974,6 +1017,81 @@ document.getElementById("pushed-close").onclick = function () {
 
 function nearBottom() {
   return window.innerHeight + window.scrollY >= document.body.scrollHeight - 160;
+}
+
+/* The newest thing the tutor has written. Not the newest thing on the page: the
+   writing surface is the last element in the transcript, by design, because a
+   correction is written under the feedback it answers. */
+function newestCardNode() {
+  var all = els.cards.querySelectorAll("[data-card]");
+  return all.length ? all[all.length - 1] : null;
+}
+
+/* Where the eye should land when a card arrives: the TOP of that card, tucked
+   under the bar. It used to be the bottom of the document, which is the bottom
+   of the writing surface -- so the reply that had just been waited for was
+   pushed off the top of the screen and what arrived instead was a blank slate.
+   The first line of the new feedback is the thing to read first. */
+function revealNewest(smooth) {
+  var node = newestCardNode();
+  var top;
+  if (node) {
+    var bar = document.getElementById("bar");
+    var under = bar ? bar.getBoundingClientRect().height : 0;
+    top = node.getBoundingClientRect().top + window.scrollY - under - 10;
+    if (top < 0) top = 0;
+  } else {
+    top = document.body.scrollHeight;
+  }
+  if (smooth) window.scrollTo({ top: top, behavior: "smooth" });
+  else window.scrollTo(0, top);
+}
+
+/* "Was the lesson still being read when this arrived." Near the bottom counts,
+   and so does having the newest card anywhere on screen -- because the board
+   now parks that card at the TOP of the window, which on a long lesson is
+   nowhere near the bottom of the document. Judging by the bottom alone would
+   call that scrolled-away and offer a jump button for the card being read. */
+function following() {
+  if (nearBottom()) return true;
+  var node = newestCardNode();
+  if (!node) return false;
+  var r = node.getBoundingClientRect();
+  return r.bottom > 0 && r.top < window.innerHeight;
+}
+
+/* Applied after the reconcile rather than folded into a card's key. A card
+   becomes superseded when the NEXT one is written, and rebuilding a card --
+   re-parsing its markdown, re-typesetting its mathematics, dropping the ink
+   layer drawn on it -- because something after it arrived is exactly the work
+   the keyed reconcile exists to avoid. */
+function paintSuperseded(set) {
+  Array.prototype.forEach.call(els.cards.querySelectorAll("[data-card]"),
+                               function (node) {
+    var old = !!set[node.dataset.card];
+    node.classList.toggle("superseded", old);
+    if (!old) node.classList.remove("open");
+    var head = node.querySelector(".card-head");
+    if (!head) return;
+    var tag = head.querySelector(".card-older");
+    if (old && !tag) {
+      tag = document.createElement("span");
+      tag.className = "card-older";
+      head.appendChild(tag);
+    } else if (!old && tag) {
+      tag.remove();
+    }
+    if (tag) tag.textContent = node.classList.contains("open") ? "fold" : "replaced";
+    if (old && !head._foldable) {
+      head._foldable = true;
+      head.addEventListener("click", function () {
+        if (!node.classList.contains("superseded")) return;
+        node.classList.toggle("open");
+        var t = head.querySelector(".card-older");
+        if (t) t.textContent = node.classList.contains("open") ? "fold" : "replaced";
+      });
+    }
+  });
 }
 
 /* Photos and PDFs only. Sent pages used to land here too, which is why answers
@@ -1738,6 +1856,48 @@ function placeCodeAnswer(owed, questionNode, card) {
   paintNotesSend();
 }
 
+/* ---- the writing surface must never own the whole screen ----
+
+   Pinch-zooming the PAGE is not the slate's own zoom: it magnifies the layout,
+   and the surface is already as wide as the glass, so at any real magnification
+   it grows past every edge of what can be seen. Every touch then lands inside
+   it -- and the slate swallows touches by design, because a pen stroke is a
+   touch -- so there is nothing left of the page to pinch back out on. The
+   surface's own zoom answers instead, which zooms the wrong thing, and the only
+   way out is to quit the app.
+
+   The layout cannot see the problem: `vw`, `svh` and `rem` are all measured
+   against the layout viewport, and the layout viewport does not move when you
+   pinch. The visual viewport does, and it can be asked. So the surface is capped
+   in CSS pixels against what is actually visible, which leaves a strip of page
+   around it at every magnification -- and a strip of page is somewhere to put a
+   thumb, both to scroll with and to pinch back out with.
+
+   At normal magnification the caps are looser than the layout and nothing
+   happens; they only start to bite once the page has been zoomed. */
+var SEEN_W = .90;     /* of the visible width, at most */
+var SEEN_H = .86;     /* and of the visible height, head included */
+var SEEN_MIN = 160;   /* never shrink the surface below this many CSS pixels */
+
+function fitWriter() {
+  var vv = window.visualViewport;
+  if (!els.writer || !vv || !vv.width) return;
+  var layout = document.documentElement.clientWidth || vv.width;
+  var side = Math.round((layout - vv.width * SEEN_W) / 2);
+  els.writer.style.setProperty("--gap-zoom", (side > 0 ? side : 0) + "px");
+
+  var head = document.getElementById("writer-head");
+  var tall = vv.height * SEEN_H - (head ? head.getBoundingClientRect().height : 0);
+  els.writer.style.setProperty("--slate-cap",
+                               Math.round(Math.max(tall, SEEN_MIN)) + "px");
+  if (writer) window.requestAnimationFrame(writer.relayout);
+}
+
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", fitWriter);
+  window.visualViewport.addEventListener("scroll", fitWriter);
+}
+
 function placeWriter(owed, questionNode) {
   els.writer.hidden = !owed;
   document.getElementById("drawbar").hidden = !owed;
@@ -1774,6 +1934,7 @@ function placeWriter(owed, questionNode) {
     requestAnimationFrame(writer.relayout);
     restoreAnswer();
   }
+  fitWriter();
 }
 
 /* Put a previously sent answer back under the pen when the tutor has commented
@@ -2045,11 +2206,15 @@ document.getElementById("btn-history-close").onclick = function () {
 };
 document.getElementById("reading-back").onclick = backToLesson;
 els.jump.onclick = function () {
-  window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+  revealNewest(true);
   els.jump.hidden = true;
 };
 window.addEventListener("scroll", function () {
-  if (nearBottom()) els.jump.hidden = true;
+  /* `following` reads a rectangle, which forces layout, and this fires for
+     every frame of a flick. It is only ever asked while there is a button to
+     put away. */
+  if (els.jump.hidden) return;
+  if (following()) els.jump.hidden = true;
 });
 if (window.matchMedia) {
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", syncSystemTheme);
