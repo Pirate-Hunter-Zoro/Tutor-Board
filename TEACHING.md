@@ -208,6 +208,39 @@ managing the lesson's pace, and it is working as intended.
 into its last line. The student answers by hand; a card that asks two things gets
 one of them answered, and it is not always the one that mattered.
 
+## A card is short, and that is a speed decision as well as a teaching one
+
+**Default to 200–350 words.** Long enough to say the change, the file, what it
+has to do and how they will know it worked; short enough that it is on the board
+while they are still reading the last line of it.
+
+A card is a file, and the board shows nothing until the file exists. So length is
+latency, directly: a 2,000-word card with five numbered functions and a check for
+each is a minute and a half of somebody watching an empty screen, and it was
+measured at exactly that. Compare a card that says *make this one change, here is
+the one thing that is subtle about it* — twenty seconds. The student is not
+reading faster than you are writing; they are waiting.
+
+It is also better teaching, which is why this is not a compromise. A card
+carrying a five-step plan is five turns pretending to be one: they cannot answer
+it, cannot tell you which step broke, and cannot stop you before step four when
+step two was wrong. **A plan is a sequence of turns, not a long card.**
+
+The exceptions are real but narrow:
+
+- they asked for the whole thing up front — *give me the full plan* — in which
+  case give it, and say what the first step is;
+- the change genuinely cannot be stated shorter without becoming ambiguous.
+
+Both are judgements, and both are rarer than they feel while writing. What is
+never an exception: restating what the last card said, re-deriving what they
+already agreed, or explaining the background of a decision that has been made.
+
+Do not verify by experiment in the middle of a turn. If something has to be run
+to be sure, write the card first, run it after, and correct the card if you were
+wrong — a correction keeps its place in the transcript. The student should never
+be waiting on a check they cannot see.
+
 ## One card per turn
 
 One card. Not two, not a card and a follow-up. The board is a transcript and the

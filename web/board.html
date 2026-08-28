@@ -103,6 +103,14 @@
 
 <main id="board">
   <div id="cards"></div>
+  <!-- A card is a file, and nothing appears until the file exists -- so a minute
+       of the tutor writing looks exactly like a minute of nothing happening. The
+       daemon already says it is working; this is where the lesson says so. -->
+  <div id="busy" class="busy" hidden>
+    <span class="busy-dot"></span>
+    <span id="busy-text">the tutor is writing</span>
+    <span id="busy-since" class="busy-since"></span>
+  </div>
   <div id="empty" class="empty">
     <p id="empty-lead">Nothing on the board yet.</p>
     <p class="muted">The tutor writes here. It appears the moment it is written.</p>

@@ -69,6 +69,9 @@ var els = {
   pushed: document.getElementById("pushed"),
   pushedIcon: document.getElementById("pushed-icon"),
   pushedText: document.getElementById("pushed-text"),
+  busy: document.getElementById("busy"),
+  busyText: document.getElementById("busy-text"),
+  busySince: document.getElementById("busy-since"),
   codeanswer: document.getElementById("codeanswer"),
   codeanswerInk: document.getElementById("codeanswer-ink"),
   codeanswerType: document.getElementById("codeanswer-type"),
@@ -742,6 +745,7 @@ function render(data) {
   placeCodeAnswer(codeMode && !!newestQ && !settled && !skipped && !data.archived,
                   qNode, newestQ);
   paintComposer(codeMode && !data.archived, data);
+  paintBusy(data);
   /* KaTeX walks the DOM it is handed. Handing it the whole lesson every frame
      re-renders mathematics that was already rendered; hand it only what was
      just inserted. */
@@ -1629,6 +1633,51 @@ var SIGNAL_LABEL = { done: "ready to check", help: "needs help", confused: "conf
    Two ways, because the question decides which is easier: write on the card
    itself, which is how you answer *about a place* in it, or type, which is how
    you answer in sentences. */
+/* A card is a file, and the lesson shows nothing until that file exists. So the
+   minute a tutor spends writing one is a minute of a blank screen with no way to
+   tell it apart from a tutor that has died -- and the difference used to be a dot
+   in the title bar the size of a full stop. Say it where the card is going to
+   appear, and count, because a wait you can see the length of is a different
+   experience from one you cannot. */
+var busySince = 0;
+var busyTurn = -1;
+var busyTimer = null;
+
+function paintBusy(data) {
+  if (!els.busy) return;
+  var st = data.agent || null;
+  var working = !!st && st.state === "working" && !data.archived;
+  if (!working) {
+    els.busy.hidden = true;
+    busySince = 0;
+    busyTurn = -1;
+    if (busyTimer) { clearInterval(busyTimer); busyTimer = null; }
+    return;
+  }
+  /* A new turn restarts the clock; the same turn continuing does not. */
+  var turn = st.turns || 0;
+  if (busyTurn !== turn || !busySince) {
+    busyTurn = turn;
+    busySince = Date.now();
+  }
+  /* Deliberately NOT inside #cards. That container is reconciled -- keyed nodes
+     are matched and moved in place -- and an unkeyed element sitting among them
+     is stepped over by the cursor walk, so cards get inserted on the wrong side
+     of it and the answer block stops sitting under its own question. It lives
+     immediately after the lesson instead, which puts it in the same place on
+     screen and out of the way of everything. */
+  els.busy.hidden = false;
+  tickBusy();
+  if (!busyTimer) busyTimer = setInterval(tickBusy, 1000);
+}
+
+function tickBusy() {
+  if (!els.busy || els.busy.hidden || !busySince) return;
+  var secs = Math.max(0, Math.round((Date.now() - busySince) / 1000));
+  els.busySince.textContent = secs < 60 ? secs + "s"
+    : Math.floor(secs / 60) + "m " + (secs % 60) + "s";
+}
+
 function placeCodeAnswer(owed, questionNode, card) {
   if (!els.codeanswer) return;
   els.codeanswer.hidden = !owed;

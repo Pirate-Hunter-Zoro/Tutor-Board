@@ -331,6 +331,21 @@ body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180de
 }
 .figure.error { color: var(--bad); border-color: var(--bad); }
 
+/* ---------- the tutor is working ---------- */
+.busy {
+  display: flex; align-items: center; gap: .55rem;
+  margin: 0 0 2.1rem;
+  font-family: var(--ui); font-size: .88rem;
+  color: var(--ink-3);
+}
+.busy-dot {
+  width: .5rem; height: .5rem; border-radius: 50%;
+  background: var(--ask); flex: none;
+  animation: busypulse 1.4s ease-in-out infinite;
+}
+@keyframes busypulse { 0%, 100% { opacity: .25 } 50% { opacity: 1 } }
+.busy-since { color: var(--ink-3); opacity: .75; font-variant-numeric: tabular-nums; }
+
 /* ---------- answering a question in a code project ---------- */
 #codeanswer {
   margin: 0 0 2.1rem;

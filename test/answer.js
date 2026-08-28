@@ -147,6 +147,49 @@ block().hidden
   ? ok('and still gets its writing surface')
   : fail('the maths answer block stopped appearing');
 
+// --- a minute of writing must not look like a minute of nothing ----------
+// A card is a file and the lesson shows nothing until it exists, so the tutor
+// taking ninety seconds over one looked exactly like a tutor that had died. The
+// only signal was a dot in the title bar the size of a full stop.
+function paintWith(agent) {
+  window.__render({
+    state: { course: 'P', mode: 'code' },
+    cards: [question], turns: [], messages: [], uploads: [], slate: [],
+    agent: agent,
+  });
+}
+
+const busy = doc.getElementById('busy');
+paintWith({ agent: 'claude', state: 'working', turns: 1, host: 'h', pid: 1 });
+busy && !busy.hidden
+  ? ok('the lesson says the tutor is writing while it writes')
+  : fail('nothing on the board says the tutor is working — a blank screen and a '
+         + 'dead tutor look identical');
+busy && /writing/i.test(busy.textContent)
+  ? ok('and says what it is doing, not merely that something is happening')
+  : fail('the working state does not say what is going on');
+// It must sit right after the lesson and NEVER inside it: #cards is reconciled,
+// and an unkeyed element among the cards is stepped over by the cursor walk, so
+// cards land on the wrong side of it and the answer block stops sitting under
+// its own question. That is not hypothetical -- it broke two suites.
+busy && busy.parentNode !== doc.getElementById('cards')
+  ? ok('and stays out of the reconciled lesson, which it would otherwise disorder')
+  : fail('the notice was put inside #cards, where it shifts the cards around it');
+busy && doc.getElementById('cards').nextElementSibling === busy
+  ? ok('and sits directly after the lesson, where the card is about to appear')
+  : fail('the notice is not at the end of the lesson');
+
+paintWith({ agent: 'claude', state: 'listening', turns: 1, host: 'h', pid: 1 });
+busy.hidden
+  ? ok('and it goes when the card lands')
+  : fail('the working notice outlives the turn');
+
+paintWith(null);
+busy.hidden
+  ? ok('and a board with no tutor attached does not claim one is writing')
+  : fail('the working notice appears with no tutor at all');
+
+
 console.log(errors.length ? '\n' + errors.length + ' FAILURES'
                           : '\na question can be answered in either kind of course');
 process.exit(errors.length ? 1 : 0);
