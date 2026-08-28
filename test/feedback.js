@@ -254,6 +254,34 @@ const withNew = Object.assign({}, lesson, {
   window.__slateBusy = false;
 }
 
+// 6b. Send lands you BELOW the working, not above it.
+//
+// Send is the one moment in a sitting when the interesting thing is under the
+// writing rather than over it: the receipt that says it arrived sits at the foot
+// of the surface, and "the tutor is writing" sits under that, and between them
+// they answer the only question a person has after pressing the button. The
+// board used to move upwards instead — and separately, the payload the send
+// provoked carried a turn one revision newer than the one on the surface, so the
+// answer was fetched back off the server and re-loaded, which re-fits the page
+// and throws away the zoom the working was written at.
+{
+  const js = fs.readFileSync(path.join(WEB, 'board.js'), 'utf8');
+  /onSend:\s*function\s*\(res\)/.test(js)
+    ? ok('Send is told which revision it just sent')
+    : fail('the send callback ignores the server\'s answer, so the surface will '
+           + 'reload the ink already on it and re-fit the page');
+  /loadedTurn = res\.turn/.test(js)
+    ? ok('and marks it as already on the surface, so nothing is re-fitted')
+    : fail('nothing stops restoreAnswer re-loading the ink that was just sent');
+  /function revealSent\(\)/.test(js) && /revealSentSettling\(\)/.test(js)
+    ? ok('and the board is put under the writing, where the receipt is')
+    : fail('nothing puts the page below the surface after a send');
+  const body = (js.match(/function revealSent\(\)\s*\{[\s\S]*?\n\}/) || [''])[0];
+  /r\.bottom/.test(body)
+    ? ok('anchored to the foot of the surface, not to a card above it')
+    : fail('the after-send scroll is not anchored under the writing');
+}
+
 // 7. The writing surface must NOT be capped against what can be seen.
 //
 // It was, once, and the cap was a fraction of the visible window -- so it shrank

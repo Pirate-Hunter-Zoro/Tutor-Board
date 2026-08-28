@@ -86,15 +86,17 @@ var els = {
 
 var seenIds = Object.create(null);
 var firstPaint = true;
-/* Has a hand touched the page yet. The opening scroll is repeated once the
-   mathematics has typeset and the images have decoded, and repeating a scroll
-   under somebody who has already started reading is worse than landing in the
-   wrong place. A real gesture -- not our own scrollTo, which also fires a
-   scroll event -- retires the repeat. */
-var handled = false;
+/* When a hand last touched the page. Several things here want to put the page
+   somewhere and then put it there again a moment later, once the mathematics has
+   typeset and the images have decoded and everything above has settled to its
+   real height. Repeating a scroll under somebody who has already started reading
+   is worse than landing in the wrong place, so every one of those repeats asks
+   first. A real gesture, not our own `scrollTo` -- which fires a scroll event
+   like any other and would otherwise cancel every repeat immediately. */
+var handledAt = 0;
 ["wheel", "touchstart", "pointerdown", "keydown"].forEach(function (ev) {
-  window.addEventListener(ev, function () { handled = true; },
-                          { passive: true, once: true });
+  window.addEventListener(ev, function () { handledAt = Date.now(); },
+                          { passive: true });
 });
 
 /* ---------------------------------------------------------------- markdown */
@@ -809,8 +811,8 @@ function render(data) {
        both change the height of everything above the newest card -- so the
        place we just scrolled to is not where that card ends up. Land on it
        again once the page has settled, unless a hand has since intervened. */
-    window.requestAnimationFrame(function () { if (!handled) revealNewest(false); });
-    setTimeout(function () { if (!handled) revealNewest(false); }, 400);
+    window.requestAnimationFrame(function () { if (!handledAt) revealNewest(false); });
+    setTimeout(function () { if (!handledAt) revealNewest(false); }, 400);
   } else if (!anythingNew) {
     /* NOTHING ARRIVED. Do not move the page.
 
@@ -826,6 +828,38 @@ function render(data) {
   } else {
     els.jump.hidden = false;
   }
+}
+
+/* Where to be after pressing Send: looking at the foot of the writing surface.
+
+   Send is the one moment in a sitting when the interesting thing is BELOW the
+   working rather than above it. The receipt that says it arrived sits under the
+   surface, and "the tutor is writing" sits under that -- and both of them are
+   the answer to the question a person actually has after pressing the button,
+   which is whether anything is happening. Landing anywhere above the working
+   answers a question nobody asked and hides the two lines that matter.
+
+   The foot of the surface goes a little above the middle of the window, so what
+   is under it is on screen with room to spare and the last thing written is
+   still visible above it. */
+function revealSent() {
+  if (!els.writer || els.writer.hidden) return;
+  var r = els.writer.getBoundingClientRect();
+  var top = r.bottom + window.scrollY - window.innerHeight * 0.62;
+  if (top < 0) top = 0;
+  window.scrollTo({ top: top, behavior: "smooth" });
+}
+
+/* And again once the payload the send provoked has landed: the receipt appears,
+   the tutor's chip changes, and both of them move the thing we were aiming at.
+   Not if a hand has intervened -- at that point the person has said where they
+   want to be, which outranks anything here. */
+function revealSentSettling() {
+  var at = Date.now();
+  revealSent();
+  [300, 900].forEach(function (ms) {
+    setTimeout(function () { if (handledAt <= at) revealSent(); }, ms);
+  });
 }
 
 /* A hand mid-answer is not to be moved. The tutor writing a second card while
@@ -1913,7 +1947,17 @@ function placeWriter(owed, questionNode) {
           return { turn: answering.turn ? answering.turn.id : null,
                    answers: answering.question };
         },
-        onSend: function () { toastSent(); },
+        onSend: function (res) {
+          /* The ink that was just sent is already on the surface -- it is what
+             was sent. Without this, the payload that follows carries a turn one
+             revision newer than the one `restoreAnswer` has loaded, so it fetches
+             the answer back off the server and hands it to `load`, which re-fits
+             the page: the working visibly jumps and the zoom you were writing at
+             is thrown away, every single time Send is pressed. */
+          if (res && res.turn && res.rev) loadedTurn = res.turn + ":r" + res.rev;
+          toastSent();
+          revealSentSettling();
+        },
         /* Marks on the lesson are a second thing that can be sent. Ask which,
            but only when both actually exist. */
         beforeSend: askWhatToSend,
