@@ -273,7 +273,7 @@ function create(opts) {
      is generous, because the gap between two words of a proof is longer than it
      feels and a still pen reports nothing -- but it is finite, which is the
      whole point. */
-  var PEN_STALE = 8000;
+  var PEN_STALE = 4000;
   /* Contacts already judged to be a hand. Judged once, when they land, and kept
      judged while they stay on the glass: re-deciding on every move is how a palm
      that outlives a pause becomes a finger. Recorded WITH the time, and expiring,
@@ -938,17 +938,29 @@ function create(opts) {
     sheet.setPointerCapture(ev.pointerId);
 
     if (ev.pointerType === "touch") {
-      /* Judged when it lands, rather than after it has already moved something.
+      /* Condemned for life ONLY when the nib is actually on the glass, which is
+         the one case there is no doubt about: a contact that lands while a
+         stroke is being drawn is a hand.
  
-         Judged by the pen and by nothing else. There was a contact-size test
-         here as well -- a palm's patch is wider than a fingertip's -- and it was
-         wrong: what Safari reports for `width` on a fingertip is not the small
-         number the specification's examples suggest, so the threshold that was
-         meant to catch a heel of a hand caught ordinary fingers and took the
-         scroll and the pinch with them. A signal that cannot be calibrated
-         without the hardware in front of you does not belong in the path that
-         decides whether the surface responds at all. */
-      if (handAtWork()) {
+         It used to condemn on `handAtWork()`, which is also true for half a
+         second after the pen last reported -- and a judgement made there lasted
+         the whole life of the contact. So a finger put down within half a second
+         of lifting the pen was dead, and stayed dead however long it rested,
+         which is exactly the gesture "write a line, then scroll" is made of. The
+         surface looked like it had stopped answering at random; it had, and the
+         randomness was how quickly the hand moved.
+ 
+         The half-second tail is still applied, but per MOVE, down in the pan and
+         pinch handling where it started -- so it suppresses and then lets go,
+         rather than condemning.
+ 
+         (There was a contact-size test here too, once. What Safari reports for
+         `width` on a fingertip is not the small number the specification's
+         examples suggest, so the threshold meant to catch a heel of a hand caught
+         ordinary fingers. A signal that cannot be calibrated without the hardware
+         in front of you does not belong in the path that decides whether the
+         surface responds at all.) */
+      if (penDown && Date.now() - lastPenAt < PEN_STALE) {
         palms[ev.pointerId] = Date.now();
         return;
       }

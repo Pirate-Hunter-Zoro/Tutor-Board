@@ -275,6 +275,36 @@ const heelSwipe = (id, x, y, dx, dy) => {
       : fail('contact size is being judged again; this is what killed the scroll');
   }
 
+  // A judgement that cannot be undone is a surface that stops answering.
+  //
+  // "Write a line, then scroll" is the commonest pair of gestures there is, and
+  // the condemnation used to be made on `handAtWork()` -- true for half a second
+  // after the pen last reported -- and then kept for the whole life of the
+  // contact. So a finger put down within half a second of the pen lifting was
+  // dead, and stayed dead however long it rested. The surface looked like it had
+  // stopped answering at random; the randomness was how fast the hand moved.
+  {
+    pen('pointerdown', 300, 300, 5);
+    pen('pointermove', 340, 320, 5);
+    pen('pointerup', 340, 320, 5);            // the nib is off the glass
+    const v0 = slate.view();
+    swipe(45, 500, 300, -7, -4);              // a finger, immediately after
+    // Suppressed for the moment, which is right -- a hand settles after a pen.
+    const v1 = slate.view();
+    (v1.ox === v0.ox && v1.oy === v0.oy)
+      ? ok('a finger landing on the pen\'s heels is held off for a moment')
+      : fail('the palm suppression does not apply just after a stroke');
+
+    await sleep(700);                          // and now it should let go
+    const v2 = slate.view();
+    swipe(47, 500, 300, -7, -4);
+    const v3 = slate.view();
+    (v3.ox !== v2.ox || v3.oy !== v2.oy)
+      ? ok('and lets go again — the judgement is a moment, not a life sentence')
+      : fail('a finger condemned by the pen stays condemned; this is the surface '
+             + 'that stops answering at random');
+  }
+
   // And an ordinary fingertip, for the avoidance of doubt.
   {
     const v0 = slate.view();

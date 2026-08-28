@@ -64,13 +64,17 @@ window.scrollTo = function (a, b) {
 const vv = new window.EventTarget();
 vv.width = 800; vv.height = 600; vv.offsetLeft = 0; vv.offsetTop = 0; vv.scale = 1;
 Object.defineProperty(window, 'visualViewport', { value: vv, configurable: true });
-const zoomTo = (scale, offsetLeft, offsetTop) => {
+// Placement is coalesced to one per animation frame — this fires on every scroll
+// event, and a forced layout per scroll frame is how a page that is merely
+// scrolling starts to stutter. So a zoom has to be given a frame to land in.
+const zoomTo = async (scale, offsetLeft, offsetTop) => {
   vv.scale = scale;
   vv.width = 800 / scale;
   vv.height = 600 / scale;
   vv.offsetLeft = offsetLeft;
   vv.offsetTop = offsetTop;
   vv.dispatchEvent(new window.Event('resize'));
+  await sleep(10);
 };
 
 window.addEventListener('error', (e) => fail('uncaught: ' + e.message));
@@ -122,7 +126,7 @@ const press = (type, x, y) => btn.dispatchEvent(
 
   // 3. Zoom the page in and pan to the far corner. This is the state that
   //    stranded a person: everything fixed by CSS is now off the glass.
-  zoomTo(2, 300, 200);
+  await zoomTo(2, 300, 200);
   const zoomed = at();
   if (!zoomed) {
     fail('the button lost its position when the page was zoomed');
@@ -192,7 +196,7 @@ const press = (type, x, y) => btn.dispatchEvent(
   }
 
   // 6. A press and hold picks it up, and where it is put is where it stays.
-  zoomTo(1, 0, 0);
+  await zoomTo(1, 0, 0);
   const before = at();
   scrolls.length = 0;
   try { window.localStorage.removeItem('board.panic'); } catch (e) {}
@@ -230,7 +234,7 @@ const press = (type, x, y) => btn.dispatchEvent(
   // 7. Wherever it is put, it stays on the glass. A control dragged to the very
   //    edge and then met with a rotation or a zoom must not end up half off it.
   window.localStorage.setItem('board.panic', JSON.stringify({ x: 1, y: 1 }));
-  zoomTo(3, 500, 400);
+  await zoomTo(3, 500, 400);
   const corner = at();
   const bw = (btn.offsetWidth || 108) / 3, bh = (btn.offsetHeight || 32) / 3;
   corner && corner.x + bw <= vv.offsetLeft + vv.width + 1 &&

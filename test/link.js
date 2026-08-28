@@ -540,6 +540,22 @@ if (es && window.Annotate) {
     else fail('a pen drag over the lesson can start a text selection, which '
               + 'kills the stroke and smears the page blue');
 
+    // But refusing the GESTURE is a different rule, and it belongs to the cards
+    // alone. Applied to the whole lesson it also covers the margins, the gaps
+    // between cards and the student's own turns — which is every part of the
+    // page there was left to scroll with, so turning annotate mode on locked the
+    // lesson where it stood and looked like the touch screen had died.
+    var wide = /body\.annotating\s+#board,\s*body\.annotating\s+#board \*\s*\{([^}]*)\}/
+      .exec(css3);
+    if (wide && !/touch-action/.test(wide[1]))
+      ok('but the lesson can still be scrolled while annotating');
+    else fail('touch-action is refused across the whole lesson, so there is '
+              + 'nowhere left to scroll with once annotate mode is on');
+    if (/body\.annotating\s+\.card,\s*body\.annotating\s+\.card \*\s*\{[^}]*touch-action:\s*none/.test(css3))
+      ok('while a swipe over a card is still a stroke, not a scroll');
+    else fail('a card no longer refuses the scroll gesture, so ink over one '
+              + 'will be taken as a swipe');
+
     window.Annotate.setOn(true);
     var sel1 = new window.Event('selectstart', { bubbles: true, cancelable: true });
     card.dispatchEvent(sel1);

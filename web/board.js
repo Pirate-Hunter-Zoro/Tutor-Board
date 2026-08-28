@@ -2321,6 +2321,25 @@ var PANIC_KEY = "board.panic";
 var panicAt = { x: .975, y: .1 };      /* of the visible window, its centre */
 var panicHold = null;
 
+/* Coalesced to one placement per frame, and its own size measured only when
+   something could have changed it.
+
+   This is hung off every scroll and every visual-viewport event, which during a
+   flick on a tablet is every frame -- and it was reading two offsets and writing
+   a transform each time. A forced layout per scroll event is how a page that is
+   merely scrolling starts to stutter, and a control that stutters while
+   everything else moves smoothly reads as the whole screen misbehaving. */
+var panicFrame = 0;
+var panicSize = null;
+
+function panicSoon() {
+  if (panicFrame) return;
+  panicFrame = window.requestAnimationFrame(function () {
+    panicFrame = 0;
+    panicPlace();
+  });
+}
+
 function panicPlace() {
   if (!els.panic || els.panic.hidden) return;
   var vv = window.visualViewport;
@@ -2331,8 +2350,11 @@ function panicPlace() {
   var k = (vv && vv.scale) ? vv.scale : 1;
   /* The button is drawn at 1/k, so the room it takes in the page's own units is
      its CSS size divided by the magnification. */
-  var bw = (els.panic.offsetWidth || 108) / k;
-  var bh = (els.panic.offsetHeight || 32) / k;
+  if (!panicSize || !panicSize.w) {
+    panicSize = { w: els.panic.offsetWidth || 108, h: els.panic.offsetHeight || 32 };
+  }
+  var bw = panicSize.w / k;
+  var bh = panicSize.h / k;
   var pad = 6 / k;
   var x = ox + panicAt.x * w - bw / 2;
   var y = oy + panicAt.y * h - bh / 2;
@@ -2389,6 +2411,7 @@ function panicRecentre() {
   /* The magnification settles over the next few frames, and every one of them
      changes what "the visible window" means. */
   [0, 120, 300, 500].forEach(function (ms) { setTimeout(panicPlace, ms); });
+  panicSize = null;
 }
 
 if (els.panic) {
@@ -2443,10 +2466,12 @@ if (els.panic) {
   els.panic.addEventListener("pointercancel", panicRelease);
 
   ["resize", "scroll"].forEach(function (ev) {
-    if (window.visualViewport) window.visualViewport.addEventListener(ev, panicPlace);
-    window.addEventListener(ev, panicPlace, { passive: true });
+    if (window.visualViewport) window.visualViewport.addEventListener(ev, panicSoon);
+    window.addEventListener(ev, panicSoon, { passive: true });
   });
+  window.addEventListener("resize", function () { panicSize = null; });
   window.addEventListener("orientationchange", function () {
+    panicSize = null;
     setTimeout(panicPlace, 120);
   });
   panicPlace();
