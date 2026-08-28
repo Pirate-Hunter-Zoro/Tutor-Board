@@ -1875,47 +1875,19 @@ function placeCodeAnswer(owed, questionNode, card) {
   paintNotesSend();
 }
 
-/* ---- the writing surface must never own the whole screen ----
+/* The writing surface used to be capped against the visual viewport here, so
+   that pinch-zooming the page could not make it swallow the glass. The cap
+   worked and was still wrong: it was a fraction of what could be SEEN, so it
+   shrank by exactly the factor the page was magnified by -- and zooming in on
+   the writing therefore did nothing at all, because the block got smaller as
+   fast as the page got bigger. A surface for reading handwriting that cannot be
+   zoomed into is worse than one you can occasionally get lost in.
 
-   Pinch-zooming the PAGE is not the slate's own zoom: it magnifies the layout,
-   and the surface is already as wide as the glass, so at any real magnification
-   it grows past every edge of what can be seen. Every touch then lands inside
-   it -- and the slate swallows touches by design, because a pen stroke is a
-   touch -- so there is nothing left of the page to pinch back out on. The
-   surface's own zoom answers instead, which zooms the wrong thing, and the only
-   way out is to quit the app.
-
-   The layout cannot see the problem: `vw`, `svh` and `rem` are all measured
-   against the layout viewport, and the layout viewport does not move when you
-   pinch. The visual viewport does, and it can be asked. So the surface is capped
-   in CSS pixels against what is actually visible, which leaves a strip of page
-   around it at every magnification -- and a strip of page is somewhere to put a
-   thumb, both to scroll with and to pinch back out with.
-
-   At normal magnification the caps are looser than the layout and nothing
-   happens; they only start to bite once the page has been zoomed. */
-var SEEN_W = .90;     /* of the visible width, at most */
-var SEEN_H = .86;     /* and of the visible height, head included */
-var SEEN_MIN = 160;   /* never shrink the surface below this many CSS pixels */
-
-function fitWriter() {
-  var vv = window.visualViewport;
-  if (!els.writer || !vv || !vv.width) return;
-  var layout = document.documentElement.clientWidth || vv.width;
-  var side = Math.round((layout - vv.width * SEEN_W) / 2);
-  els.writer.style.setProperty("--gap-zoom", (side > 0 ? side : 0) + "px");
-
-  var head = document.getElementById("writer-head");
-  var tall = vv.height * SEEN_H - (head ? head.getBoundingClientRect().height : 0);
-  els.writer.style.setProperty("--slate-cap",
-                               Math.round(Math.max(tall, SEEN_MIN)) + "px");
-  if (writer) window.requestAnimationFrame(writer.relayout);
-}
-
-if (window.visualViewport) {
-  window.visualViewport.addEventListener("resize", fitWriter);
-  window.visualViewport.addEventListener("scroll", fitWriter);
-}
+   The button is the answer instead. It rides on the visual viewport, so it
+   cannot be zoomed off the glass, and one tap puts the magnification back. That
+   makes zooming safe without making it useless, which is the trade the cap had
+   backwards. What is left in the layout is `--gap` on `#writer`: the strip of
+   page down each side that is there to put a thumb on. */
 
 function placeWriter(owed, questionNode) {
   els.writer.hidden = !owed;
@@ -1953,7 +1925,6 @@ function placeWriter(owed, questionNode) {
     requestAnimationFrame(writer.relayout);
     restoreAnswer();
   }
-  fitWriter();
 }
 
 /* Put a previously sent answer back under the pen when the tutor has commented
@@ -2231,12 +2202,13 @@ els.jump.onclick = function () {
 
 /* --------------------------------------------------------- the way back ----
 
-   A pinch-zoomed page has no reverse gear that can be relied on. The surface is
-   capped so it cannot swallow the glass -- see `fitWriter` -- but a cap is a
-   guess at a number, and being wrong about it strands somebody mid-proof with
-   no way out but quitting the app. So there is also a button, and the button is
-   the guarantee: one tap puts the magnification back and the newest card back
-   under the bar.
+   A pinch-zoomed page has no reverse gear that can be relied on: the writing
+   surface is as wide as the glass by design, so at any real magnification it
+   covers everything there was to pinch on, and it swallows touches because a
+   pen stroke is a touch. The first answer was to cap the surface against what
+   could be seen, and that made zooming into the writing pointless -- the block
+   shrank as fast as the page grew. So the surface is left alone and this is the
+   way back instead: one tap puts the magnification where it started.
 
    Two things about it are not ordinary.
 
@@ -2252,10 +2224,11 @@ els.jump.onclick = function () {
    does the thing. The distinction is time, not distance, because a tap on a
    tablet always travels a little. */
 var PANIC_KEY = "board.panic";
-/* Hard against the right edge and below the bar: at normal magnification that
-   is the strip of page beside the writing surface, so it starts out covering
-   neither the prose nor anywhere the pen goes. */
-var panicAt = { x: .975, y: .2 };     /* of the visible window, its centre */
+/* Hard against the right edge, just under the bar: clear of the 46rem prose
+   measure, and high enough that it is not over the writing surface or the tools.
+   Wherever it lands it is in somebody's way eventually, which is what the press
+   and hold is for. */
+var panicAt = { x: .975, y: .1 };      /* of the visible window, its centre */
 var panicHold = null;
 
 function panicPlace() {
@@ -2268,12 +2241,13 @@ function panicPlace() {
   var k = (vv && vv.scale) ? vv.scale : 1;
   /* The button is drawn at 1/k, so the room it takes in the page's own units is
      its CSS size divided by the magnification. */
-  var span = (els.panic.offsetWidth || 42) / k;
+  var bw = (els.panic.offsetWidth || 108) / k;
+  var bh = (els.panic.offsetHeight || 32) / k;
   var pad = 6 / k;
-  var x = ox + panicAt.x * w - span / 2;
-  var y = oy + panicAt.y * h - span / 2;
-  x = Math.min(Math.max(x, ox + pad), ox + w - span - pad);
-  y = Math.min(Math.max(y, oy + pad), oy + h - span - pad);
+  var x = ox + panicAt.x * w - bw / 2;
+  var y = oy + panicAt.y * h - bh / 2;
+  x = Math.min(Math.max(x, ox + pad), ox + w - bw - pad);
+  y = Math.min(Math.max(y, oy + pad), oy + h - bh - pad);
   els.panic.style.transform =
     "translate(" + x + "px," + y + "px) scale(" + (1 / k) + ")";
 }
@@ -2284,23 +2258,46 @@ function panicPlace() {
    clamp is lifted again a moment later, or the page could never be zoomed in
    again, which would be a cure worse than the disease. Best effort: on anything
    that ignores it the scroll still happens, which is most of the value. */
+var panicViewport = null;      /* the declaration to put back, if any */
+
+function panicRestore() {
+  if (!panicViewport) return;
+  var meta = document.querySelector('meta[name="viewport"]');
+  if (meta) meta.setAttribute("content", panicViewport);
+  panicViewport = null;
+}
+
 function panicUnzoom() {
   var meta = document.querySelector('meta[name="viewport"]');
   if (!meta) return;
   var was = meta.getAttribute("content") || "";
   if (/maximum-scale/.test(was)) return;         /* a reset is already running */
+  panicViewport = was;
   meta.setAttribute("content", was + ", maximum-scale=1");
-  setTimeout(function () { meta.setAttribute("content", was); }, 450);
+  /* Put it back, and mean it. A clamp left in place is a page that can never be
+     zoomed again -- a worse state than the one this exists to leave, and one
+     with no button of its own. So the restore hangs off everything that could
+     plausibly happen next, not off a single timer that a backgrounded app is
+     free to drop on the floor. */
+  setTimeout(panicRestore, 450);
+  window.addEventListener("pointerdown", panicRestore, { once: true });
+  document.addEventListener("visibilitychange", panicRestore, { once: true });
 }
 
+/* Magnification only. It does NOT move the lesson.
+
+   It did at first, and that was a misreading of what "lost" means here: being
+   zoomed too far into the writing is not the same as being in the wrong part of
+   the transcript, and answering the first with the second takes the page away
+   from somebody who was looking at exactly the right thing. The zoom is the
+   thing that cannot be undone by hand once the surface fills the glass; the
+   scrolling never needed help. */
 function panicRecentre() {
   panicUnzoom();
-  revealNewest(true);
-  if (els.jump) els.jump.hidden = true;
   els.panic.classList.add("hit");
   setTimeout(function () { els.panic.classList.remove("hit"); }, 420);
-  /* The magnification settles over the next few frames and every one of them
-     moves what "the visible window" means. */
+  /* The magnification settles over the next few frames, and every one of them
+     changes what "the visible window" means. */
   [0, 120, 300, 500].forEach(function (ms) { setTimeout(panicPlace, ms); });
 }
 

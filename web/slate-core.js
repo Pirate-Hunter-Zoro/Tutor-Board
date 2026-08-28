@@ -260,18 +260,38 @@ function create(opts) {
      streaked across the working to the new position. One stroke, two symptoms,
      one cause. While the pen is down, a hand does nothing at all. */
   var penDown = false;
-  /* Contacts already judged to be a hand. A palm is judged once, when it lands,
-     and stays judged for as long as it is on the glass -- re-deciding it on
-     every move is how a palm that outlives a pause becomes a finger. */
+  /* Every rule that says "ignore this touch" has to be able to expire.
+ 
+     The first version of this could not, and it cost the surface outright: a
+     pen lift that the sheet never saw -- capture released elsewhere, the app
+     backgrounded mid-stroke, the nib leaving the glass at the edge -- left
+     `penDown` true for ever, and with it true nothing a hand did was allowed to
+     pan, pinch or write. The surface simply stopped answering, with no way to
+     tell from the outside that it was a latch and not a dead canvas.
+ 
+     So the flag is only believed while the pen is still reporting. `PEN_STALE`
+     is generous, because the gap between two words of a proof is longer than it
+     feels and a still pen reports nothing -- but it is finite, which is the
+     whole point. */
+  var PEN_STALE = 8000;
+  /* Contacts already judged to be a hand. Judged once, when they land, and kept
+     judged while they stay on the glass: re-deciding on every move is how a palm
+     that outlives a pause becomes a finger. Recorded WITH the time, and expiring,
+     for the same reason as above -- a pointer id is reused, and a stale entry
+     would silently kill the next finger to be given that number. */
   var palms = {};
-  /* A fingertip's contact patch is around 10-25 CSS pixels across; a palm is far
-     wider. `width`/`height` on a pointer event are that patch. A browser that
-     does not measure it reports 1, which reads as a finger -- the right way
-     round to be wrong, since the cost is a missed palm and not a dead pen. */
-  var PALM_SIZE = 34;
+  var PALM_STALE = 4000;
 
   function handAtWork() {
-    return penDown || (Date.now() - lastPenAt < PALM_MS);
+    var since = Date.now() - lastPenAt;
+    return (penDown && since < PEN_STALE) || since < PALM_MS;
+  }
+
+  function isPalm(id) {
+    var at = palms[id];
+    if (!at) return false;
+    if (Date.now() - at > PALM_STALE) { delete palms[id]; return false; }
+    return true;
   }
   var saveTimer = null, liveTimer = null, rafPending = false;
   var touches = {}, pinch = null;
@@ -866,7 +886,7 @@ function create(opts) {
          as long as it stays there. Clearing `touches` alone was not enough:
          a contact that is merely forgotten is a contact that gets re-read as a
          fresh finger by the next move it makes. */
-      Object.keys(touches).forEach(function (id) { palms[id] = true; });
+      Object.keys(touches).forEach(function (id) { palms[id] = Date.now(); });
       touches = {};
       pinch = null;
     }
@@ -875,9 +895,17 @@ function create(opts) {
 
     if (ev.pointerType === "touch") {
       /* Judged when it lands, rather than after it has already moved something.
-         Either signal is enough on its own. */
-      if (handAtWork() || Math.max(ev.width || 0, ev.height || 0) >= PALM_SIZE) {
-        palms[ev.pointerId] = true;
+ 
+         Judged by the pen and by nothing else. There was a contact-size test
+         here as well -- a palm's patch is wider than a fingertip's -- and it was
+         wrong: what Safari reports for `width` on a fingertip is not the small
+         number the specification's examples suggest, so the threshold that was
+         meant to catch a heel of a hand caught ordinary fingers and took the
+         scroll and the pinch with them. A signal that cannot be calibrated
+         without the hardware in front of you does not belong in the path that
+         decides whether the surface responds at all. */
+      if (handAtWork()) {
+        palms[ev.pointerId] = Date.now();
         return;
       }
       touches[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
@@ -906,7 +934,7 @@ function create(opts) {
 
   sheet.addEventListener("pointermove", function (ev) {
     if (ev.pointerType === "pen") lastPenAt = Date.now();
-    if (palms[ev.pointerId]) return;
+    if (isPalm(ev.pointerId)) return;
     if (touches[ev.pointerId]) {
       var prev = touches[ev.pointerId];
       touches[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
@@ -1016,6 +1044,7 @@ function create(opts) {
   function endStroke(ev) {
     if (ev && ev.pointerType === "pen") penDown = false;
     if (ev && palms[ev.pointerId]) { delete palms[ev.pointerId]; return; }
+    /* fall through: a contact that was never a palm ends normally */
     if (ev && touches[ev.pointerId]) {
       delete touches[ev.pointerId];
       if (Object.keys(touches).length < 2) pinch = null;
@@ -1054,6 +1083,16 @@ function create(opts) {
   sheet.addEventListener("pointerup", endStroke);
   sheet.addEventListener("pointercancel", endStroke);
   sheet.addEventListener("pointerleave", endStroke);
+  /* The last word on whether the pen is still down belongs to the window, not
+     to the canvas. A nib lifted past the edge of the surface, or an app sent to
+     the background mid-stroke, never delivers a pointerup to the sheet -- and
+     that lift is the only thing that gives a hand the surface back. */
+  ["pointerup", "pointercancel"].forEach(function (t) {
+    window.addEventListener(t, function (ev) {
+      if (ev.pointerType === "pen") penDown = false;
+    }, true);
+  });
+  window.addEventListener("blur", function () { penDown = false; });
   ["touchstart", "touchmove", "touchend", "gesturestart", "gesturechange"].forEach(function (t) {
     sheet.addEventListener(t, function (e) { e.preventDefault(); }, { passive: false });
   });

@@ -147,9 +147,17 @@ const press = (type, x, y) => btn.dispatchEvent(
   press('pointermove', 402, 303);
   press('pointerup', 402, 303);
 
-  scrolls.length
-    ? ok('a tap puts the lesson back where it can be read')
-    : fail('a tap did nothing — the button is decoration');
+  // It is a zoom control and nothing else. Being zoomed too far into the writing
+  // is not the same as being in the wrong part of the transcript, and answering
+  // the first with the second takes the page away from somebody who was looking
+  // at exactly the right thing.
+  !scrolls.length
+    ? ok('a tap leaves the lesson exactly where it was')
+    : fail('the button scrolled the page; it is a zoom control, not a jump');
+  btn.classList.contains('hit')
+    ? ok('and says out loud that it did something, since a change of scale is '
+         + 'easy to miss')
+    : fail('a tap gave no sign at all that it had been received');
   !btn.classList.contains('holding')
     ? ok('and a tap that travelled three pixels was not mistaken for a drag')
     : fail('the button was picked up by a tap; distance is being used to decide');
@@ -166,7 +174,24 @@ const press = (type, x, y) => btn.dispatchEvent(
     ? ok('and lifts the clamp again, so the page can still be zoomed by hand')
     : fail('the viewport was left clamped: ' + meta.getAttribute('content'));
 
-  // 5. A press and hold picks it up, and where it is put is where it stays.
+  // 5. Findable. It is a rescue, and the state it rescues you from is one where
+  //    the screen is already full of something else — so it carries its own name
+  //    and the board's accent rather than being a dim circle in a corner.
+  {
+    /re-cent/i.test(btn.textContent)
+      ? ok('the button says what it does')
+      : fail('the button is unlabelled: ' + JSON.stringify(btn.textContent));
+    const css = fs.readFileSync(path.join(WEB, 'board.css'), 'utf8');
+    const rule = (css.match(/#panic\s*\{[^}]*\}/) || [''])[0];
+    /background:\s*var\(--accent\)/.test(rule)
+      ? ok('and is painted in the accent, not in the page it sits on')
+      : fail('the button has no contrasting fill; it reads as a smudge');
+    !/opacity:\s*0?\.[0-8]/.test(rule)
+      ? ok('and is not dimmed away')
+      : fail('the button is still faded out at rest');
+  }
+
+  // 6. A press and hold picks it up, and where it is put is where it stays.
   zoomTo(1, 0, 0);
   const before = at();
   scrolls.length = 0;
@@ -202,13 +227,14 @@ const press = (type, x, y) => btn.dispatchEvent(
     ? ok('and remembered as a fraction of the window, so a rotation keeps it on screen')
     : fail('the position was saved in pixels: ' + JSON.stringify(stored));
 
-  // 6. Wherever it is put, it stays on the glass. A control dragged to the very
+  // 7. Wherever it is put, it stays on the glass. A control dragged to the very
   //    edge and then met with a rotation or a zoom must not end up half off it.
   window.localStorage.setItem('board.panic', JSON.stringify({ x: 1, y: 1 }));
   zoomTo(3, 500, 400);
   const corner = at();
-  corner && corner.x + 42 / 3 <= vv.offsetLeft + vv.width + 1 &&
-            corner.y + 42 / 3 <= vv.offsetTop + vv.height + 1
+  const bw = (btn.offsetWidth || 108) / 3, bh = (btn.offsetHeight || 32) / 3;
+  corner && corner.x + bw <= vv.offsetLeft + vv.width + 1 &&
+            corner.y + bh <= vv.offsetTop + vv.height + 1
     ? ok('pushed into the corner it is still wholly on the glass')
     : fail('the button can be pushed past the edge of the visible window');
 

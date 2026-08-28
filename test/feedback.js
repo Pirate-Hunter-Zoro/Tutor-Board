@@ -254,25 +254,28 @@ const withNew = Object.assign({}, lesson, {
   window.__slateBusy = false;
 }
 
-// 5. The board reads the visual viewport, not the layout, when sizing the
-//    surface. Pinch-zooming the page is invisible to vw/svh/rem, and a surface
-//    that grows past every visible edge leaves nothing to pinch back out on.
+// 7. The writing surface must NOT be capped against what can be seen.
+//
+// It was, once, and the cap was a fraction of the visible window -- so it shrank
+// by exactly the factor the page was magnified by, and pinch-zooming into the
+// writing did nothing at all: the block got smaller as fast as the page got
+// bigger. A surface for reading handwriting that cannot be zoomed into is worse
+// than one you can occasionally get lost in. The re-centre button is what makes
+// zooming safe now; see test/panic.js.
 {
-  const js = fs.readFileSync(path.join(WEB, 'board.js'), 'utf8');
-  /visualViewport/.test(js)
-    ? ok('the writing surface is sized against what can actually be seen')
-    : fail('nothing consults the visual viewport; page zoom can still engulf the screen');
-  /visualViewport\.addEventListener\(\s*["']resize/.test(js)
-    ? ok('and re-sized as the magnification changes')
-    : fail('the cap is computed once and never again');
-
   const css = fs.readFileSync(path.join(WEB, 'board.css'), 'utf8');
-  /--slate-cap/.test(css) && /min\(clamp\(/.test(css)
-    ? ok('the height is capped by it')
-    : fail('the surface height ignores the cap');
-  /--gap-zoom/.test(css)
-    ? ok('and so is the width, so a strip of page survives at every zoom')
-    : fail('the width ignores the cap: the surface can still reach both edges');
+  const slate = (css.match(/#writer #slate\s*\{[^}]*\}/) || [''])[0];
+  !/--slate-cap|visualViewport/.test(slate)
+    ? ok('the surface height is not clamped to the visible window')
+    : fail('the surface is capped against the viewport again: zooming into the '
+           + 'writing will do nothing');
+  const wr = (css.match(/#writer\s*\{[^}]*\}/) || [''])[0];
+  !/--gap-zoom/.test(wr)
+    ? ok('and neither is its width')
+    : fail('the width is capped against the viewport again');
+  /--gap:\s*max\(/.test(wr)
+    ? ok('while the strip of page down each side survives, to put a thumb on')
+    : fail('the writing surface runs to the edge of the glass again');
 }
 
 console.log(errors.length ? '\n' + errors.length + ' FAILURES'

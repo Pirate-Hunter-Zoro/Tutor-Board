@@ -511,7 +511,7 @@ body.tools-out { padding-bottom: 5.5rem; }
    surface running to the edge of the glass there was nowhere on that screenful
    to put a thumb and scroll the lesson. It is the margin you scroll in. */
 #writer {
-  --gap: max(2.5rem, var(--gap-zoom, 0px), env(safe-area-inset-left));
+  --gap: max(2.5rem, env(safe-area-inset-left));
   --room: 22rem;
   --bleed: min(0px, max(calc(50% - 50vw + var(--gap)), calc(-1 * var(--room))));
   margin: .5rem var(--bleed) 2.2rem;
@@ -546,13 +546,9 @@ body.tools-out { padding-bottom: 5.5rem; }
    anything sized in it spends its first screenful underneath the browser chrome.
    The `vh` line stays as the fallback for anything that does not know `svh` --
    a browser that ignores the second declaration keeps the first. */
-/* `--slate-cap` is set from the visual viewport -- see `fitWriter` -- and is
-   how the surface is kept smaller than what can actually be seen once the page
-   has been pinch-zoomed. It defaults to a value that never binds, so a browser
-   with no visual-viewport API gets exactly the old height. */
 #writer #slate {
   height: clamp(18rem, 68vh, 60rem);
-  height: min(clamp(18rem, 74svh, 60rem), var(--slate-cap, 400vh));
+  height: clamp(18rem, 74svh, 60rem);
 }
 
 #btn-clip {
@@ -587,34 +583,42 @@ body.tools-out .jump { bottom: calc(6.5rem + env(safe-area-inset-bottom)); }
    moves the visual one. Left and top stay at zero and the transform does the
    work, including a counter-scale so the button is the same size under a thumb
    however far the page has been zoomed in. */
+/* It is a rescue, so it has to be findable in the state it rescues you from --
+   which is one where the screen is full of something else. A dim circle was
+   neither visible nor self-explanatory: it read as a smudge and said nothing
+   about what pressing it would do. It carries its own name and the board's
+   accent, like every other control that acts rather than describes. */
 #panic {
   position: fixed; left: 0; top: 0; z-index: 62;
   transform-origin: 0 0;
-  width: 2.6rem; height: 2.6rem; padding: 0;
-  display: flex; align-items: center; justify-content: center;
-  border-radius: 50%;
-  border: 1px solid var(--rule);
-  background: color-mix(in srgb, var(--paper) 76%, transparent);
-  backdrop-filter: blur(8px);
-  color: var(--ink-3);
-  opacity: .4;
+  display: flex; align-items: center; gap: .35rem;
+  padding: .42rem .7rem .42rem .55rem;
+  border-radius: 1.4rem;
+  border: 1px solid color-mix(in srgb, var(--paper) 55%, var(--accent));
+  background: var(--accent);
+  color: var(--paper);
+  font: 700 .74rem var(--ui);
+  letter-spacing: .02em;
+  box-shadow: 0 4px 14px rgba(0,0,0,.3);
   cursor: grab;
   /* The drag is ours; the browser must not take the gesture as a scroll. */
   touch-action: none;
   -webkit-user-select: none; user-select: none;
   -webkit-tap-highlight-color: transparent;
-  transition: opacity .18s, color .18s, box-shadow .18s;
+  transition: box-shadow .18s, filter .18s;
 }
-#panic svg { width: 1.2rem; height: 1.2rem; display: block; }
-#panic:hover { opacity: 1; color: var(--ink); }
+#panic svg { width: .95rem; height: .95rem; display: block; flex: none; }
+#panic:hover { filter: brightness(1.1); }
 /* Held down: it has become a thing being moved, and must look like one before
    the finger travels, or the first drag reads as a tap that did nothing. */
 #panic.holding {
-  opacity: 1; color: var(--ink); cursor: grabbing;
-  box-shadow: 0 0 0 5px color-mix(in srgb, var(--ask) 28%, transparent);
+  cursor: grabbing;
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 32%, transparent),
+              0 4px 14px rgba(0,0,0,.3);
 }
-/* Tapped: acknowledge it, because most of what the tap does happens off screen. */
-#panic.hit { opacity: 1; color: var(--accent); }
+/* Tapped: acknowledge it, because what the tap does is a change of scale and
+   not a change of content, which is easy to miss on a page you were lost in. */
+#panic.hit { filter: brightness(1.25); }
 
 /* ---------- what the student said, in the lesson ---------- */
 .mine .signal {

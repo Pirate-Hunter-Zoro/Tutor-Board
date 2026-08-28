@@ -257,27 +257,47 @@ const heelSwipe = (id, x, y, dx, dy) => {
       : fail('the paused stroke did not survive the hand');
   }
 
-  // Size is the other signal, and the only one available when no pen has been
-  // near: a fingertip is 10-25 CSS pixels across and a palm is not.
+  // The pen is the ONLY signal. There was a contact-size test here as well --
+  // a palm's patch is wider than a fingertip's -- and it took the scroll and the
+  // pinch with it: what Safari reports for a fingertip's width is not the small
+  // number the specification's examples suggest, so the threshold meant to catch
+  // a heel of a hand caught ordinary fingers, and the surface stopped answering
+  // touch at all. A signal that cannot be calibrated without the hardware in
+  // front of you does not belong in the path that decides whether the surface
+  // responds.
   {
     await sleep(700);
     const v0 = slate.view();
-    const n0 = slate.strokes();
     heelSwipe(41, 500, 300, -8, -5);
     const v1 = slate.view();
-    (v1.ox === v0.ox && v1.oy === v0.oy && slate.strokes() === n0)
-      ? ok('a contact the size of a palm is ignored even with no pen in sight')
-      : fail('a palm-sized contact still drove the surface');
+    (v1.ox !== v0.ox || v1.oy !== v0.oy)
+      ? ok('with no pen in sight, a broad contact still pans — size is not judged')
+      : fail('contact size is being judged again; this is what killed the scroll');
   }
 
-  // A fingertip must survive that test, or the scroll gesture is gone.
+  // And an ordinary fingertip, for the avoidance of doubt.
   {
     const v0 = slate.view();
     swipe(43, 500, 300, -8, -5);
     const v1 = slate.view();
     (v1.ox !== v0.ox || v1.oy !== v0.oy)
-      ? ok('while an ordinary fingertip still pans, so the gesture is not lost')
-      : fail('palm rejection ate the finger scroll as well');
+      ? ok('as does an ordinary fingertip')
+      : fail('palm rejection ate the finger scroll');
+  }
+
+  // Every rule that refuses a touch has to expire, or a lift the surface never
+  // saw takes the surface away for good. This is the failure that cost an
+  // evening: `penDown` latched true and nothing a hand did was allowed to pan,
+  // pinch or write, with nothing on screen to say it was a latch.
+  {
+    const js = fs.readFileSync(path.join(WEB, 'slate-core.js'), 'utf8');
+    /PEN_STALE/.test(js) && /PALM_STALE/.test(js)
+      ? ok('and both refusals expire on their own')
+      : fail('a refusal here can outlive the contact that caused it');
+    /window\.addEventListener\(t, function \(ev\) \{\s*if \(ev\.pointerType === "pen"\) penDown = false;/
+      .test(js)
+      ? ok('a pen lifted outside the surface still gives the hand its glass back')
+      : fail('only the canvas can clear the pen; a nib lifted past its edge latches');
   }
 
   // And the usual order of events: the hand lands BEFORE the nib does, so a
