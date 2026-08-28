@@ -287,10 +287,21 @@ function create(opts) {
     return (penDown && since < PEN_STALE) || since < PALM_MS;
   }
 
-  function isPalm(id) {
-    var at = palms[id];
+  /* A PEN is never a palm, whatever the id says.
+
+     Pointer ids are small integers and the platform reuses them, so a palm's id
+     -- especially one whose lift the surface never saw, and which is therefore
+     still sitting in the map -- comes back a minute later attached to the
+     Pencil. Both the move handler and the lift handler then treated a real
+     stroke as a hand: the samples were dropped, and worse, the lift returned
+     early and the stroke that had just been written was never committed. That
+     is a mark that appears under the nib and is gone by the time the hand
+     moves, which is as close to unusable as this gets. */
+  function isPalm(ev) {
+    if (!ev || ev.pointerType === "pen") return false;
+    var at = palms[ev.pointerId];
     if (!at) return false;
-    if (Date.now() - at > PALM_STALE) { delete palms[id]; return false; }
+    if (Date.now() - at > PALM_STALE) { delete palms[ev.pointerId]; return false; }
     return true;
   }
   var saveTimer = null, liveTimer = null, rafPending = false;
@@ -969,7 +980,7 @@ function create(opts) {
 
   sheet.addEventListener("pointermove", function (ev) {
     if (ev.pointerType === "pen") lastPenAt = Date.now();
-    if (isPalm(ev.pointerId)) return;
+    if (isPalm(ev)) return;
     if (touches[ev.pointerId]) {
       var prev = touches[ev.pointerId];
       touches[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
@@ -1084,7 +1095,8 @@ function create(opts) {
 
   function endStroke(ev) {
     if (ev && ev.pointerType === "pen") penDown = false;
-    if (ev && palms[ev.pointerId]) { delete palms[ev.pointerId]; return; }
+    if (isPalm(ev)) { delete palms[ev.pointerId]; return; }
+    if (ev && ev.pointerType === "pen") delete palms[ev.pointerId];
     /* fall through: a contact that was never a palm ends normally */
     if (ev && touches[ev.pointerId]) {
       delete touches[ev.pointerId];
@@ -1278,6 +1290,7 @@ function create(opts) {
   /* ---------------------------------------------------------------- save */
   function markDirty() {
     dirty = true;
+    changeSeq++;
     dropInk();          /* the writing moved, so its extent did */
     savedTag.textContent = "…";
     savedTag.classList.add("busy");
@@ -1291,8 +1304,35 @@ function create(opts) {
     }
   }
 
+  /* One save on the wire at a time, and a count of how many times the page has
+     changed.
+
+     Two things were wrong here, and both of them lose ink quietly, which is the
+     one thing this must not do. A save builds its body when it is CALLED, so two
+     overlapping autosaves are two different versions of the same page racing
+     each other to the disk -- and the version that lands is whichever the server
+     happens to write second, which on a flaky link is regularly the older and
+     smaller one. `board.log` showed it plainly: 111 strokes saved, then 106,
+     then 111 again. And any save completing cleared `dirty`, so once a stale one
+     had landed last, nothing scheduled another and the disk kept the smaller
+     page for good.
+
+     So: never two in flight, and `dirty` is only cleared if the page has not
+     changed since the body went out. */
+  var saving = null;
+  var pendingSave = false;
+  var changeSeq = 0;
+
   function save(send, quiet) {
+    if (saving) {
+      /* An autosave can simply wait its turn: the next one carries everything
+         this one would have. A send is a person pressing a button and has to
+         actually happen, so it queues behind what is already going. */
+      if (!send) { pendingSave = true; return saving; }
+      return saving.then(function () { return save(send, quiet); });
+    }
     var p = page();
+    var at = changeSeq;
     savedTag.classList.add("busy");
     var body = { page: current + 1, w: p.w, h: p.h,
                  strokes: p.strokes.map(stripDense),
@@ -1304,14 +1344,19 @@ function create(opts) {
       if (ctx.turn) body.turn = ctx.turn;
       if (ctx.answers) body.answers = ctx.answers;
     }
-    return fetch("/slate/save", {
+    var done = fetch("/slate/save", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }).then(function (r) { return r.json(); }).then(function (res) {
-      dirty = false;
-      savedTag.classList.remove("busy");
-      savedTag.textContent = send ? "sent" : "saved";
+      /* Only if nothing was written while this was in the air. Otherwise the
+         page on disk is already behind the page in hand, and saying "saved" is
+         a lie that stops the next save from happening. */
+      if (changeSeq === at) {
+        dirty = false;
+        savedTag.classList.remove("busy");
+        savedTag.textContent = send ? "sent" : "saved";
+      }
       if (send) {
         lastLiveSend = Date.now();
         if (!quiet) toast(res && res.rev > 1 ? "answer updated" : "sent for review");
@@ -1321,6 +1366,14 @@ function create(opts) {
       savedTag.classList.remove("busy");
       savedTag.textContent = "offline";
     });
+    saving = done.then(function () {
+      saving = null;
+      if (pendingSave || changeSeq !== at) {
+        pendingSave = false;
+        save(false, true);
+      }
+    });
+    return saving;
   }
 
   function stripDense(s) {

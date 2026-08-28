@@ -359,6 +359,45 @@ const heelSwipe = (id, x, y, dx, dy) => {
              + 'rubber is still testing points instead of the line between them');
   }
 
+  // A pen is never a palm, whatever its id says. Pointer ids are small integers
+  // and the platform reuses them, so a palm's id -- especially one whose lift the
+  // surface never saw, and which is therefore still in the map -- comes back
+  // attached to the Pencil. The lift handler then returned early and the stroke
+  // that had just been written was never committed: a mark that appears under the
+  // nib and is gone by the time the hand moves.
+  {
+    slate.finger('scroll');
+    slate.tool('pen');
+    slate.clear();
+    // Strand a palm on id 77, by letting a touch land while the pen is at work
+    // and never lifting it.
+    pen('pointerdown', 100, 100, 77);
+    pen('pointermove', 130, 130, 77);
+    pen('pointerup', 130, 130, 77);
+    touch('pointerdown', 600, 400, 77);       // judged a palm: the pen just went
+    // ...and no pointerup for it, ever.
+
+    const n0 = slate.strokes();
+    pen('pointerdown', 200, 200, 77);         // the same id, now a Pencil
+    for (let i = 1; i <= 12; i++) pen('pointermove', 200 + i * 9, 200 + i * 4, 77);
+    pen('pointerup', 308, 248, 77);
+    slate.strokes() === n0 + 1
+      ? ok('a pen stroke on a recycled palm id is still committed')
+      : fail('the stroke was thrown away because its id had once been a hand');
+  }
+
+  // Ink must not be lost to two saves racing each other to the disk.
+  {
+    const js = fs.readFileSync(path.join(WEB, 'slate-core.js'), 'utf8');
+    /if \(saving\)/.test(js)
+      ? ok('only one save is ever on the wire')
+      : fail('overlapping autosaves can still land out of order, and the older '
+             + 'one wins');
+    /if \(changeSeq === at\)/.test(js)
+      ? ok('and a save only clears the dirty flag if nothing changed while it flew')
+      : fail('a stale save can report "saved" and stop the next one happening');
+  }
+
   // The board asks the surface whether a hand is mid-answer before it moves the
   // page. A surface that cannot answer is a page that scrolls under a pen.
   typeof slate.busy === 'function'
