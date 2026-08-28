@@ -1774,7 +1774,13 @@ class Handler(BaseHTTPRequestHandler):
                     "t": time.time(),
                     "iso": time.strftime("%Y-%m-%d %H:%M:%S"),
                     "from": "student",
-                    "text": "[uploaded] " + ", ".join(saved),
+                    # A picture has no sentence in it, so its inbox line has to
+                    # carry its own meaning -- the same reason a `begin` signal
+                    # spells itself out. A tutor woken by a bare filename has no
+                    # reason to think opening it is the next thing to do.
+                    "text": ("[uploaded] %s — the student handed this over for you "
+                             "to look at. Open the file below and answer what is "
+                             "in it." % ", ".join(saved)),
                     "files": saved,
                     "read": False,
                 }

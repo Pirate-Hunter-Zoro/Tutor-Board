@@ -186,6 +186,25 @@ If the marks are a correction rather than a question — a crossing-out, a "this
 should be n−1" — check it. If they are right, say so plainly and fix the card; a
 corrected card keeps its place in the transcript.
 
+## When they hand you a picture
+
+The board takes photographs and PDFs — a page of a book, a scan of paper working,
+a screenshot of the exercises they want to do next. One arrives in the inbox as a
+line reading `[uploaded] …` with a `file:` path under it, and the path is the
+whole point: **open the file.** `board eyes <path>` reads it if you cannot read an
+image directly.
+
+A picture is a message, and it is nearly always the student telling you what they
+want to happen next rather than answering anything. Treat it as an interruption
+in the same way as marks on a card: look at it, say in one line what you can see
+in it, and act on what it asks for. A screenshot of four exercises means *these
+are the ones I want to work through* — pick from them and say which and why,
+exactly as you would from a section's own exercise list.
+
+Never let one sit unremarked. A student who has handed you something and heard
+nothing back has no way to tell whether it arrived, and the next thing they do is
+send it again.
+
 ## Skipping
 
 The answer block carries **skip this one**. When a skip arrives:

@@ -745,7 +745,32 @@ body[data-mode2="code"] { padding-bottom: 5rem; }
   display: flex; align-items: center; justify-content: space-between;
   padding: .7rem .9rem; border-bottom: 1px solid var(--rule);
 }
-.scratch-foot { border-bottom: 0; border-top: 1px solid var(--rule); font-size: .74rem; }
+.scratch-foot {
+  border-bottom: 0; border-top: 1px solid var(--rule); font-size: .74rem;
+  display: block;
+}
+#btn-add-file {
+  display: block; width: 100%; margin-bottom: .5rem;
+  font: 600 .82rem var(--ui); cursor: pointer;
+  padding: .55rem .8rem; border-radius: .45rem;
+  border: 1px solid var(--accent);
+  background: var(--accent); color: var(--paper);
+}
+#btn-add-file:hover { filter: brightness(1.1); }
+
+/* The way back to a pen when nothing is owed. Quiet, because most of the time
+   the tutor has just asked something and the surface is already open -- and
+   plainly a button, because the moment it is wanted is a moment of not being
+   able to do the obvious thing. */
+#reopen {
+  display: block; margin: 0 0 2.1rem;
+  font: 600 .82rem var(--ui); cursor: pointer;
+  padding: .55rem .95rem; border-radius: 1.4rem;
+  border: 1px dashed var(--rule);
+  background: transparent; color: var(--ink-2);
+}
+#reopen:hover { border-style: solid; border-color: var(--accent);
+                color: var(--accent); }
 .scratch-head button { border: 0; background: none; font: inherit; cursor: pointer; color: var(--ink-2); }
 #scratch-list { flex: 1; overflow-y: auto; padding: .6rem; }
 #scratch-list a { display: block; margin-bottom: .7rem; color: var(--ink); text-decoration: none; }
@@ -806,7 +831,7 @@ body.viewing { overflow: hidden; }
 /* ---------- print ---------- */
 @media print {
   #bar, #drawbar, #composer, #scratch, .jump, .drop, .finish, .pushed,
-  #panic, #viewer { display: none !important; }
+  #panic, #reopen, #viewer { display: none !important; }
   body { background: #fff; color: #000; }
   #board { max-width: none; padding: 0; }
   .card { break-inside: avoid; animation: none; }

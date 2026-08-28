@@ -257,6 +257,50 @@ try:
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             timeout=60)
     check("a read message does not wake it again", p_wait.returncode == 2)
+
+    # ---- a picture is a message too --------------------------------------
+    #
+    # A screenshot of the next four exercises is the student saying "these are
+    # the ones I want to do", and in a mathematics course it is the ONLY way to
+    # say it: there is no text box, and the slate answers a question rather than
+    # starting a subject. So it has to reach the tutor, and it has to reach it
+    # meaning something -- a wake-up whose whole content is a filename has told
+    # the assistant nothing, exactly as the bare "[begin]" tag did.
+    boundary = "----tutorboardtest"
+    payload = (
+        "--%s\r\n"
+        'Content-Disposition: form-data; name="f0"; filename="exercises.png"\r\n'
+        "Content-Type: image/png\r\n\r\n" % boundary
+    ).encode("utf-8") + b"\x89PNG\r\n\x1a\n" + ("\r\n--%s--\r\n" % boundary).encode("utf-8")
+    req = urllib.request.Request(
+        BASE + "/upload", method="POST", data=payload,
+        headers={"Content-Type": "multipart/form-data; boundary=" + boundary})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        up = json.loads(r.read().decode("utf-8"))
+    check("a photograph can be handed over", up.get("ok") and up.get("saved"))
+    check("and is on disk where the tutor can open it",
+          up.get("saved") and os.path.exists(os.path.join(repo.uploads, up["saved"][0])))
+
+    with open(repo.messages_path, "r", encoding="utf-8") as fh:
+        notes = [json.loads(l) for l in fh if l.strip()]
+    shot = [m for m in notes if m.get("files")]
+    check("it reaches the inbox, which is what wakes the tutor", len(shot) == 1)
+    check("unread, so it wakes one that is already waiting",
+          shot and shot[0].get("read") is False)
+    shot_text = shot[0].get("text", "") if shot else ""
+    check("the line names the file", "exercises.png" in shot_text)
+    check("and says what to do with it, because a picture has no sentence in it",
+          "open the file" in shot_text.lower() and "look at" in shot_text.lower())
+    check("the line is not just a filename",
+          len(shot_text.strip()) > len("[uploaded] exercises.png") + 20)
+
+    # And the tutor is TOLD that any of this happens.
+    with open(os.path.join(ROOT, "TEACHING.md"), "r", encoding="utf-8") as fh:
+        method = fh.read().lower()
+    check("the method tells the tutor pictures arrive and must be opened",
+          "uploaded" in method and "board eyes" in method)
+    check("and that one must never sit unremarked",
+          "unremarked" in method or "never let one sit" in method)
 finally:
     httpd.shutdown()
     shutil.rmtree(tmp, ignore_errors=True)

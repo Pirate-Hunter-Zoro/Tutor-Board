@@ -111,6 +111,15 @@
     <span id="busy-text">the tutor is writing</span>
     <span id="busy-since" class="busy-since"></span>
   </div>
+  <!-- The surface closes when the tutor says the answer is right, because a
+       permanent writing box in a lesson with nothing to answer is furniture.
+       But "right, now strike that line" is a correct card that still wants a
+       pen, and so is remembering three more exercises to mention. Without this
+       there is no way to write anything at all until the tutor happens to ask
+       another question -- a dead end reached by finishing an exercise, which is
+       the worst possible moment for one. -->
+  <button id="reopen" type="button" hidden>write on the board</button>
+
   <div id="empty" class="empty">
     <p id="empty-lead">Nothing on the board yet.</p>
     <p class="muted">The tutor writes here. It appears the moment it is written.</p>
@@ -244,8 +253,16 @@
     <button id="btn-scratch-close">✕</button>
   </div>
   <div id="scratch-list"></div>
-  <div class="scratch-foot muted">Drop a photo or a PDF anywhere on this page, or write on the
-    <a href="/slate">slate</a>.</div>
+  <!-- The file input has been in the page from the beginning and nothing ever
+       opened it. Dropping a file and pasting one both worked, and neither is a
+       gesture that exists on a tablet -- so handing the tutor a screenshot of
+       the next three exercises was, in practice, impossible from the device the
+       board is for. -->
+  <div class="scratch-foot">
+    <button id="btn-add-file" type="button">add a photo or a PDF</button>
+    <span class="muted">It goes to the tutor with the lesson. You can also drop
+      one anywhere on this page, or write on the <a href="/slate">slate</a>.</span>
+  </div>
 </aside>
 
 <!-- Maths: answering means writing, and the writing happens here, under the

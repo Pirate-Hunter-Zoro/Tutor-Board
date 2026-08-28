@@ -282,6 +282,69 @@ const withNew = Object.assign({}, lesson, {
     : fail('the after-send scroll is not anchored under the writing');
 }
 
+// 6c. Finishing an exercise must not leave you with nowhere to write.
+//
+// The surface closes when the tutor says the answer is right, which is correct
+// almost always and a dead end the rest of the time. "Correct — now strike that
+// line from it" is a `correct` card that still wants a pen. So is remembering
+// four more exercises you meant to mention. Reaching a state with nowhere to
+// write, by getting an exercise RIGHT, is the worst possible moment for one, and
+// in a mathematics course there is no text box to fall back on either.
+{
+  const settled = Object.assign({}, lesson, {
+    cards: lesson.cards.concat([card('0009', 'correct', 'that is the proof', 9)]),
+  });
+  es.onmessage({ data: JSON.stringify(settled) });
+
+  const writer = doc.getElementById('writer');
+  const reopen = doc.getElementById('reopen');
+  writer.hidden
+    ? ok('a correct answer closes the writing surface, as it should')
+    : fail('the surface stays open for ever once opened; it is furniture');
+  reopen
+    ? ok('and the board carries a way to open it again')
+    : fail('there is no way back to a pen: finishing an exercise is a dead end');
+  reopen && !reopen.hidden
+    ? ok('offered exactly where the surface was')
+    : fail('the way back exists in the markup but is never shown');
+
+  reopen.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  !writer.hidden
+    ? ok('and asking for it brings the surface back')
+    : fail('the button was pressed and no surface appeared');
+
+  // It survives the next payload -- a heartbeat must not take it away again.
+  es.onmessage({ data: JSON.stringify(settled) });
+  !writer.hidden
+    ? ok('and it stays through the payloads that follow')
+    : fail('the surface was withdrawn again by the next heartbeat');
+
+  // A new question supersedes the request: the surface would be open anyway,
+  // and the request must not outlive what it was made for.
+  es.onmessage({ data: JSON.stringify(Object.assign({}, settled, {
+    cards: settled.cards.concat([card('0010', 'question', 'Exercise 1.4', 10)]),
+  })) });
+  !writer.hidden
+    ? ok('a new question opens it on its own account')
+    : fail('a new question left no surface to answer it on');
+}
+
+// 6d. And a picture can be handed over from the device. The file input has been
+// in the page from the beginning and nothing ever opened it -- dropping a file
+// and pasting one both worked, and neither is a gesture that exists on a tablet.
+{
+  const add = doc.getElementById('btn-add-file');
+  const file = doc.getElementById('file');
+  add ? ok('there is a control for adding a photograph')
+      : fail('the only ways to hand over a picture are drag-and-drop and paste');
+  let opened = false;
+  if (file) file.click = () => { opened = true; };
+  if (add) add.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  opened
+    ? ok('and pressing it opens the picker')
+    : fail('the control does not reach the file input');
+}
+
 // 7. The writing surface must NOT be capped against what can be seen.
 //
 // It was, once, and the cap was a fraction of the visible window -- so it shrank

@@ -42,6 +42,8 @@ var els = {
   hwBuild: document.getElementById("hw-build"),
   jump: document.getElementById("jump"),
   panic: document.getElementById("panic"),
+  reopen: document.getElementById("reopen"),
+  addFile: document.getElementById("btn-add-file"),
   scratch: document.getElementById("scratch"),
   scratchList: document.getElementById("scratch-list"),
   writer: document.getElementById("writer"),
@@ -737,6 +739,17 @@ function render(data) {
     if (c.kind === "correct" && c.mtime >= lastQuestion) settled = true;
   });
   var owed = !codeMode && !!newestQ && !settled;
+
+  /* And asked for. The surface closes when the tutor says the answer is right,
+     which is correct almost always and a dead end the rest of the time: "right,
+     now strike that line" is a `correct` card that still wants a pen, and so is
+     wanting to tell the tutor about three more exercises. Reaching a state with
+     nowhere to write, by finishing an exercise, is the worst possible moment for
+     one. The request lasts until the tutor asks something else, at which point
+     the surface would be open anyway. */
+  if (reopenedFor !== null && reopenedFor !== (newestQ || "")) reopenedFor = null;
+  if (!codeMode && reopenedFor !== null && !data.archived) owed = true;
+
   pinnedTo = owed ? newestQ : null;
 
   /* A sent answer keeps the block open, because the tutor's next move is usually
@@ -777,6 +790,13 @@ function render(data) {
   /* A past lesson is read only: no pen, no box, nothing to send into a session
      that has already been filed. */
   placeWriter(owed && !data.archived, qNode);
+  /* Offered exactly when there is no surface to write on: in a maths lesson the
+     tutor has written something, and nothing is owed. */
+  if (els.reopen) {
+    els.reopen.hidden = codeMode || !!data.archived || !!reading
+                        || !(data.cards || []).length
+                        || !els.writer.hidden;
+  }
   /* A question in a code project owes an answer just as much as one in a maths
      course; what differs is how it is given. `owed` stays false there because it
      governs the writing surface, so this is decided separately. */
@@ -1808,6 +1828,9 @@ var pinnedTo = null;
    whether it is starting an answer or correcting one. */
 var answering = { question: null, turn: null };
 var loadedTurn = null;
+/* Which question the student asked for the surface back on, or null for "not
+   asked". Empty string means "asked, on a lesson with no open question". */
+var reopenedFor = null;
 
 var SIGNAL_LABEL = { done: "ready to check", help: "needs help", confused: "confused",
                      begin: "asked the tutor to begin", skip: "skipped this one" };
@@ -2232,6 +2255,29 @@ els.begin.onclick = function () {
     els.begin.textContent = "ask the tutor to begin";
   });
 };
+if (els.reopen) {
+  els.reopen.onclick = function () {
+    var q = null;
+    (lastLive && lastLive.cards || []).forEach(function (c) {
+      if (c.kind === "question") q = c.id;
+    });
+    reopenedFor = q || "";
+    els.reopen.hidden = true;
+    if (lastLive) render(lastLive);
+    /* Straight to it: the button was pressed because there was something to
+       write, and hunting for the surface that just appeared is not part of it. */
+    setTimeout(function () {
+      if (!els.writer.hidden && els.writer.scrollIntoView) {
+        els.writer.scrollIntoView({ block: "center", behavior: "smooth" });
+      }
+    }, 60);
+  };
+}
+
+if (els.addFile) {
+  els.addFile.onclick = function () { els.file.click(); };
+}
+
 document.getElementById("btn-scratch").onclick = function () { els.scratch.hidden = !els.scratch.hidden; };
 document.getElementById("btn-scratch-close").onclick = function () { els.scratch.hidden = true; };
 document.getElementById("btn-history").onclick = openHistory;
