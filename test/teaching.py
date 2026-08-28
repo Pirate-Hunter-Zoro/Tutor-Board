@@ -77,6 +77,13 @@ for phrase, why in [
     ("follow that pointer", "and the tutor follows that pointer for what is next"),
     ("do not choose an agenda", "and asks rather than choosing its own work"),
     ("goes with a commit", "and finishing work includes writing it down"),
+    # Not every project wants a tutor. One line of configuration, and the tutor
+    # does the work instead of setting it -- without any of the rest of a turn
+    # changing, which is why it is a line of configuration and not a mode.
+    ('"stance": "do"', "a repository can ask for the work to be done, not taught"),
+    ("declared, never inferred", "and that is never guessed at"),
+    ("still one card, still short", "a doing turn is still one short card first"),
+    ("say what you did not verify", "and says what it has not actually run"),
 ]:
     check("the method states: " + why, phrase.lower() in text.lower())
 

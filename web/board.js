@@ -1641,7 +1641,18 @@ var SIGNAL_LABEL = { done: "ready to check", help: "needs help", confused: "conf
    experience from one you cannot. */
 var busySince = 0;
 var busyTurn = -1;
+var busyFrom = 0;
 var busyTimer = null;
+
+/* The newest card's mtime -- a correction to an existing card counts as much as
+   a new one, since either way something appeared for them to read. */
+function newestCard(data) {
+  var newest = 0;
+  (data.cards || []).forEach(function (c) {
+    if (c.mtime > newest) newest = c.mtime;
+  });
+  return newest;
+}
 
 function paintBusy(data) {
   if (!els.busy) return;
@@ -1659,6 +1670,18 @@ function paintBusy(data) {
   if (busyTurn !== turn || !busySince) {
     busyTurn = turn;
     busySince = Date.now();
+    busyFrom = newestCard(data);
+  }
+
+  /* The card is what they are waiting for, and a turn does not end when the card
+     lands -- the tutor goes on to verify, file, and write the handoff, and the
+     daemon says "working" for all of it. So this counted on for minutes after
+     the answer was already on screen, which is how a 34-second card came to look
+     like a four-minute wait. Once something new is on the board, stop talking. */
+  if (newestCard(data) > busyFrom) {
+    els.busy.hidden = true;
+    if (busyTimer) { clearInterval(busyTimer); busyTimer = null; }
+    return;
   }
   /* Deliberately NOT inside #cards. That container is reconciled -- keyed nodes
      are matched and moved in place -- and an unkeyed element sitting among them
@@ -1676,6 +1699,11 @@ function tickBusy() {
   var secs = Math.max(0, Math.round((Date.now() - busySince) / 1000));
   els.busySince.textContent = secs < 60 ? secs + "s"
     : Math.floor(secs / 60) + "m " + (secs % 60) + "s";
+  /* Past a couple of minutes, silence stops being reassuring. Say that this one
+     is long rather than letting the number say it alone. */
+  els.busyText.textContent = secs > 150
+    ? "the tutor is still writing — this one is taking a while"
+    : "the tutor is writing";
 }
 
 function placeCodeAnswer(owed, questionNode, card) {

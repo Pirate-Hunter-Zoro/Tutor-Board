@@ -101,6 +101,29 @@ check("an agent with one recipe still gets the cold prompt on its first turn",
 
 check("the config carries a session length", "session_turns" in tutor.DEFAULT_CONFIG)
 
+# --- the stance a repository declares --------------------------------------
+# `stance: do` is what a project sets when it wants the work done rather than
+# taught. It is never guessed: writing the code for somebody who wanted to learn
+# it is the one mistake here the next card cannot undo.
+import importlib.machinery as _m  # noqa: E402
+import importlib.util as _u       # noqa: E402
+
+_loader = _m.SourceFileLoader("serve_mod", os.path.join(ROOT, "serve.py"))
+_spec = _u.spec_from_loader("serve_mod", _loader)
+serve_mod = _u.module_from_spec(_spec)
+_loader.exec_module(serve_mod)
+
+teach = serve_mod.code_sense("", "teach")
+do = serve_mod.code_sense("", "do")
+check("a teaching project is told never to write the code",
+      "you never write it" in teach and "own editor" in teach)
+check("a doing project is told to write it", "you write the code" in do.lower())
+check("and to run what needs running", "run what needs running" in do)
+check("but still one card, and still first",
+      "one card" in do.lower() and "before the rest" in do)
+check("and the default is to teach, whatever is passed",
+      "never write it" in serve_mod.code_sense("", None))
+
 # --- board recap ----------------------------------------------------------
 tmp = tempfile.mkdtemp(prefix="tutor-tokens-")
 try:

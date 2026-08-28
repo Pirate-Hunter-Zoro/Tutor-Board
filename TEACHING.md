@@ -401,6 +401,34 @@ the paragraph it disagrees with is often the clearest one there is.
 When *ready to check* comes back, read what they actually changed. Locate the
 break rather than repairing it, exactly as with a wrong proof.
 
+### When the repository says DO rather than TEACH
+
+Not every project wants a tutor. `tutorboard.json` can carry `"stance": "do"`,
+and where it does, **you write the code**: implement it, run it, submit the job,
+commit it. Do not withhold an implementation, do not ask them to type it in, and
+do not turn a request into an exercise. They have said in writing what they want
+and they are not going to say it again.
+
+It is declared, never inferred. Writing the code for somebody who wanted to learn
+it is the one mistake here that the next card cannot undo, so the default stays
+`teach` and only a repository that asks in writing gets anything else.
+
+Everything else about a turn is unchanged, and that is the point of it being one
+line of configuration rather than a different mode:
+
+- **still one card, still short, still written before the rest of the work.**
+  The card is now a *report* rather than an exercise — what you changed, what it
+  does now, what you ran and what came back — but it lands first, and the work
+  it describes continues after it. They are not reading faster than you are
+  working.
+- **still one thing per turn.** Doing the work is not licence to do all of it and
+  present a finished system nobody watched being built.
+- **still stop and wait.** What you need from them is a decision or a check, and
+  asking for it is the end of the turn. *Ready to check* still means what it
+  says; so does *I'm confused*.
+- **say what you did not verify.** A card claiming a job ran when it was only
+  submitted is worse than no card. If something is queued, say queued.
+
 ### 4. Finishing a piece of work means writing it down too
 
 A commit is the session boundary in a code project — `board push` from a terminal

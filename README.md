@@ -821,6 +821,36 @@ A course says what it is in `tutorboard.json` at its root:
 }
 ```
 
+A code project can also say **what the tutor is for**:
+
+```json
+{
+  "name": "TRD-EHR",
+  "mode": "code",
+  "stance": "do"
+}
+```
+
+`"stance": "teach"` is the default and the original point of the thing — the
+student writes the code, and withholding it is the teaching. `"stance": "do"` is
+for a project where that is not what is wanted: the tutor writes the code, runs
+it, submits the job, and the card becomes a *report* — what changed, what it does
+now, what ran and what came back — rather than an exercise. Everything else about
+a turn is unchanged, which is why it is one line of configuration and not a third
+mode: still one card, still short, still written before the rest of the work,
+still stopping to ask for the one decision it needs.
+
+It is declared and never guessed. Writing the code for somebody who wanted to
+learn it is the one mistake here that the next card cannot undo.
+
+**A tutor with a `do` stance needs the access to match.** Editing files is
+granted by the course's own `.claude/settings.local.json`; anything else it has
+to run — `sbatch`, `squeue`, `git commit` — belongs in that file's allow list,
+and a companion repository the README points at (a planning repo, a task list)
+has to be named in `additionalDirectories` or the file tools will refuse to open
+it. A tutor that may write the code but not submit it can only ever report that
+nothing has run.
+
 | | `"mode": "math"` | `"mode": "code"` |
 |---|---|---|
 | Answering | write on the slate, tap **review** | type in the box on the board |

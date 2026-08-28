@@ -286,7 +286,7 @@ SIGNAL_SENSE = {
 }
 
 
-def code_sense(label):
+def code_sense(label, stance="teach"):
     """Where a code project says what comes next: its README, and what it points at.
 
     This is the whole prompt in a headless session, so it carries the shape as
@@ -308,10 +308,24 @@ def code_sense(label):
         "names nothing, or what it names is missing, ask them in your first card "
         "rather than picking an agenda of your own.\n\n"
         + where +
-        "Then write ONE card saying what to change next: the file, what it has "
-        "to do, and how they will know it works. They write the code in their "
-        "own editor -- you never write it and never put a solution on the board. "
-        "One change per turn, then stop and wait for 'ready to check'."
+        (
+            # The repository has said, in writing, that it wants the work done
+            # rather than taught. Nothing else about a turn changes: one card,
+            # short, card first, and it still stops and waits.
+            "This repository's stance is DO, not teach: you write the code "
+            "yourself, run what needs running, and commit when it is right. Do "
+            "not withhold an implementation and do not ask them to type it. The "
+            "card is a report, not an exercise: what you changed, what it does "
+            "now, what you ran and what came back, and the one decision or "
+            "check you need from them. Still one card, still short, still "
+            "written before the rest of the work."
+            if stance == "do" else
+            "Then write ONE card saying what to change next: the file, what it "
+            "has to do, and how they will know it works. They write the code in "
+            "their own editor -- you never write it and never put a solution on "
+            "the board. One change per turn, then stop and wait for 'ready to "
+            "check'."
+        )
     )
 
 
@@ -335,8 +349,9 @@ def session_sense(repo):
     # you are opening" -- so it dutifully invented chapters out of the README's
     # section headings and opened "Chapter 1". There are no chapters in a
     # project. There is a README, and the README says where the work is planned.
-    if read_config(repo.root).get("mode") == "code":
-        return code_sense(chapter)
+    cfg_here = read_config(repo.root)
+    if cfg_here.get("mode") == "code":
+        return code_sense(chapter, cfg_here.get("stance"))
     # In a headless session this line is the whole prompt, so it has to carry the
     # pointer to the method as well as the pointer to the place.
     how = ("Follow live/TEACHING.md: teach only what the problem in front of them "
@@ -687,7 +702,13 @@ def load_uploads(repo, limit=40):
     return out
 
 
-DEFAULT_CONFIG = {"name": None, "mode": None, "subtitle": ""}
+# `stance` is what the tutor is FOR in this repository, and it is a per-course
+# decision because the answer genuinely differs. "teach" is the default and the
+# original point of the thing: the student writes the code and withholding it is
+# the teaching. "do" is for a project where that is not what is wanted -- the
+# work has to get done, the tutor writes it, runs it, and the card reports what
+# it did and what is next. Everything else about a turn is unchanged either way.
+DEFAULT_CONFIG = {"name": None, "mode": None, "subtitle": "", "stance": "teach"}
 
 
 def read_config(root):
@@ -710,6 +731,12 @@ def read_config(root):
     if mode not in ("math", "code"):
         mode = guess_mode(root)
     cfg["mode"] = mode
+
+    stance = (cfg.get("stance") or "").lower()
+    # Never guessed. Writing the code for somebody who wanted to learn it is the
+    # one failure here that cannot be undone by the next card, so it is only ever
+    # done because a repository asked for it in writing.
+    cfg["stance"] = "do" if stance == "do" else "teach"
     return cfg
 
 

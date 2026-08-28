@@ -181,8 +181,27 @@ busy && doc.getElementById('cards').nextElementSibling === busy
 
 paintWith({ agent: 'claude', state: 'listening', turns: 1, host: 'h', pid: 1 });
 busy.hidden
-  ? ok('and it goes when the card lands')
+  ? ok('and it goes when the turn ends')
   : fail('the working notice outlives the turn');
+
+// A turn does NOT end when the card lands: the tutor goes on to verify, file and
+// write the handoff, and the daemon says "working" throughout. The notice
+// counted through all of it, so a 34-second card looked like a four-minute wait
+// -- measured, on a real board, and reported as "WHAT is going on".
+paintWith({ agent: 'claude', state: 'working', turns: 2, host: 'h', pid: 1 });
+!busy.hidden ? ok('a new turn starts the notice again')
+             : fail('the notice does not come back for the next turn');
+window.__render({
+  state: { course: 'P', mode: 'code' },
+  cards: [question, { id: '0002', kind: 'lesson', title: 'Answer', body: 'here',
+                      mtime: now + 500 }],
+  turns: [], messages: [], uploads: [], slate: [],
+  agent: { agent: 'claude', state: 'working', turns: 2, host: 'h', pid: 1 },
+});
+busy.hidden
+  ? ok('and it stops the moment a card lands, not when the tutor stops tidying')
+  : fail('the notice goes on counting after the answer is already on screen — '
+         + 'which is worse than having no notice at all');
 
 paintWith(null);
 busy.hidden
