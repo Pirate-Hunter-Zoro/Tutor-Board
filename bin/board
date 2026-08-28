@@ -1295,12 +1295,48 @@ def ts_info():
     return v4, (name or None)
 
 
-def ts_repoint(port):
-    """Keep the HTTPS name pointed at whichever board is current.
+def served_port(out):
+    """Which local port the tailnet name is proxying to right now, if any."""
+    m = re.search(r"127\.0\.0\.1:(\d+)", out or "")
+    return int(m.group(1)) if m else None
+
+
+def port_answers(port):
+    """Is anything listening on this port on this machine."""
+    import socket as _s
+    if not port:
+        return False
+    sock = _s.socket()
+    sock.settimeout(0.4)
+    try:
+        return sock.connect_ex(("127.0.0.1", int(port))) == 0
+    except OSError:
+        return False
+    finally:
+        try:
+            sock.close()
+        except OSError:
+            pass
+
+
+def ts_repoint(port, force=False):
+    """Keep the HTTPS name pointed at a board that is actually answering.
 
     Each repository has its own port, so switching from one course to another
     would otherwise leave https://board…/ proxying to a board that is no longer
     running. The address is the thing that must stay constant, not the target.
+
+    But it must not be stolen either. Starting a board used to claim the name
+    unconditionally, and `tutor restart` restarts every board on the machine one
+    after another -- so the address ended up wherever the alphabet happened to
+    put the last course. Somebody halfway through a Galois proof was dropped into
+    a completely different lesson by a deploy, on a device with one URL baked
+    into it and no way to say which course it wanted.
+
+    So: a name already pointing at a board that is up and answering is that
+    board's, and a start does not take it. What does take it is the name pointing
+    at nothing -- a course whose board has gone -- or an explicit `board vpn
+    serve`, which is a person saying which course they mean.
     """
     if not ts_daemon_running():
         return
@@ -1308,6 +1344,9 @@ def ts_repoint(port):
     if code != 0 or "https://" not in out:
         return
     if ("127.0.0.1:%d" % port) in out:
+        return
+    held = served_port(out)
+    if not force and held and held != port and port_answers(held):
         return
     code, _ = ts("serve", "--bg", "--https=443", "http://127.0.0.1:%d" % port, timeout=40)
     if code == 0:
@@ -1377,6 +1416,9 @@ def cmd_vpn(live, args):
         if not info:
             print("start the board first", file=sys.stderr)
             return 1
+        # Forced on purpose: this is the one command whose whole meaning is
+        # "point the address at THIS course", so it takes the name from whoever
+        # is holding it. Everything else asks first -- see ts_repoint.
         code, out = ts("serve", "--bg", "--https=443",
                        "http://127.0.0.1:%d" % info["port"], timeout=40)
         print(out.strip() or "serving")

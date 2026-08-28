@@ -213,8 +213,19 @@ body.annotating canvas.ann-layer { pointer-events: auto; }
 
    Only while annotating: selecting and copying a definition out of a card is
    worth having every other second of the day. */
-body.annotating .card,
-body.annotating .card * {
+/* The WHOLE lesson, not just the cards in it. This said `.card` and `.card *`,
+   and a lesson is not only cards: the student's own turns are `.mine`, the
+   writing surface sits between them, and there is a margin down each side and a
+   gap between every pair of them. A stroke that started on any of that had no
+   ink layer under it and no rule against selecting, so the browser took the
+   gesture, painted a blue smear across whatever text it found, and the stroke
+   was gone. It looked like the pen missing every other mark, because it was:
+   the ones that missed were the ones that started a few pixels off a card.
+
+   `selectstart` was supposed to catch this and does not -- iOS does not fire it
+   for a touch-driven selection, which is the only kind that matters here. */
+body.annotating #board,
+body.annotating #board * {
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;

@@ -323,6 +323,42 @@ const heelSwipe = (id, x, y, dx, dy) => {
     slate.finger('scroll');
   }
 
+  // ----------------------------------------------------------------- rubbing
+  //
+  // "If I swipe over a bunch of text many times quickly, all of that text
+  // should be gone." It was not: the rubber tested the single point each event
+  // landed on, and a fast swipe is fast precisely because its samples arrive a
+  // long way apart -- so it left untouched gaps between them and half the
+  // working survived every pass. It is a swept segment now.
+  {
+    slate.finger('scroll');
+    slate.clear();
+    // Ten short strokes in a row, the way a line of working looks.
+    for (let n = 0; n < 10; n++) {
+      pen('pointerdown', 100 + n * 40, 300, 7);
+      pen('pointermove', 110 + n * 40, 310, 7);
+      pen('pointermove', 120 + n * 40, 300, 7);
+      pen('pointerup', 120 + n * 40, 300, 7);
+    }
+    const written = slate.strokes();
+    written === 10
+      ? ok('ten marks on the page to rub out')
+      : fail('the fixture wrote ' + written + ' strokes, not 10');
+
+    // One fast swipe across the lot, delivered as three samples — which is what
+    // a flick actually looks like on the wire.
+    slate.tool && slate.tool('erase');
+    pen('pointerdown', 80, 305, 8);
+    pen('pointermove', 260, 305, 8);
+    pen('pointermove', 460, 305, 8);
+    pen('pointerup', 520, 305, 8);
+
+    slate.strokes() === 0
+      ? ok('and one fast swipe takes all of them, gaps between samples included')
+      : fail('a fast swipe left ' + slate.strokes() + ' of 10 behind — the '
+             + 'rubber is still testing points instead of the line between them');
+  }
+
   // The board asks the surface whether a hand is mid-answer before it moves the
   // page. A surface that cannot answer is a page that scrolls under a pen.
   typeof slate.busy === 'function'

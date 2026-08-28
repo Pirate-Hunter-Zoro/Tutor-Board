@@ -848,15 +848,48 @@ function create(opts) {
   }
 
   /* --------------------------------------------------------------- input */
+  /* How far the rubber reaches, in SCREEN pixels -- divided by the zoom, so what
+     it takes out is what it looks like it covers at any magnification. It was a
+     third of this and it was measured off the PEN's width, which is a setting
+     that has nothing to do with rubbing out. */
+  var ERASE_R = 26;
+  /* Where the rubber was last known to be, so a move can be treated as the
+     sweep it is rather than as the point it ended at. */
+  var rubbedFrom = null;
+
+  /* Square of the distance from a point to a segment. The whole eraser turns on
+     this: a swipe is a line, not a dot. */
+  function distToSeg(px, py, ax, ay, bx, by) {
+    var vx = bx - ax, vy = by - ay;
+    var len = vx * vx + vy * vy;
+    var t = len ? ((px - ax) * vx + (py - ay) * vy) / len : 0;
+    t = t < 0 ? 0 : (t > 1 ? 1 : t);
+    var dx = px - (ax + vx * t), dy = py - (ay + vy * t);
+    return dx * dx + dy * dy;
+  }
+
   function eraseAt(pt) {
-    var p = page(), r = 14 / view.k * (tool.width / 2.8), before = p.strokes.length;
+    var p = page();
+    if (!p) return;
+    var r = (ERASE_R + tool.width * 1.5) / view.k;
+    var before = p.strokes.length;
+    /* Sweep from where the rubber was to where it now is, instead of testing the
+       one point the event happened to land on. A fast swipe delivers its samples
+       a long way apart -- that is what makes it fast -- so testing only the
+       landing points leaves untouched gaps between them, and the gaps are the
+       whole of "I went over it three times and half of it is still there".
+       Against the segment rather than against a string of sampled points on it,
+       which is both exact and cheaper. */
+    var a = rubbedFrom || pt;
     p.strokes = p.strokes.filter(function (s) {
       for (var i = 0; i < s.pts.length; i++) {
-        var dx = s.pts[i][0] - pt.x, dy = s.pts[i][1] - pt.y;
-        if (dx * dx + dy * dy < r * r) return false;
+        if (distToSeg(s.pts[i][0], s.pts[i][1], a.x, a.y, pt.x, pt.y) < r * r) {
+          return false;
+        }
       }
       return true;
     });
+    rubbedFrom = pt;
     if (p.strokes.length !== before) { invalidate(); markDirty(); }
   }
 
@@ -921,7 +954,9 @@ function create(opts) {
     }
 
     var pt = toLogical(ev);
-    if (tool.mode === "erase") { snapshot(); eraseAt(pt); drawing = "erasing"; return; }
+    if (tool.mode === "erase") {
+      snapshot(); rubbedFrom = null; eraseAt(pt); drawing = "erasing"; return;
+    }
     if (sel && inSelection(pt.x, pt.y)) { snapshot(); dragging = { x: pt.x, y: pt.y }; return; }
     if (tool.mode === "lasso") { clearSelection(); lasso = [[pt.x, pt.y]]; return; }
 
@@ -976,7 +1011,13 @@ function create(opts) {
       invalidate();
       return;
     }
-    if (drawing === "erasing") { eraseAt(toLogical(ev)); return; }
+    if (drawing === "erasing") {
+      /* Every sample the hardware took, not one per frame: the sweep follows the
+         path the hand actually made rather than the chords between frames. */
+      var rubs = ev.getCoalescedEvents ? ev.getCoalescedEvents() : [ev];
+      for (var u = 0; u < rubs.length; u++) eraseAt(toLogical(rubs[u]));
+      return;
+    }
     if (lasso) { var l = toLogical(ev); lasso.push([l.x, l.y]); schedule(); return; }
     if (!drawing) return;
 
@@ -1066,6 +1107,7 @@ function create(opts) {
       return;
     }
     if (!drawing) return;
+    rubbedFrom = null;
     if (drawing !== "erasing" && drawing.pts.length) {
       snapshot();
       delete drawing._sx; delete drawing._sy; delete drawing._sp;
@@ -1481,6 +1523,19 @@ function create(opts) {
   api.busy = function () {
     return !!drawing || !!lasso || !!dragging || penDown ||
            (Date.now() - lastPenAt < 2500);
+  };
+  /* Which tool is in hand. Reading it is for the chrome; setting it is for
+     tests, which otherwise have to reach into the toolbar and click a button to
+     exercise the rubber. */
+  api.tool = function (v) {
+    var modes = ["pen", "hl", "erase", "lasso"];
+    var i = modes.indexOf(v);
+    if (i !== -1) {
+      var buttons = [bPen, bHl, bEr, bLa];
+      if (buttons[i] && buttons[i].onclick) buttons[i].onclick();
+      else tool.mode = v;
+    }
+    return tool.mode;
   };
   api.reach = reach;
   api.inkBox = inkBox;

@@ -493,16 +493,52 @@ if (es && window.Annotate) {
               + 'px on a fast stroke — smoothing is lagging it');
     window.Annotate.clear('0003');
 
+    // A short mark is still a mark. This wanted three recorded samples before it
+    // would keep a stroke, and the samples that arrive DURING a stroke are
+    // smoothed towards the hand's average -- so a tick, a caret, a two-letter
+    // correction could still be sitting almost on top of each other when the pen
+    // lifted, and the whole thing was thrown away as a tap. It read as the pen
+    // missing every other mark.
+    window.Annotate.clear('0003');
+    ink('pointerdown', 60, 200, 0.5);
+    ink('pointermove', 66, 208, 0.5);
+    ink('pointerup', 74, 214, 0.5);
+    var tick = window.Annotate.payload('0003').strokes;
+    if (tick.length === 1) ok('a two-sample tick is kept, not discarded as a tap');
+    else fail('a short quick mark was thrown away: ' + tick.length + ' strokes kept');
+    if (tick.length && tick[0].p.length >= 4)
+      ok('and it has a start and an end, so it draws as a line');
+    else fail('the short mark was kept but has nothing to draw');
+
+    // The lift position is not a guess, and on a short mark it is most of the
+    // mark: it must be where the pen actually left the glass.
+    if (tick.length) {
+      var tipX = tick[0].p[tick[0].p.length - 2] * W;
+      var tipY = tick[0].p[tick[0].p.length - 1] * H;
+      if (Math.abs(tipX - 74) < 8 && Math.abs(tipY - 214) < 8)
+        ok('and it ends where the nib left the glass');
+      else fail('the tick ends at ' + tipX.toFixed(0) + ',' + tipY.toFixed(0)
+                + ' rather than 74,214 — the lift sample is being dropped');
+    }
+    window.Annotate.clear('0003');
+
     // The blue flash: a pen drag over a card used to start a native text
     // selection. The moment it does, the browser owns the gesture, the pointer
     // stream stops reaching the canvas, and the ink dies mid-stroke until a tap
     // somewhere else clears it. The slate page has always refused selection;
     // the lesson never did, because until annotate mode there was nothing to
     // write on here.
-    if (/body\.annotating[^{]*\.card[^{]*\{[^}]*user-select:\s*none/.test(css3))
-      ok('the lesson refuses to be selected while annotating');
-    else fail('a pen drag over a card can start a text selection, which kills '
-              + 'the stroke and turns the card blue');
+    // And it must be the WHOLE lesson, not only the cards in it. This rule said
+    // `.card`, and a lesson is not only cards: the student's own turns are
+    // `.mine`, the writing surface sits between them, and there is a margin down
+    // each side and a gap between every pair. A stroke that started a few pixels
+    // off a card had no layer under it and no rule against selecting, so the
+    // browser took the gesture and smeared blue across whatever text it found.
+    // It read as the pen missing every other mark, because it was.
+    if (/body\.annotating\s+#board[^{]*\{[^}]*user-select:\s*none/.test(css3))
+      ok('the whole lesson refuses to be selected while annotating');
+    else fail('a pen drag over the lesson can start a text selection, which '
+              + 'kills the stroke and smears the page blue');
 
     window.Annotate.setOn(true);
     var sel1 = new window.Event('selectstart', { bubbles: true, cancelable: true });

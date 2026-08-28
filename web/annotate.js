@@ -35,7 +35,12 @@ var on = false;
    margin below it), because while annotate mode is on these layers take the
    pointer, and two of them overlapping would mean marks landing on the wrong
    card near a boundary. */
-var PAD = 12;
+/* How far the ink layer reaches beyond its card, in CSS pixels. It is here so a
+   ring drawn around something near an edge is not chopped off at the boundary --
+   and it is 18 rather than 12 so that two adjacent layers MEET: cards are 2.1rem
+   apart, and a stroke begun in the gap between them used to land on the prose
+   instead of on a canvas. */
+var PAD = 18;
 
 /* The slate's ink geometry, shared rather than reimplemented: smooth the samples
    as they arrive, run a Catmull-Rom curve through them, resample it to about a
@@ -487,13 +492,29 @@ function move(ev) {
   ev.preventDefault();
 }
 
-function end() {
+function end(ev) {
   var d = drawing;
   if (!d) return;
   window.removeEventListener("scroll", follow, true);
   var id = d.id;
   if (!d.erasing) {
-    if (d.raw.length < 3) {
+    /* Where the nib actually left the glass. The samples that arrive during a
+       stroke are smoothed towards the hand's average, and on a short quick mark
+       -- a tick, a caret, a two-letter correction -- the smoothing has not
+       caught up by the time the pen lifts, so the recorded points can still be
+       sitting almost on top of each other and the mark reads as a tap. The lift
+       position is not smoothed and is not a guess: it is where the mark ends. */
+    if (ev && typeof ev.clientX === "number") {
+      var xy = at(ev, d);
+      var last = d.raw[d.raw.length - 1];
+      if (!last || Math.abs(xy[0] - last[0]) > 0.01 || Math.abs(xy[1] - last[1]) > 0.01) {
+        d.raw.push([xy[0], xy[1], last ? last[2] : 0.5]);
+      }
+    }
+    /* Two points make a line, and a line is a mark. This wanted three, which
+       threw away every flick short enough to be recorded in two -- and a tick
+       beside a wrong line is exactly that flick. */
+    if (d.raw.length < 2) {
       past.pop();                  /* a tap is not a mark, or an undo step */
       drawing = null;
       draw(d.card);                /* clear whatever dot was painted live */

@@ -65,6 +65,15 @@ else
   printf '%s\n' "$out" | grep '^FAIL' | sed 's/^/             /'
 fi
 
+printf '%-12s ' "address"
+if out="$(python3 test/address.py 2>&1)"; then
+  printf '%s\n' "$out" | tail -1
+else
+  fails=$((fails + 1))
+  echo "FAILED"
+  printf '%s\n' "$out" | grep '^FAIL' | sed 's/^/             /'
+fi
+
 printf '%-12s ' "transcript"
 if out="$(python3 test/transcript.py 2>&1)"; then
   printf '%s\n' "$out" | tail -1
