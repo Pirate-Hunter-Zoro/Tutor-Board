@@ -322,6 +322,11 @@ into the course's own file, in the same turn:
 4. `board hw build` compiles, and the result appears on the board. A failure
    shows the actual LaTeX error there, so fix it rather than leaving it.
 
+Saving now compiles the write-up for you if the `.tex` is newer than its `.pdf`,
+so a pushed document is never behind the source beside it. That is a safety net
+and not a substitute: build in the turn, because a LaTeX error found at push time
+is found by the student, on the board, at the moment they were trying to leave.
+
 `board hw` at any point says which problems are still empty. The board carries the
 same line, so the student can see the document filling up without asking.
 

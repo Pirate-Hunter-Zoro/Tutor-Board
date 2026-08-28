@@ -188,6 +188,62 @@ try:
 
     code, out = run(gal, "hw", "list")
     check("list works without a session being open", code == 0 and "ch07" in out)
+
+    # ---- the write-up is part of the commit ------------------------------
+    #
+    # An exercise is finished when it is typeset, not when it is agreed: the point
+    # of the hour is the piece of mathematics. Compiling it was a step the tutor
+    # had to remember at the end of a turn that had already delivered its card,
+    # and a session ends by being abandoned far more often than it ends tidily.
+    # What got pushed was then a `.tex` carrying tonight's proof beside a `.pdf`
+    # from last week that does not -- which is worse than no PDF at all, because
+    # it looks finished and is silently missing the exercise.
+    tex = os.path.join(prob, "homework", "hw05", "hw05.tex")
+    pdf = os.path.splitext(tex)[0] + ".pdf"
+
+    # Stand in for LaTeX: a build script is honoured before the built-in path,
+    # and this test is about WHEN a build happens, not about compiling TeX.
+    scripts = os.path.join(prob, "scripts")
+    os.makedirs(scripts, exist_ok=True)
+    with open(os.path.join(scripts, "build.sh"), "w", encoding="utf-8") as fh:
+        fh.write('#!/usr/bin/env bash\necho "pretending to compile $1"\n'
+                 'printf %%s "%%PDF-1.4" > "${1%%.tex}.pdf"\n')
+    # And a push that does not touch the network.
+    with open(os.path.join(scripts, "save-and-push.sh"), "w", encoding="utf-8") as fh:
+        fh.write('#!/usr/bin/env bash\necho "pushed: $1"\n')
+
+    check("a set with no PDF at all is out of date", not os.path.exists(pdf))
+    code, out = run(prob, "push", "an agreed exercise")
+    check("pushing compiles the write-up first",
+          code == 0 and "compiling" in out and os.path.exists(pdf))
+    check("and says which set it built", "hw05" in out)
+    check("and then actually pushes", "pushed:" in out)
+
+    # A second push with nothing changed must not rebuild: an ordinary save in
+    # the middle of a lesson should cost nothing.
+    stamp = os.path.getmtime(pdf)
+    code, out = run(prob, "push", "again")
+    check("a push with the PDF already current does not rebuild",
+          code == 0 and "compiling" not in out and os.path.getmtime(pdf) == stamp)
+
+    # Write to the source, and it is out of date again.
+    with open(tex, "a", encoding="utf-8") as fh:
+        fh.write("\n%% one more agreed exercise\n")
+    os.utime(tex, (stamp + 10, stamp + 10))
+    code, out = run(prob, "push", "and another")
+    check("touching the write-up makes the next push rebuild it",
+          code == 0 and "compiling" in out)
+
+    # A LaTeX error must not eat the source. The `.tex` is the record.
+    with open(os.path.join(scripts, "build.sh"), "w", encoding="utf-8") as fh:
+        fh.write('#!/usr/bin/env bash\necho "! Undefined control sequence."\nexit 1\n')
+    with open(tex, "a", encoding="utf-8") as fh:
+        fh.write("\n%% broken\n")
+    code, out = run(prob, "push", "with a broken write-up")
+    check("a build that fails still pushes the source, which is the record",
+          code == 0 and "pushed:" in out)
+    check("and says so loudly rather than shipping a stale PDF in silence",
+          "BUILD FAILED" in out)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

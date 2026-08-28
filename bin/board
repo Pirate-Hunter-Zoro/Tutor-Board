@@ -545,6 +545,65 @@ def read_turns(live):
 # ---------------------------------------------------------------------------
 # homework: a problem set is a file in the course, and the board tracks it
 # ---------------------------------------------------------------------------
+def hw_build(live, st):
+    """Compile the sitting's problem set and record what happened.
+
+    Split out of `board hw build` so that pushing can do it too. A pushed `.pdf`
+    that is older than the `.tex` beside it is worse than no `.pdf`: it is a
+    finished-looking document missing the exercise the evening was spent on, and
+    nothing about it says so.
+    """
+    tex = os.path.join(live.root, st["rel"])
+    script = os.path.join(live.root, "scripts", "build.sh")
+    if os.path.exists(script):
+        p = subprocess.run(["bash", script, tex], cwd=live.root,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        out = p.stdout.decode("utf-8", "replace").strip()
+        code = p.returncode
+    else:
+        out = compile_tex(live, tex)
+        code = 0 if os.path.exists(os.path.splitext(tex)[0] + ".pdf") else 1
+    pdf = os.path.splitext(tex)[0] + ".pdf"
+    if not os.path.exists(pdf):
+        found = glob.glob(os.path.join(os.path.dirname(tex), "build", "*.pdf"))
+        pdf = found[0] if found else None
+    record = {"ok": code == 0, "at": time.time(),
+              "iso": time.strftime("%Y-%m-%d %H:%M:%S"),
+              "set": st["name"],
+              "pdf": os.path.relpath(pdf, live.root) if pdf else None,
+              # The whole tail, because a LaTeX error is only useful in
+              # context and the person reading it is not at this terminal.
+              "detail": out[-1600:]}
+    with open(live.path("hw.json"), "w", encoding="utf-8") as fh:
+        json.dump(record, fh, indent=2)
+    return code, pdf, out
+
+
+def hw_stale(live):
+    """The sitting's problem set, if its PDF is missing or older than its source.
+
+    Returns the status dict to build from, or None if there is nothing to do --
+    no problem sets in this repository, none bound to this sitting, or a PDF that
+    is already newer than the `.tex`.
+    """
+    try:
+        st = homework.status(live.root, live.state())
+    except Exception:                                   # noqa: BLE001
+        return None
+    if not st or not st.get("rel") or not st.get("name"):
+        return None
+    tex = os.path.join(live.root, st["rel"])
+    if not os.path.exists(tex):
+        return None
+    pdf = os.path.splitext(tex)[0] + ".pdf"
+    if not os.path.exists(pdf):
+        found = glob.glob(os.path.join(os.path.dirname(tex), "build", "*.pdf"))
+        pdf = found[0] if found else None
+    if pdf and os.path.getmtime(pdf) >= os.path.getmtime(tex):
+        return None
+    return st
+
+
 def cmd_hw(live, args):
     """Which problem set this sitting is, how much of it is written up, compile it.
 
@@ -612,30 +671,8 @@ def cmd_hw(live, args):
         return 0
 
     if sub == "build":
-        tex = os.path.join(live.root, st["rel"])
-        script = os.path.join(live.root, "scripts", "build.sh")
-        if os.path.exists(script):
-            p = subprocess.run(["bash", script, tex], cwd=live.root,
-                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-            out = p.stdout.decode("utf-8", "replace").strip()
-            code = p.returncode
-        else:
-            out = compile_tex(live, tex)
-            code = 0 if os.path.exists(os.path.splitext(tex)[0] + ".pdf") else 1
+        code, pdf, out = hw_build(live, st)
         print(out)
-        pdf = os.path.splitext(tex)[0] + ".pdf"
-        if not os.path.exists(pdf):
-            found = glob.glob(os.path.join(os.path.dirname(tex), "build", "*.pdf"))
-            pdf = found[0] if found else None
-        record = {"ok": code == 0, "at": time.time(),
-                  "iso": time.strftime("%Y-%m-%d %H:%M:%S"),
-                  "set": st["name"],
-                  "pdf": os.path.relpath(pdf, live.root) if pdf else None,
-                  # The whole tail, because a LaTeX error is only useful in
-                  # context and the person reading it is not at this terminal.
-                  "detail": out[-1600:]}
-        with open(live.path("hw.json"), "w", encoding="utf-8") as fh:
-            json.dump(record, fh, indent=2)
         if pdf:
             print(pdf)
         return code
@@ -750,6 +787,36 @@ def cmd_push(live, args):
     if not os.path.exists(script):
         print("no scripts/save-and-push.sh in this repository", file=sys.stderr)
         return 1
+
+    # The write-up is part of the work, so it is part of the commit.
+    #
+    # An exercise is finished when it is typeset, not when it is agreed: the
+    # point of the hour is the piece of mathematics, and the `.tex` is where that
+    # lives. But compiling it was a step the tutor had to remember, in a turn
+    # that had already delivered its card -- and a session ends by being
+    # abandoned far more often than it ends tidily. What got pushed was then a
+    # `.tex` containing tonight's proof and a `.pdf` from last week that does
+    # not, which is worse than no PDF at all: it looks finished and is silently
+    # missing the exercise the evening was spent on.
+    #
+    # Only when it is actually out of date, so an ordinary save costs nothing.
+    if "--no-build" not in args:
+        stale = hw_stale(live)
+        if stale is not None:
+            print("the write-up is newer than its PDF; compiling %s first"
+                  % stale["name"])
+            code, pdf, out = hw_build(live, stale)
+            if code == 0:
+                print("  built %s" % (pdf or "the document"))
+            else:
+                # Push anyway. The source is the record and losing it to a LaTeX
+                # error is the one outcome worse than a stale PDF -- but say so
+                # loudly, and the board says so too, because the person is not
+                # reading this terminal.
+                print("  BUILD FAILED — pushing the source anyway; the PDF will "
+                      "be behind until it is fixed:")
+                print("  " + "\n  ".join(out.strip().splitlines()[-8:]))
+
     p = subprocess.run(["bash", script, message], cwd=live.root,
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     out = p.stdout.decode("utf-8", "replace").strip()
