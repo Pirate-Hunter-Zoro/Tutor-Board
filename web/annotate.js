@@ -58,6 +58,12 @@ function polish(pts, passes) {
 }
 var store = Object.create(null);      /* card id -> [stroke, ...] */
 var dirty = Object.create(null);      /* card ids with unsaved changes */
+/* Which cards' marks have been handed to the tutor. Separate from `dirty`,
+   which is about disk: the autosave clears `dirty` about a second after the pen
+   lifts, so "not yet saved" is useless as a stand-in for "not yet sent" -- it
+   is false almost all of the time, including for ink nobody has ever seen but
+   you. Seeded from the payload on load, cleared by any change, set by a send. */
+var handed = Object.create(null);
 var onChange = function () {};
 
 function strokesFor(id) {
@@ -259,13 +265,13 @@ function remember(id) {
 function restore(snap) {
   store[snap.id] = snap.strokes;
   dirty[snap.id] = true;
+  handed[snap.id] = false;
   draw(document.querySelector('[data-card="' + snap.id + '"]'));
   onChange();
 }
 
 var tool = "pen";        /* pen | erase */
 var drawing = null;
-var sawPen = false;
 var pending = false;
 
 /* Within this many card-widths of a stroke counts as touching it. Generous,
@@ -423,9 +429,15 @@ function begin(ev, card) {
   var id = card.dataset.card;
   if (!id) return;
   dropSelection();
-  if (ev.pointerType === "pen") sawPen = true;
-  /* Once a pen has been seen, a finger is a palm. Same rule as the slate. */
-  if (sawPen && ev.pointerType === "touch") return;
+  /* A finger scrolls the lesson unless the slate has been told a finger writes.
+     Returning before preventDefault is what lets the scroll happen.
+
+     This used to be a latch of its own -- "once a pen has been seen, a finger is
+     a palm" -- which meant the two surfaces disagreed about the same hand, and
+     both of them forgot the answer on every reload. One setting, read from the
+     component that owns it. */
+  if (ev.pointerType === "touch"
+      && !(window.Slate && window.Slate.fingerWrites && window.Slate.fingerWrites())) return;
   var canvas = layerOf(card);
   size(card, canvas);
 
@@ -458,6 +470,7 @@ function rub(ev) {
   var y = (xy[1] - PAD) / Math.max(1, d.canvas._h);
   if (eraseAt(d.id, x, y)) {
     dirty[d.id] = true;
+    handed[d.id] = false;
     draw(d.card);
   }
 }
@@ -490,6 +503,7 @@ function end() {
   }
   drawing = null;
   dirty[id] = true;
+  handed[id] = false;
   draw(d.card);                    /* once, with the polished line */
   onChange();
 }
@@ -564,6 +578,7 @@ window.Annotate = {
   clearCurrent: function () {
     var ids = window.Annotate.marked();
     ids.forEach(function (id) { remember(id); store[id] = []; dirty[id] = true;
+                                handed[id] = false;
                                 draw(document.querySelector('[data-card="' + id + '"]')); });
     if (ids.length) onChange();
     return ids.length;
@@ -573,14 +588,36 @@ window.Annotate = {
     if (colour) pen.colour = colour;
     if (width) pen.width = width;
   },
-  /* Which cards carry marks, and which of those are unsaved. */
+  /* Which cards carry marks, which of those are unsaved, and which of those
+     have never been handed to the tutor.
+
+     `unsent` is the one to ask before interrupting somebody. `marked` counts
+     every mark on the board, including ink delivered a week ago and ink from a
+     sitting they have forgotten -- and a board that has ever been written on
+     therefore answered "yes, there are marks" for ever. */
   marked: function () { return Object.keys(store).filter(function (id) { return (store[id] || []).length; }); },
+  unsent: function () {
+    return window.Annotate.marked().filter(function (id) { return !handed[id]; });
+  },
   unsaved: function () { return Object.keys(dirty); },
   clean: function (id) { delete dirty[id]; },
+  /* Delivered. Called when the round trip has actually come back, not when it
+     was started -- a send that failed has not been sent. */
+  sent: function (id) { handed[id] = true; },
+  /* The server's record of what has been delivered, seeded on load. Same guard
+     as `load`: this device is authoritative for a card it already knows about,
+     because a mark drawn during the round trip is not in the copy coming back. */
+  loadSent: function (map) {
+    if (!map) return;
+    Object.keys(map).forEach(function (id) {
+      if (!(id in handed)) handed[id] = !!map[id];
+    });
+  },
   clear: function (id) {
     remember(id);
     store[id] = [];
     dirty[id] = true;
+    handed[id] = false;
     draw(document.querySelector('[data-card="' + id + '"]'));
     onChange();
   },

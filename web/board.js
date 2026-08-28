@@ -32,9 +32,7 @@ var els = {
   annDone: document.getElementById("ann-done"),
   annotate: document.getElementById("btn-annotate"),
   sendwhat: document.getElementById("sendwhat"),
-  sendWork: document.getElementById("send-work"),
   sendNotes: document.getElementById("send-notes"),
-  sendBoth: document.getElementById("send-both"),
   sendCancel: document.getElementById("send-cancel"),
   offline: document.getElementById("offline"),
   linkbad: document.getElementById("linkbad"),
@@ -759,6 +757,10 @@ function render(data) {
     Array.prototype.forEach.call(els.cards.querySelectorAll("[data-card]"),
                                  window.Annotate.attach);
     window.Annotate.load(data.notes);
+    /* Which of those the tutor has already been given. Without this, marks
+       restored after a reload all read as undelivered, and the follow-up offer
+       came back for ink that had gone days ago. */
+    window.Annotate.loadSent(data.notes_sent);
   }
   renderScratch(data.uploads || []);
 
@@ -1131,7 +1133,10 @@ var noteSaveTimer = null;
 
 function saveNotes(send) {
   if (!window.Annotate) return Promise.resolve([]);
-  var ids = send ? window.Annotate.marked() : window.Annotate.unsaved();
+  /* Sending re-sent every mark on the board, so a card marked up yesterday and
+     already delivered came back to the tutor as a fresh turn every time
+     anything else was sent. Send what has not been sent. */
+  var ids = send ? window.Annotate.unsent() : window.Annotate.unsaved();
   if (!ids.length) return Promise.resolve([]);
   return Promise.all(ids.map(function (id) {
     var body = window.Annotate.payload(id, send);
@@ -1139,7 +1144,10 @@ function saveNotes(send) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
-    }).then(function () { window.Annotate.clean(id); });
+    }).then(function () {
+      window.Annotate.clean(id);
+      if (send) window.Annotate.sent(id);
+    });
   }));
 }
 
@@ -1205,36 +1213,47 @@ Array.prototype.forEach.call(document.querySelectorAll(".ann-ink"), function (b)
 /* ------------------------------------------------------------ send chooser */
 /* Only asked when there is genuinely a choice: working on the slate AND marks
    on the lesson. One of the two alone just sends. */
-var pendingSend = null;
 
 function haveNotes() {
-  return !!(window.Annotate && window.Annotate.marked().length);
+  return !!(window.Annotate && window.Annotate.unsent().length);
 }
 
+/* What Send does, and what it must never do.
+
+   It used to ask first: with marks anywhere on the board, tapping Send on the
+   writing surface issued no request at all and raised a "Send what?" bar
+   instead, and the answer only went out on a second tap. That is a Send button
+   that does nothing, and it cost a real answer -- an evening's working sat in
+   live/slate/ for two days while the student believed they had handed it in,
+   and the board's own receipt never appeared because the code that writes it
+   was never reached. Nothing on the surface said a decision was outstanding.
+
+   So the working goes first, unconditionally. The button sits on the surface
+   holding the working; that is what it means. Marks on the lesson are then
+   offered as a follow-up, which cannot lose anything, because by then the
+   working is already gone.
+
+   The one exception is an empty surface: with nothing written and marks that
+   have not been sent, the marks ARE the answer, and handing the tutor a blank
+   sheet alongside them is noise. */
 function askWhatToSend(sendWork) {
-  if (!haveNotes()) { sendWork(); return; }
-  pendingSend = sendWork;
-  els.sendwhat.hidden = false;
+  var marks = haveNotes();
+  var written = !writer || writer.strokes() > 0;
+  if (!written && marks) {
+    saveNotes(true).then(function () { paintNotesSend(); toastSent(); });
+    return;
+  }
+  sendWork();
+  if (marks) els.sendwhat.hidden = false;
 }
 
 function closeChooser() {
   els.sendwhat.hidden = true;
-  pendingSend = null;
 }
 
-els.sendWork.onclick = function () {
-  var go = pendingSend;
-  closeChooser();
-  if (go) go();
-};
 els.sendNotes.onclick = function () {
   closeChooser();
-  saveNotes(true);
-};
-els.sendBoth.onclick = function () {
-  var go = pendingSend;
-  closeChooser();
-  saveNotes(true).then(function () { if (go) go(); });
+  saveNotes(true).then(function () { paintNotesSend(); toastSent(); });
 };
 els.sendCancel.onclick = closeChooser;
 
@@ -1263,7 +1282,7 @@ function paintNotesSend() {
      which is exactly the doubt that sends somebody looking for a text box. */
   var answeringNow = els.codeanswer && !els.codeanswer.hidden
                      && window.Annotate
-                     && window.Annotate.marked().indexOf(els.codeanswer.dataset.card) !== -1;
+                     && window.Annotate.unsent().indexOf(els.codeanswer.dataset.card) !== -1;
   els.notesend.textContent = answeringNow ? "send my annotations as my answer"
                                           : "send my annotations";
   els.notesend.classList.toggle("answering", !!answeringNow);

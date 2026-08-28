@@ -141,6 +141,34 @@ comp ? ok('#composer has a rule') : fail('#composer has no styling at all');
   ? ok('the same holds for the student\'s own turns')
   : fail('every .mine carries an entry animation');
 
+// The writing surface is not a paragraph, and must not share a paragraph's
+// width. #board carries a 46rem measure because prose needs one; the surface
+// inside it was therefore about half an iPad in landscape, on a tool whose whole
+// value is the area you have to write in.
+{
+  const wr = block('#writer') || '';
+  /\bmargin:[^;]*var\(--bleed\)/.test(wr) || /margin-(left|inline)/.test(wr)
+    ? ok('#writer breaks out of the reading column')
+    : fail('#writer is still confined to the 46rem prose measure');
+  /50vw/.test(wr)
+    ? ok('and does so against the viewport, so it scales with the device')
+    : fail('#writer\'s width is not derived from the viewport');
+  /max\(/.test(wr) && /--room/.test(wr)
+    ? ok('with a cap, so a large display does not get an absurd surface')
+    : fail('the breakout is uncapped');
+  !/transform:/.test(wr)
+    ? ok('and without a transform, which would land the canvas on a half pixel')
+    : fail('#writer is translated; the canvas will be soft');
+
+  const sl = block('#writer #slate') || '';
+  /svh/.test(sl)
+    ? ok('the surface height uses svh, so iOS chrome does not eat the top of it')
+    : fail('the surface is sized in vh; on iOS its first screenful hides under the chrome');
+  /height:\s*clamp\([^;]*vh/.test(sl)
+    ? ok('and keeps a vh fallback for browsers that do not know svh')
+    : fail('no fallback height: an older browser gets no height at all');
+}
+
 console.log(errors.length ? '\n' + errors.length + ' FAILURES'
                           : '\nevery bar is where it belongs');
 process.exit(errors.length ? 1 : 0);

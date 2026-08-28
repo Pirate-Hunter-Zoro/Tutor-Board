@@ -87,6 +87,11 @@ try:
     notes = serve.load_notes(repo)
     check("and the board gets it back on the next payload",
           notes.get("0003") and notes["0003"][0]["p"][0] == 0.1)
+    # Saved is not sent, and after a reload the browser has no other way to tell
+    # the difference. Marks autosaved and never handed over went on demanding a
+    # decision every time anything else was sent, for ever.
+    check("a saved-only mark is recorded as not sent",
+          serve.load_notes_sent(repo).get("0003") is False)
     check("coordinates are the card's own, not the page's — so a reflow moves "
           "the ink with the words",
           all(0.0 <= v <= 1.0 for v in notes["0003"][0]["p"]))
@@ -106,6 +111,16 @@ try:
           os.path.isfile(os.path.join(repo.answers, os.path.basename(t["png"]))))
     check("frozen, like every other answer — the card can be marked again later",
           "/answers/" in t["png"])
+    check("and the card is now recorded as delivered",
+          serve.load_notes_sent(repo).get("0003") is True)
+    check("which the board is told about on the payload",
+          hub.build().get("notes_sent", {}).get("0003") is True)
+
+    # A later change to the same card puts it back to undelivered, because a
+    # plain save only ever arrives for a card that has just been drawn on.
+    post("/annotate/save", {"card": "0003", "strokes": strokes + strokes, "png": PNG})
+    check("marking it again makes it undelivered once more",
+          serve.load_notes_sent(repo).get("0003") is False)
 
     with open(repo.messages_path, encoding="utf-8") as fh:
         line = json.loads([l for l in fh if l.strip()][-1])
@@ -193,6 +208,27 @@ try:
 
     status, _ = post("/session", {"session": "lecture", "chapter": "Ch 99 — Invented"})
     check("a chapter this course does not have is refused", status == 400)
+
+    # --- the log says what arrived --------------------------------------------
+    # board.log used to hold nothing but "listening", so a send that never left
+    # the device and a send this server rejected were the same observation.
+    import io as _io
+    cap = _io.StringIO()
+    real_stderr, sys.stderr = sys.stderr, cap
+    try:
+        post("/annotate/save", {"card": "0003", "strokes": strokes, "png": PNG})
+        post("/annotate/save", {"card": "0003", "strokes": strokes, "png": PNG,
+                                "send": True, "turn": t["id"]})
+    finally:
+        sys.stderr = real_stderr
+    logged = cap.getvalue()
+    check("the log records the request that arrived", "POST /annotate/save" in logged)
+    check("with the size of the body, so a truncated upload is visible",
+          "bytes in" in logged)
+    check("and distinguishes a save from a send, which is the whole point",
+          "saved only" in logged and "SENT" in logged)
+    check("the poll is not logged, or the one useful line is buried",
+          "/board.json" not in logged)
 
     # --- rubbish is refused ---------------------------------------------------
     status, _ = post("/annotate/save", {"card": "../../etc/passwd", "strokes": []})

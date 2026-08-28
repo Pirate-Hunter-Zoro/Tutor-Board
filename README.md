@@ -32,37 +32,55 @@ which kind of subject it is and the board adapts.
 > a person's account of using it.** Not teaching the subject — that is the other session's job,
 > in the course repository, and it does not know or care about this one.
 >
+> **Since then, 28 August:** sending from the board was found to be broken outright, and it
+> had been broken the whole time. Pressing **Send** on the writing surface issued no request
+> at all whenever there were marks anywhere on the lesson — it raised the *Send what?* chooser
+> instead — so two sittings' working (Galois Theory, Exercise 1.3) sat in `live/slate/` having
+> never been handed in. `live/answers/` in that course was empty and always had been. The
+> working goes first now and the marks are offered afterwards; `board.log` records what
+> arrives, which is what made the diagnosis take an afternoon instead of a week.
+>
 > **What has never been tried, in rough order of how likely it is to be broken:**
 >
-> 1. **Everything shipped after about 20:20 is unverified on a device.** The marker fix (a
+> 1. **The reworked Send, on a device.** It is pressed by `test/interactive.js` now, in a real
+>    DOM, and the request is checked on the wire — but no hand has touched it. The follow-up
+>    offer (*send those as well*) has never been looked at on a screen either.
+> 2. **The plane, the finger setting and the wider surface, on a device.** All three came from
+>    somebody holding an iPad and all three are asserted in `test/plane.js` and `test/chrome.js`
+>    — in jsdom, with no layout engine and no canvas backend. What a test cannot tell you: how
+>    far out the zoom *feels* like it should go, whether half a second of palm suppression is
+>    the right half second, and whether the bled-out surface looks right beside cards that keep
+>    the 46rem measure. The knobs are `ROOM`, `ZOOM_MIN` and `PALM_MS` at the top of
+>    `web/slate-core.js`, and `--room` on `#writer` in `web/board.css`.
+> 3. **Everything shipped after about 20:20 on 26 August is unverified on a device.** The marker fix (a
 >    highlighter now stays pale in the export instead of coming out as a black smudge), the
 >    receipt under the writing surface, the writing surface moving *below* the tutor's feedback,
 >    the six-control title bar with the `⋯` menu, and the contents panel (`☰`). All of it passes
 >    tests; none of it has been looked at.
-> 2. **The writing surface after a reload.** It vanished entirely once, because it survived a
+> 4. **The writing surface after a reload.** It vanished entirely once, because it survived a
 >    send only through an in-memory pin. It is now decided from the transcript — a question stays
 >    open until a `correct` card settles it. Close the app mid-correction and check there is
 >    still somewhere to write.
-> 3. **Leaving and saving.** The exit offer appears, but nobody has ever tapped *Save and push*.
+> 5. **Leaving and saving.** The exit offer appears, but nobody has ever tapped *Save and push*.
 >    The server side is tested; the button reaching it is not.
-> 4. **Asking a question on the slate.** The tutor is now told to answer a question before
+> 6. **Asking a question on the slate.** The tutor is now told to answer a question before
 >    assessing any working, and never to label a question `wrong`. Write *"am I on the right
 >    track?"* with no working and see what comes back.
-> 5. **A second turn in a headless session.** Turns after the first now resume the agent's own
+> 7. **A second turn in a headless session.** Turns after the first now resume the agent's own
 >    session rather than re-reading the whole contract. If a resume fails it retries once as a
 >    fresh turn. Only the first turn of each course has actually been watched.
-> 6. **The homework write-up, end to end.** Statements are transcribed and `hw01.pdf` compiles.
+> 8. **The homework write-up, end to end.** Statements are transcribed and `hw01.pdf` compiles.
 >    Nobody has yet agreed an answer and watched it land in a solution region.
-> 7. **`board eyes`** has never been run against the headless agent, and a homework sitting
+> 9. **`board eyes`** has never been run against the headless agent, and a homework sitting
 >    depends on it reading an assignment PDF. It read one tonight, so it works — but that is one
 >    observation, not a check.
 >
-> 8. **`tutor restart --tutors` on a busy daemon.** It now refuses to claim a restart it did
+> 10. **`tutor restart --tutors` on a busy daemon.** It now refuses to claim a restart it did
 >    not perform — the first run of `ship.sh` reported "tutors restarted: Probability" while the
 >    old process was still writing its handoff, because `agent_start` answers "already
 >    listening" with a success code. Fixed by comparing pids; worth watching once.
-> 9. **Galois Theory has no tutor attached** as of tonight — its daemon was stopped earlier and
->    never came back. `tutor headless galois` starts one.
+> 11. **Galois Theory** had no tutor attached on the 26th; it has one again as of 28 August
+>    (`claude`, listening). `tutor headless galois` is what starts one.
 >
 > **What was learned tonight that is worth not relearning:** a board is a process and holds old
 > code (hence `scripts/ship.sh`); a headless agent with no `.claude/settings.local.json` reads,
@@ -161,6 +179,13 @@ these tests fail, the test is right.
 | A `begin` signal sent while no tutor was attached was invisible for ever: `board wait` took the unread count at start as a baseline and returned only when it grew, so the first tap did nothing and the second one woke it | `test/begin.py` |
 | A resumed turn was told to re-read the contract, the method, the handoff and every card — about fourteen thousand tokens it was already carrying, plus a round trip per card | `test/tokens.py` |
 | The "is a tutor attached" dot could never go green outside headless: only the daemon ever wrote `agent.json`, and a heartbeat is the wrong test for a session that is idle whenever its person is thinking | `test/agents.py`, `test/begin.py` |
+| Pressing Send did nothing: with marks anywhere on the lesson the handler raised the *Send what?* chooser and issued no request, so an evening's working sat unsent for two days. Every existing assertion about Send checked that the button was in the right column and had not scrolled off the edge; none pressed it. The old chooser test called `askWhatToSend` directly and asserted the deferral, so the suite endorsed the bug | `test/interactive.js` presses the real button and watches the wire; `test/link.js` |
+| Sending re-delivered every mark on the board, and marks autosaved in a previous sitting counted as "there are marks" for ever — because the only thing tracked was whether ink had reached *disk*, which the autosave clears about a second after the pen lifts | `sent` in `live/annotations/<card>.json`, `notes_sent` on the payload, `test/annotate.py`, `test/link.js` |
+| `board.log` held nothing but "listening", so a send that never left the iPad and a send the server rejected were the same observation: silence. Diagnosing the first cost a scratch server and a jsdom probe | `log_request` in `serve.py`, `test/annotate.py` |
+| A turn id was unique for the life of a *lesson*, not of the course: `board archive` renames `turns.jsonl` into the archive and leaves `messages.jsonl` where it is, so filing a chapter sent the counter back to `t0001` while the inbox still held every id ever issued — two different turns, one name, and `turn_revision` offering rev 1 for something already sent | `.turnseq` plus the inbox and `answers/` as the high-water mark, `test/transcript.py` |
+| A finger swipe wrote a line instead of scrolling, on every fresh load: the rule was a latch ("a finger draws until a pen has been seen"), and a latch is a variable | `tool.finger`, persisted; `test/plane.js` |
+| Zooming out found a hard edge one screen away, because the page was a box and the view was clamped to it | `reach()` in `slate-core.js`, `test/plane.js` |
+| The export rasterised the whole page at one pixel per logical unit, which only ever worked because the page was the size of the screen — on a plane it is unbounded work and an unbounded upload | `pngBox` crops to the ink and caps, `test/plane.js` |
 
 The pattern in most of them: a stub that returns a plausible object for everything will report that
 a broken page loads fine. `test/interactive.js` and `test/sizing.js` use a real DOM for that
@@ -270,11 +295,29 @@ time. Pinned to the card, it moves with the words it is about.
 
 They save themselves about a second after the pen lifts, so a reload never costs them.
 
-When you press **Send** and there is working on the slate *and* marks on the lesson, the
-board asks which: *my working*, *my annotations*, or *both*. With only one of the two, it
-just sends. Marks made when no answer is owed — on a card from ten minutes ago — get their
-own **send my annotations** button, because otherwise they would be stranded with no Send
-button anywhere on the page.
+**Send always sends.** It used to ask first: with marks anywhere on the board, pressing
+Send on the writing surface issued no request at all and raised a *Send what?* bar
+instead, and the answer went out only on a second tap. A Send button that does nothing is
+worse than no Send button, and it cost a real answer — an evening's working sat in
+`live/slate/` for two days while the student believed it had been handed in, and the
+board's own receipt never appeared, because the code that writes it was never reached.
+
+So the working goes first, unconditionally; the button sits on the surface holding the
+working, and that is what it means. If there are marks on the lesson that have not been
+sent, they are then *offered* — **send those as well** — which cannot lose anything,
+because by then the working has gone. Writing nothing and marking a card is the one
+exception: with an empty surface the marks are the answer, and a blank page is not sent
+alongside them.
+
+Marks made when no answer is owed — on a card from ten minutes ago — get their own **send
+my annotations** button, because otherwise they would be stranded with no Send button
+anywhere on the page.
+
+*Unsent* means unsent. Which cards have been handed over is recorded next to the ink, in
+`live/annotations/<card>.json`, and comes back on the payload — so a reload can tell ink
+that was delivered from ink that was only ever autosaved. Without that record, marks made
+in one sitting and forgotten went on demanding a decision every time anything was sent,
+for ever, and sending re-delivered them as a fresh turn each time.
 
 What the tutor receives is the ink and the card it sits on, plus roughly where — *near the
 top*, *in the middle*. It wrote that card and reads it back off disk, so it does not need a
@@ -1298,6 +1341,59 @@ tells the assistant to look at it. The **live**
 toggle does that automatically whenever writing pauses, at most once every fifteen seconds — that
 is the mode for being watched while you work.
 
+### The surface is a plane, not a page
+
+A page used to be a box: created at the size of the surface showing it, clamped
+so the view could never leave it, and enlarged only by pressing a *taller* button.
+Which means running out of room in the middle of a derivation, and zooming out to
+find a hard edge one screen away in every direction.
+
+Now panning is clamped to the *ink* instead — whatever has been written, plus a
+viewport of clear space beyond it, in every direction including above and to the
+left of the origin. Write into that space and it moves outward again. There is no
+edge to reach, and no **taller** button, because there is nothing to enlarge.
+Zoom out reaches a twelfth of fit scale rather than a half. **⤢** now means *show
+me everything I have written*, which on a plane is not the same as *fit the page*.
+
+The clamp still exists, deliberately: a stray pinch cannot fling the surface into
+empty space a mile from the nearest word, which is how an unbounded canvas
+usually goes wrong.
+
+**And it costs nothing to hand in.** What the tutor is sent is a picture of the
+writing, not of the plane: the image is cropped to the ink, padded, and then
+scaled down if it is still large (2000 px on the longest side). Cost is
+proportional to how much was written rather than to how far the canvas reaches —
+the same three lines of algebra export to the same ~700×400 image whether the
+plane around them is 800 units across or 8000. It used to rasterise the whole
+page at one pixel per unit, which was survivable only because the page was the
+size of the screen.
+
+The surface also breaks out of the reading column. `#board` carries a 46rem
+measure because prose needs one; sharing it made the writing area about half an
+iPad in landscape. Cards keep the measure, the surface bleeds to the width of the
+device (capped, so a large display does not get an absurd one), and its height is
+`74svh` — `svh` rather than `vh`, because on iOS `vh` is the tallest the viewport
+ever gets and anything sized in it spends its first screenful under the browser
+chrome.
+
+### A finger is not a pen
+
+Swiping with a finger used to write. The rule was a latch — *a finger draws until
+a pen has been seen, and after that a finger is a palm* — and a latch is a
+variable, so every reload handed the first swipe to the ink. It also left somebody
+with no stylus no way to say so.
+
+It is a setting now, in the **⋯** menu under **Finger**: *scrolls* (the default)
+or *writes*. Remembered per device in `localStorage`, because it is a property of
+how you work and what is in your other hand, not of a lesson. The lesson's
+annotation layer reads the same setting — it had its own copy of the old latch, so
+the two surfaces disagreed about the same hand.
+
+With a finger set to scroll, one finger pans, two pinch, and the pen writes.
+Anything the hand does is ignored for half a second after the pen last reported,
+which is what palm rejection actually is: without it, the heel of a hand resting
+on the glass drags the canvas out from under the nib mid-word.
+
 ### What the slate can do
 
 Strokes are stored as vectors rather than pixels, which is what makes the editing possible.
@@ -1311,9 +1407,11 @@ Strokes are stored as vectors rather than pixels, which is what makes the editin
   so does Delete.
 - **Six inks, three nibs**, pressure-sensitive width.
 - **Zoom and pan** — pinch to zoom, one finger to pan, trackpad pinch on a laptop. The pen always
-  writes; a finger never draws once a pen has been seen, which is the whole of palm rejection.
-  Zoom is clamped and the page cannot be lost off-screen.
-- **Pages**, and a **↕** button to make the current page taller when a proof runs long.
+  writes; whether a finger does is a setting (**⋯ → Finger**), and touch is ignored for half a
+  second after the pen last reported, which is the whole of palm rejection. Panning is clamped to
+  the ink and the space around it, so the surface cannot be lost off-screen.
+- **Pages**, for starting somewhere clean. A page no longer has to be made taller — it is a
+  plane, and it grows into whatever you write on it.
 - Grid, ruled, or blank paper. Undo is 60 deep and covers selection edits, not just strokes.
 
 ### What it deliberately cannot do

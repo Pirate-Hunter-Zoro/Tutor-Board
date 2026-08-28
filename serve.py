@@ -254,21 +254,88 @@ def load_turns(repo, path=None):
     return [latest[t] for t in order]
 
 
-def next_turn_id(repo):
+# A turn id must be unique for the life of the course, and it was only unique
+# for the life of one lesson.
+#
+# `board archive` RENAMES turns.jsonl into the archive folder and leaves
+# messages.jsonl exactly where it is -- the inbox is the assistant's mailbox and
+# is never rotated. So the moment a chapter was filed, the id counter went back
+# to t0001 while the inbox still held every id ever issued, and the next answer
+# was written into the inbox as a second, different `t0001 rev 1`. Two turns, one
+# name: anything joining an inbox line to a turn joined the wrong one, and
+# `turn_revision` reported rev 1 for a card that already had one.
+#
+# The high-water mark therefore comes from every place that can still name a
+# turn, and is remembered in a file the archive does not move.
+TURN_SEQ = ".turnseq"
+TURN_ID_RE = re.compile(r"^t(\d+)")
+
+
+def _turn_n(value):
+    m = TURN_ID_RE.match(str(value or ""))
+    return int(m.group(1)) if m else 0
+
+
+def turn_hwm(repo):
+    """The highest turn number this course has ever issued."""
     n = 0
+    try:
+        with open(os.path.join(repo.live, TURN_SEQ), "r", encoding="utf-8") as fh:
+            n = int((fh.read() or "0").strip() or 0)
+    except (OSError, ValueError):
+        n = 0
+    # The current lesson's transcript.
     for rec in load_turns(repo):
-        try:
-            n = max(n, int(str(rec.get("id", "t0"))[1:]))
-        except ValueError:
-            pass
-    return "t%04d" % (n + 1)
+        n = max(n, _turn_n(rec.get("id")))
+    # The inbox, which is never rotated and is therefore the real history.
+    for rec in load_messages(repo, limit=10 ** 9):
+        n = max(n, _turn_n(rec.get("id")))
+    # Frozen answers, named <turn>-r<rev>. Belt and braces: a file on disk that
+    # a new turn could overwrite is worth one listdir.
+    try:
+        for name in os.listdir(repo.answers):
+            n = max(n, _turn_n(name))
+    except OSError:
+        pass
+    return n
+
+
+def bump_turn_hwm(repo, tid):
+    n = _turn_n(tid)
+    if not n:
+        return
+    try:
+        with open(os.path.join(repo.live, TURN_SEQ), "r", encoding="utf-8") as fh:
+            have = int((fh.read() or "0").strip() or 0)
+    except (OSError, ValueError):
+        have = 0
+    if n <= have:
+        return
+    try:
+        with open(os.path.join(repo.live, TURN_SEQ), "w", encoding="utf-8") as fh:
+            fh.write("%d\n" % n)
+    except OSError:
+        pass
+
+
+def next_turn_id(repo):
+    return "t%04d" % (turn_hwm(repo) + 1)
 
 
 def turn_revision(repo, tid):
+    """Which revision the next write of `tid` is.
+
+    Read from the transcript AND the inbox: after an archive the transcript no
+    longer has the turn, and answering "rev 1" for something already sent is how
+    a revision came to overwrite the thing it was revising.
+    """
     rev = 0
     for rec in load_turns(repo):
         if rec.get("id") == tid:
-            rev = rec.get("rev", 1)
+            rev = max(rev, rec.get("rev", 1))
+    for rec in load_messages(repo, limit=10 ** 9):
+        if rec.get("id") == tid:
+            rev = max(rev, rec.get("rev", 1))
     return rev + 1
 
 
@@ -417,6 +484,8 @@ def newest_question(repo):
 def write_turn(repo, rec):
     with open(repo.turns_path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(rec) + "\n")
+    # So the counter survives this lesson being filed away.
+    bump_turn_hwm(repo, rec.get("id"))
 
 
 # ---------------------------------------------------------------------------
@@ -559,6 +628,31 @@ def load_hw(repo):
     except (OSError, ValueError):
         st["build"] = None
     return st
+
+
+def load_notes_sent(repo):
+    """Which cards' marks have already been handed to the tutor.
+
+    Kept beside `load_notes` rather than folded into it because the shape of
+    `notes` is a contract with `Annotate.load`, and widening it there would mean
+    every mark on the board arriving in a new shape for the sake of one boolean.
+    """
+    out = {}
+    try:
+        names = sorted(os.listdir(repo.notes))
+    except OSError:
+        return out
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(repo.notes, name), "r", encoding="utf-8") as fh:
+                rec = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if rec.get("card"):
+            out[rec["card"]] = bool(rec.get("sent"))
+    return out
 
 
 def load_notes(repo):
@@ -1037,6 +1131,7 @@ class Hub:
             "uploads": load_uploads(self.repo),
             "slate": load_slate(self.repo),
             "notes": load_notes(self.repo),
+            "notes_sent": load_notes_sent(self.repo),
             "unsaved": repo_dirty(self.repo),
             "push": load_push(self.repo),
             "agent": load_agent(self.repo),
@@ -1140,6 +1235,48 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         pass
+
+    # A request log, deliberately narrow.
+    #
+    # `board.log` used to hold nothing but "listening", which made two very
+    # different failures the same observation: a send that never left the iPad
+    # and a send this server rejected both looked like silence. Diagnosing the
+    # first one cost a scratch server and a jsdom probe. Now the file says what
+    # arrived.
+    #
+    # The poll and the stream are left out on purpose. /board.json is asked for
+    # several times a second and /events never ends, so logging either buries
+    # the one line anybody actually wants -- but a failure is logged whatever
+    # the path, because a 500 on the poll is worth knowing about.
+    QUIET_GET = re.compile(
+        r"^/(events|board\.json|courses\.json|health|static/|figure/|"
+        r"icon-\d+\.png|apple-touch-icon\.png|manifest\.webmanifest|sw\.js|"
+        r"slate/(page-|state)|answers/|uploads/|notes/|favicon)")
+
+    def log_request(self, code="-", size="-"):
+        try:
+            status = int(code)
+        except (TypeError, ValueError):
+            status = 0
+        path = (self.path or "").split("?", 1)[0]
+        if self.command == "GET" and status < 400 and self.QUIET_GET.match(path):
+            return
+        length = ""
+        try:
+            n = int((self.headers or {}).get("Content-Length") or 0)
+            if n:
+                length = " %d bytes in" % n
+        except (TypeError, ValueError):
+            pass
+        self.note("%s %s -> %s%s" % (self.command, path, code, length))
+
+    def note(self, line):
+        """One timestamped line into board.log, which is this process's stderr."""
+        try:
+            sys.stderr.write("[%s] %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), line))
+            sys.stderr.flush()
+        except (OSError, ValueError):
+            pass
 
     # -- helpers ---------------------------------------------------------
     def send_bytes(self, data, ctype, cache=False, status=200, nosniff=False, extra=None):
@@ -1415,8 +1552,17 @@ class Handler(BaseHTTPRequestHandler):
             if not re.match(r"^\d{1,4}$", card):
                 return self.send_json({"ok": False, "error": "bad card"}, status=400)
             strokes = payload.get("strokes") or []
+            # Whether these marks have been handed to the tutor, recorded next
+            # to them. Without it a reload cannot tell ink that was delivered
+            # from ink that was only ever autosaved, so yesterday's forgotten
+            # marks went on demanding a decision every time anything was sent.
+            # A plain save only ever arrives for a card that just changed, so
+            # "not a send" is exactly the right moment to clear the flag.
+            sent = bool(payload.get("send"))
             with open(os.path.join(repo.notes, card + ".json"), "w", encoding="utf-8") as fh:
-                json.dump({"card": card, "strokes": strokes}, fh)
+                json.dump({"card": card, "strokes": strokes, "sent": sent}, fh)
+            self.note("annotate card %s: %d strokes, %s"
+                      % (card, len(strokes), "SENT" if sent else "saved only"))
 
             png = payload.get("png") or ""
             marker = "base64,"
@@ -1548,8 +1694,12 @@ class Handler(BaseHTTPRequestHandler):
                 with open(repo.messages_path, "a", encoding="utf-8") as fh:
                     fh.write(json.dumps(msg) + "\n")
                 self.server.hub.worker.dirty.set()
+                self.note("slate page %d: %d strokes, SENT as %s rev %d answering %s"
+                          % (n, len(strokes), tid, rev, record["answers"] or "-"))
                 return self.send_json({"ok": True, "page": n, "turn": tid, "rev": rev})
             self.server.hub.worker.dirty.set()
+            self.note("slate page %d: %d strokes, saved only (not sent)"
+                      % (n, len(payload.get("strokes") or [])))
             return self.send_json({"ok": True, "page": n})
 
         if path == "/say":

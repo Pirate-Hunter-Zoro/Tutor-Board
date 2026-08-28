@@ -181,6 +181,39 @@ setTimeout(() => setTimeout(() => {
     ? ok('a pen stroke lands, with the network still unanswered')
     : fail('a pen stroke produced nothing (' + before + ' -> ' + after + ')');
 
+  // Pressing Send must produce a request. Not "be present", not "be reachable" --
+  // produce a request.
+  //
+  // Every existing assertion about Send checked that the button was in the right
+  // column and had not scrolled off the edge, and all of them passed while the
+  // button did nothing at all: with marks anywhere on the lesson, the handler
+  // raised a chooser and issued no fetch, and the answer went out only on a
+  // second tap nobody knew was owed. So this presses the real button and watches
+  // the wire.
+  {
+    const sendBtn = chrome.querySelector('.sl-send');
+    const seen = [];
+    const realFetch = window.fetch;
+    window.fetch = (u, o) => {
+      seen.push({ url: String(u), body: o && o.body ? JSON.parse(o.body) : null });
+      return Promise.resolve({ json: () => Promise.resolve({ ok: true, page: 1, turn: 't0002', rev: 1 }) });
+    };
+    // The state that broke it: ink on the surface AND marks on a card.
+    if (window.Annotate) {
+      window.Annotate.load({ '0001': [{ c: '#e0b45c', w: 2, p: [0.1, 0.1, 0.5, 0.5] }] });
+    }
+    if (sendBtn && sendBtn.onclick) sendBtn.onclick();
+
+    const sent = seen.filter((r) => r.url.indexOf('/slate/save') !== -1 && r.body && r.body.send);
+    sent.length
+      ? ok('pressing Send posts the working, with marks on the lesson present')
+      : fail('pressing Send posted nothing — the working is held behind a prompt');
+    sent.length && sent[0].body.strokes && sent[0].body.strokes.length
+      ? ok('and the ink is in the body, not an empty page')
+      : fail('Send posted an empty page');
+    window.fetch = realFetch;
+  }
+
   // Send must be in a column that cannot be squeezed away, not merely present.
   const bar = chrome.querySelector('.sl-bar');
   const acts = chrome.querySelector('.sl-acts');

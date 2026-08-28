@@ -469,8 +469,25 @@ body.tools-out { padding-bottom: 5.5rem; }
 /* ---------- the answer block, inline in the lesson ---------- */
 /* Part of the flow, under the question it answers. It never covers anything,
    and it is always the same size, so there is nothing to drag or discover. */
+/* The writing surface breaks out of the reading column.
+ 
+   Prose wants a measure -- 46rem, which is why #board has one -- and handwriting
+   wants the glass. Sharing one width meant the surface was about half the screen
+   on an iPad in landscape and less than that on a laptop, while the whole point
+   of the thing is the area you have to write in.
+ 
+   So the surface alone bleeds out to the width of the device and every card
+   stays at a readable line length. Done with margins rather than a transform: a
+   translate of an odd-width box lands the canvas on a half pixel, and a
+   half-pixel canvas is a soft one, which on a handwriting surface is the one
+   thing you would notice. `--room` caps how far it may go, so a 27-inch display
+   does not get a four-foot writing surface; an iPad is inside the cap and
+   therefore goes edge to edge. */
 #writer {
-  margin: .5rem 0 2.2rem;
+  --gap: max(.5rem, env(safe-area-inset-left));
+  --room: 22rem;
+  --bleed: min(0px, max(calc(50% - 50vw + var(--gap)), calc(-1 * var(--room))));
+  margin: .5rem var(--bleed) 2.2rem;
   border: 1px solid #2c2f37;
   border-radius: .8rem;
   overflow: hidden;
@@ -496,8 +513,15 @@ body.tools-out { padding-bottom: 5.5rem; }
 #skip:hover { background: #2c2f37; color: #e9e7e2; }
 #skip:disabled { opacity: .5; cursor: default; }
 
+/* And taller, scaled to the device.
+ 
+   `svh` rather than `vh`: on iOS `vh` is the tallest the viewport ever gets, so
+   anything sized in it spends its first screenful underneath the browser chrome.
+   The `vh` line stays as the fallback for anything that does not know `svh` --
+   a browser that ignores the second declaration keeps the first. */
 #writer #slate {
-  height: clamp(20rem, 60vh, 46rem);
+  height: clamp(18rem, 68vh, 60rem);
+  height: clamp(18rem, 74svh, 60rem);
 }
 
 #btn-clip {

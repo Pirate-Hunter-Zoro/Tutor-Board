@@ -40,6 +40,44 @@ var RESAMPLE = 0.8;         /* logical units between rendered points */
 var MIN_STEP = 0.5;         /* how far the pen must travel to record a point */
 var POLISH = 2;             /* smoothing passes over a finished stroke */
 
+/* The page is a window onto a plane, not the plane itself.
+
+   A page used to be a box: created at the size of the surface, clamped so the
+   view could never leave it, and enlarged only by pressing "taller". Which
+   means running out of room mid-derivation, and zooming out to find a hard edge
+   a screen away in every direction.
+
+   So panning is clamped to the ink instead -- whatever has been written, plus
+   this much fresh space beyond it, measured in viewports. Write into that space
+   and it moves outward again, in every direction, negative coordinates
+   included. There is no edge to reach. */
+var ROOM = 1.0;             /* viewports of empty space beyond the ink */
+var ZOOM_MIN = 1 / 12;      /* how far out you may zoom, relative to fit */
+var ZOOM_MAX = 8;
+
+/* What the tutor is sent is a picture of the WRITING, not of the plane it sits
+   on -- so an unbounded canvas costs nothing to hand in. The image is cropped
+   to the ink and then capped, and both halves matter: cropping alone would
+   still rasterise a page-wide derivation at 1:1, and capping alone would spend
+   the whole budget on empty paper. */
+var PNG_PAD = 26;           /* logical units of margin around the ink */
+var PNG_MAX_EDGE = 2000;    /* longest side of the image, in pixels */
+var PNG_MAX_AREA = 2600 * 2600;
+
+/* Remembered per device, because it is a property of how somebody works and of
+   what they are holding, not of a lesson. */
+var STORE_KEY = "tutor-board.slate.finger";
+
+function remembered(key, fallback) {
+  try {
+    var v = window.localStorage.getItem(key);
+    return v === null ? fallback : v;
+  } catch (e) { return fallback; }
+}
+function remember_(key, value) {
+  try { window.localStorage.setItem(key, value); } catch (e) { /* private mode */ }
+}
+
 var PAPERS = {
   black: { bg: "#101114", rule: "#23262c", ink: "#f2f4f7" },
   white: { bg: "#fdfdfb", rule: "#dfe6ee", ink: "#16171a" },
@@ -194,10 +232,25 @@ function create(opts) {
   var pages = [];
   var current = 0;
   var undoStack = [], redoStack = [], clipboard = [];
+  /* `finger`: "scroll" or "write".
+
+     It used to be neither -- it was a latch. A finger drew until the first time
+     a pen touched the glass, and from then on a finger was treated as a palm.
+     Which is wrong twice: a swipe writes a line across the page every time the
+     app is opened before the Pencil is picked up (the latch is a variable, so it
+     resets on every load), and somebody with no stylus at all has no way to say
+     so. Nebo asks the question once and remembers the answer; so does this. */
   var tool = { mode: "pen", color: PALETTE_DARK[0], width: 3.2,
-               paper: "black", rule: "plain", live: false };
+               paper: "black", rule: "plain", live: false,
+               finger: remembered(STORE_KEY, "scroll") === "write" ? "write" : "scroll" };
   var drawing = null, lasso = null, sel = null, dragging = null;
-  var penSeen = false, dirty = false, lastLiveSend = 0;
+  var dirty = false, lastLiveSend = 0;
+  /* When the pen last reported anything. A palm resting on the glass is a touch
+     like any other, and with a finger set to scroll it would drag the canvas out
+     from under the nib. Touch panning is therefore ignored for a moment after
+     any pen activity -- which is what palm rejection actually is. */
+  var lastPenAt = 0;
+  var PALM_MS = 500;
   var saveTimer = null, liveTimer = null, rafPending = false;
   var touches = {}, pinch = null;
 
@@ -290,7 +343,18 @@ function create(opts) {
   rPages.appendChild(pageTag);
   var bNext = mk(rPages, "sl-t sl-icon-only", '<span class="sl-i">' + ICON.next + '</span>', "next");
   var bAdd = mk(rPages, "sl-t", "+", "new page");
-  var bTaller = mk(rPages, "sl-t", "↕", "taller");
+
+  /* Not a preference buried in a settings screen: whether a finger writes is the
+     difference between a usable surface and an unusable one, and which way round
+     it should be depends on what is in the other hand. */
+  var rFinger = menuRow("Finger");
+  var fingerBtns = [["scroll", "scrolls"], ["write", "writes"]].map(function (a) {
+    var b = mk(rFinger, "sl-chip" + (a[0] === tool.finger ? " sel" : ""), a[1],
+               a[0] === "scroll" ? "a finger pans and pinches; only the pen writes"
+                                 : "a finger writes too — for a device with no stylus");
+    b.dataset.finger = a[0];
+    return b;
+  });
 
   var rZoom = menuRow("Zoom");
   var bZoomOut = mk(rZoom, "sl-t", "−", "out");
@@ -387,6 +451,38 @@ function create(opts) {
     markDirty();
   }
 
+  /* Where the writing actually is, over the whole page.
+
+     Cached, because the pan clamp needs it on every frame of a drag and walking
+     every point of every stroke sixty times a second is exactly the kind of cost
+     this file has been bitten by before. Invalidated by content changing, not by
+     the view moving. */
+  var inkCache = null;
+  function dropInk() { inkCache = null; }
+
+  function inkBox() {
+    if (!inkCache) inkCache = inkBoxOf(page());
+    return inkCache;
+  }
+
+  /* The region the view is allowed into: the nominal page, plus everything
+     written, plus a viewport of clear space in every direction. Writing into
+     that space grows it, so the plane has no edge -- but the clamp still exists,
+     so a stray pinch cannot fling the surface into empty space a mile from the
+     nearest word, which is the way an unbounded canvas usually goes wrong. */
+  function reach() {
+    var p = page();
+    var vw = wrap.clientWidth / view.k, vh = wrap.clientHeight / view.k;
+    var mx = vw * ROOM, my = vh * ROOM;
+    var x0 = 0, y0 = 0, x1 = p ? p.w : vw, y1 = p ? p.h : vh;
+    var b = inkBox();
+    if (b) {
+      x0 = Math.min(x0, b.x0); y0 = Math.min(y0, b.y0);
+      x1 = Math.max(x1, b.x1); y1 = Math.max(y1, b.y1);
+    }
+    return { x0: x0 - mx, y0: y0 - my, x1: x1 + mx, y1: y1 + my };
+  }
+
   /* ------------------------------------------------------------ the view */
   /* `held` records that the zoom is the writer's, not the component's. Once it
      is set, nothing but an explicit Fit, or turning to another page, is allowed
@@ -412,21 +508,40 @@ function create(opts) {
     invalidate();
   }
 
+  /* ⤢ means "show me what I have written", which on a plane is not the same as
+     "fit the nominal page". With nothing written yet it falls back to the page,
+     because fitting an empty box is the only sensible reading. */
+  function fitContent() {
+    var b = inkBox();
+    if (!b || !wrap.clientWidth) return fitPage();
+    var pad = 24;
+    var w = (b.x1 - b.x0) + pad * 2, h = (b.y1 - b.y0) + pad * 2;
+    var k = Math.min(wrap.clientWidth / w, wrap.clientHeight / h);
+    view.k = Math.max(view.fit * ZOOM_MIN, Math.min(view.fit * ZOOM_MAX, k));
+    view.held = true;
+    view.ox = (wrap.clientWidth - (b.x1 - b.x0) * view.k) / 2 - b.x0 * view.k;
+    view.oy = (wrap.clientHeight - (b.y1 - b.y0) * view.k) / 2 - b.y0 * view.k;
+    clampView();
+    invalidate();
+  }
+
   function clampView() {
     var p = page();
     if (!p) return;
-    var m = 60;
-    var w = p.w * view.k, h = p.h * view.k;
-    /* Horizontally: never leave a gap when the page is at or wider than the
-       surface, so the writing area always fills the width. */
-    view.ox = w <= wrap.clientWidth ? (wrap.clientWidth - w) / 2
-            : Math.min(0, Math.max(wrap.clientWidth - w, view.ox));
-    view.oy = h <= wrap.clientHeight ? (wrap.clientHeight - h) / 2
-            : Math.min(0, Math.max(wrap.clientHeight - h, view.oy));
+    /* The old rule pinned the view to the page box and centred anything smaller
+       than the surface, which is why zooming out found a wall a screen away and
+       why the surface sprang back to the middle when you tried to pan past it. */
+    var r = reach();
+    var cw = wrap.clientWidth, ch = wrap.clientHeight;
+    var w = (r.x1 - r.x0) * view.k, h = (r.y1 - r.y0) * view.k;
+    if (w <= cw) view.ox = (cw - w) / 2 - r.x0 * view.k;
+    else view.ox = Math.min(-r.x0 * view.k, Math.max(cw - r.x1 * view.k, view.ox));
+    if (h <= ch) view.oy = (ch - h) / 2 - r.y0 * view.k;
+    else view.oy = Math.min(-r.y0 * view.k, Math.max(ch - r.y1 * view.k, view.oy));
   }
 
   function setZoom(k, cx, cy) {
-    k = Math.max(view.fit * 0.5, Math.min(view.fit * 8, k));
+    k = Math.max(view.fit * ZOOM_MIN, Math.min(view.fit * ZOOM_MAX, k));
     view.held = true;
     var r = sheetRect();
     if (cx === undefined) { cx = r.width / 2; cy = r.height / 2; }
@@ -490,19 +605,29 @@ function create(opts) {
   }
 
   /* -------------------------------------------------------------- render */
+  /* The paper is whatever is on screen. It used to be the page box, which on a
+     plane means panning off the edge of the paper into a transparent void -- and
+     the ruling stopping dead at an invisible line is worse than no ruling. */
   function paintPaper(c, p, scale) {
     var skin = PAPERS[tool.paper];
+    var x0 = -view.ox / view.k, y0 = -view.oy / view.k;
+    var x1 = x0 + wrap.clientWidth / view.k, y1 = y0 + wrap.clientHeight / view.k;
     c.fillStyle = skin.bg;
-    c.fillRect(0, 0, p.w, p.h);
+    c.fillRect(x0, y0, x1 - x0, y1 - y0);
     if (tool.rule === "plain") return;
+    var step = ruleStep(p);
+    /* Anchored to the origin, so the ruling does not crawl as the view moves. */
     c.strokeStyle = skin.rule;
     c.lineWidth = 1 / scale;
     c.beginPath();
-    var step = Math.max(28, Math.round(p.w / 22));
-    for (var y = step; y < p.h; y += step) { c.moveTo(0, y); c.lineTo(p.w, y); }
-    if (tool.rule === "grid") for (var x = step; x < p.w; x += step) { c.moveTo(x, 0); c.lineTo(x, p.h); }
+    for (var y = Math.ceil(y0 / step) * step; y < y1; y += step) { c.moveTo(x0, y); c.lineTo(x1, y); }
+    if (tool.rule === "grid") {
+      for (var x = Math.ceil(x0 / step) * step; x < x1; x += step) { c.moveTo(x, y0); c.lineTo(x, y1); }
+    }
     c.stroke();
   }
+
+  function ruleStep(p) { return Math.max(28, Math.round((p && p.w ? p.w : 900) / 22)); }
 
   /* `onDark` is a property of the surface being painted, not of the current
      paper: the same function draws the live canvas and the PNG, and the PNG is
@@ -703,7 +828,7 @@ function create(opts) {
   }
 
   sheet.addEventListener("pointerdown", function (ev) {
-    if (ev.pointerType === "pen") penSeen = true;
+    if (ev.pointerType === "pen") lastPenAt = Date.now();
     ev.preventDefault();
     sheet.setPointerCapture(ev.pointerId);
 
@@ -714,7 +839,10 @@ function create(opts) {
         var a = touches[ids[0]], b = touches[ids[1]];
         pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), k: view.k };
       }
-      if (penSeen) return;
+      /* A finger scrolls unless it has been told to write. It used to be the
+         other way about until a pen had been seen at least once, which meant the
+         first swipe of every session drew a line across the page. */
+      if (tool.finger !== "write") return;
     }
 
     var pt = toLogical(ev);
@@ -729,10 +857,15 @@ function create(opts) {
   });
 
   sheet.addEventListener("pointermove", function (ev) {
+    if (ev.pointerType === "pen") lastPenAt = Date.now();
     if (touches[ev.pointerId]) {
       var prev = touches[ev.pointerId];
       touches[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
       var ids = Object.keys(touches);
+      /* The heel of a hand is a touch. With a finger set to scroll it would drag
+         the canvas out from under the nib mid-word, so anything the hand does is
+         ignored for a moment after the pen last reported. */
+      if (Date.now() - lastPenAt < PALM_MS) return;
       if (ids.length === 2 && pinch) {
         var a = touches[ids[0]], b = touches[ids[1]];
         var r = sheetRect();
@@ -749,7 +882,9 @@ function create(opts) {
         return;
       }
     }
-    if (ev.pointerType !== "pen" && penSeen) return;
+    /* Past the pan and pinch handling: a finger that is not allowed to write has
+       nothing further to do here. A mouse still draws -- this is about hands. */
+    if (ev.pointerType === "touch" && tool.finger !== "write") return;
 
     if (dragging) {
       var q = toLogical(ev);
@@ -811,6 +946,24 @@ function create(opts) {
     }
   }
 
+  /* The nominal page follows the writing outwards. `w` and `h` are what another
+     device scales to fit on arrival and what the ruling is spaced from, so they
+     have to mean something once the plane is being used; they are the extent of
+     the page, not a boundary on it. Ink at negative coordinates is allowed and
+     is carried by the strokes themselves -- the export is cropped to the ink, so
+     nothing written above or left of the origin is lost. */
+  function grow(st) {
+    var p = page();
+    if (!p || !st || !st.pts) return;
+    var w = p.w, h = p.h;
+    for (var i = 0; i < st.pts.length; i++) {
+      if (st.pts[i][0] > w) w = st.pts[i][0];
+      if (st.pts[i][1] > h) h = st.pts[i][1];
+    }
+    p.w = Math.ceil(w);
+    p.h = Math.ceil(h);
+  }
+
   function endStroke(ev) {
     if (ev && touches[ev.pointerId]) {
       delete touches[ev.pointerId];
@@ -841,6 +994,7 @@ function create(opts) {
       delete drawing._built;
       livePainted = 0;
       page().strokes.push(drawing);
+      grow(drawing);
     }
     drawing = null;
     invalidate();
@@ -910,20 +1064,71 @@ function create(opts) {
   });
 
   /* -------------------------------------------------------------- export */
+  /* A picture of the writing, not of the plane.
+     
+     This used to rasterise the whole page at one device pixel per logical unit,
+     which was fine only because the page was the size of the screen. On an
+     unbounded canvas that is unbounded work and an unbounded upload -- and it is
+     also the wrong image: a tutor asked to read three lines of algebra should
+     not be handed an acre of blank paper to find them on.
+
+     So the image is the ink's bounding box plus a margin, and then scaled down
+     if that is still large. Cost is proportional to how much was written, not to
+     how far the canvas reaches, which is what makes the infinite canvas free to
+     hand in. */
+  function pngBox(p) {
+    var b = inkBoxOf(p);
+    if (!b) return { x0: 0, y0: 0, w: Math.max(1, p.w), h: Math.max(1, p.h), s: 1 };
+    var x0 = b.x0 - PNG_PAD, y0 = b.y0 - PNG_PAD;
+    var w = (b.x1 - b.x0) + PNG_PAD * 2, h = (b.y1 - b.y0) + PNG_PAD * 2;
+    var s = Math.min(1, PNG_MAX_EDGE / Math.max(w, h));
+    if (w * s * h * s > PNG_MAX_AREA) s = Math.sqrt(PNG_MAX_AREA / (w * h));
+    return { x0: x0, y0: y0, w: w, h: h, s: s };
+  }
+
+  /* The same measurement as inkBox, for an arbitrary page rather than the
+     current one -- toPNG is handed the page to export and the cache belongs to
+     whichever page is on screen. */
+  function inkBoxOf(p) {
+    if (!p || !p.strokes || !p.strokes.length) return null;
+    var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    p.strokes.forEach(function (st) {
+      var pad = (st.w || 1) * (st.hl ? 3 : 1);
+      for (var i = 0; i < st.pts.length; i++) {
+        var q = st.pts[i];
+        if (q[0] - pad < x0) x0 = q[0] - pad;
+        if (q[0] + pad > x1) x1 = q[0] + pad;
+        if (q[1] - pad < y0) y0 = q[1] - pad;
+        if (q[1] + pad > y1) y1 = q[1] + pad;
+      }
+    });
+    return x1 > x0 ? { x0: x0, y0: y0, x1: x1, y1: y1 } : null;
+  }
+
   function toPNG(p) {
+    var box = pngBox(p);
     var c = document.createElement("canvas");
-    c.width = p.w; c.height = p.h;
+    c.width = Math.max(1, Math.round(box.w * box.s));
+    c.height = Math.max(1, Math.round(box.h * box.s));
     var g = c.getContext("2d");
     g.fillStyle = "#ffffff";
-    g.fillRect(0, 0, p.w, p.h);
+    g.fillRect(0, 0, c.width, c.height);
+    /* Logical units from here on: the crop and the scale are in the transform,
+       so the stroke painter and the ruling need to know nothing about either. */
+    g.setTransform(box.s, 0, 0, box.s, -box.x0 * box.s, -box.y0 * box.s);
     if (tool.rule !== "plain") {
+      var step = ruleStep(p);
       g.strokeStyle = "#eef1f4";
-      g.lineWidth = 1;
+      g.lineWidth = 1 / box.s;
       g.beginPath();
-      var step = Math.max(28, Math.round(p.w / 22));
-      for (var y = step; y < p.h; y += step) { g.moveTo(0, y); g.lineTo(p.w, y); }
+      var yEnd = box.y0 + box.h, xEnd = box.x0 + box.w;
+      for (var y = Math.ceil(box.y0 / step) * step; y < yEnd; y += step) {
+        g.moveTo(box.x0, y); g.lineTo(xEnd, y);
+      }
       if (tool.rule === "grid") {
-        for (var x = step; x < p.w; x += step) { g.moveTo(x, 0); g.lineTo(x, p.h); }
+        for (var x = Math.ceil(box.x0 / step) * step; x < xEnd; x += step) {
+          g.moveTo(x, box.y0); g.lineTo(x, yEnd);
+        }
       }
       g.stroke();
     }
@@ -941,6 +1146,7 @@ function create(opts) {
   /* ---------------------------------------------------------------- save */
   function markDirty() {
     dirty = true;
+    dropInk();          /* the writing moved, so its extent did */
     savedTag.textContent = "…";
     savedTag.classList.add("busy");
     clearTimeout(saveTimer);
@@ -1055,7 +1261,7 @@ function create(opts) {
   bRedo.onclick = function () { restoreFrom(redoStack, undoStack); };
   bZoomIn.onclick = function () { setZoom(view.k * 1.25); };
   bZoomOut.onclick = function () { setZoom(view.k / 1.25); };
-  bFit.onclick = fitPage;
+  bFit.onclick = fitContent;
 
   paperBtns.forEach(function (b) {
     b.onclick = function () {
@@ -1086,12 +1292,14 @@ function create(opts) {
     bLive.classList.toggle("sel", tool.live);
     toast(tool.live ? "the tutor sees each page as you pause" : "sending only when you tap Send");
   };
-  bTaller.onclick = function () {
-    snapshot();
-    page().h += Math.round(wrap.clientHeight / view.k * 0.75);
-    markDirty();
-    fitPage();
-  };
+  fingerBtns.forEach(function (b) {
+    b.onclick = function () {
+      tool.finger = b.dataset.finger === "write" ? "write" : "scroll";
+      remember_(STORE_KEY, tool.finger);
+      selectOne(fingerBtns, b);
+      toast(tool.finger === "write" ? "a finger writes" : "a finger scrolls; the pen writes");
+    };
+  });
   bPrev.onclick = function () { goTo(current - 1); };
   bNext.onclick = function () { goTo(current + 1); };
   bAdd.onclick = function () { pages.push(blankPage()); goTo(pages.length - 1); };
@@ -1108,6 +1316,7 @@ function create(opts) {
     if (n < 0 || n >= pages.length) return;
     if (dirty) save(false);
     current = n;
+    dropInk();
     undoStack.length = 0; redoStack.length = 0;
     clearSelection();
     fitPage();
@@ -1145,6 +1354,7 @@ function create(opts) {
     if (pages.length === 1 && !pages[0].strokes.length) {
       pages = saved;
       current = pages.length - 1;
+      dropInk();
       layout();
       fitPage();
     }
@@ -1166,6 +1376,27 @@ function create(opts) {
              pages: pages.length, k: view.k };
   };
   api.save = save;
+  /* How much is on the current page. The host needs it to tell an answer from an
+     empty surface -- tapping Send with nothing written should not hand the tutor
+     a blank sheet. `debug` reports this too, but a name with "debug" in it is
+     not something behaviour should depend on. */
+  api.strokes = function () { var p = page(); return p ? p.strokes.length : 0; };
+  /* The plane, the crop and the finger rule, so all three can be asserted --
+     none of them is visible from the outside otherwise, and the last time a
+     surface behaviour was untestable it shipped broken for two days. */
+  api.reach = reach;
+  api.inkBox = inkBox;
+  api.pngBox = function () { return pngBox(page()); };
+  api.finger = function (v) {
+    if (v === undefined) return tool.finger;
+    tool.finger = v === "write" ? "write" : "scroll";
+    remember_(STORE_KEY, tool.finger);
+    fingerBtns.forEach(function (b) {
+      b.classList.toggle("sel", b.dataset.finger === tool.finger);
+    });
+    return tool.finger;
+  };
+  api.view = function () { return { k: view.k, fit: view.fit, ox: view.ox, oy: view.oy }; };
   /* Put a previously sent answer back on the surface so it can be corrected.
      Feedback on an answer you can no longer edit is feedback you cannot act on,
      which was the whole complaint. Replaces the current page; the undo stack
@@ -1178,6 +1409,7 @@ function create(opts) {
     p.strokes.forEach(function (s) { s.dense = null; });
     if (data && data.w) p.w = data.w;
     if (data && data.h) p.h = data.h;
+    dropInk();
     clearSelection();
     invalidate();
     fitPage();
@@ -1188,6 +1420,7 @@ function create(opts) {
     if (!p) return;
     snapshot();
     p.strokes = [];
+    dropInk();
     clearSelection();
     invalidate();
   };
@@ -1208,6 +1441,10 @@ function create(opts) {
 window.Slate = {
   create: create,
   forPaper: forPaper,
+  /* One question, one answer, both surfaces. The lesson's annotation layer had
+     its own copy of the old pen-seen latch, so a finger drew on a card even
+     after the slate had been told not to let it. */
+  fingerWrites: function () { return remembered(STORE_KEY, "scroll") === "write"; },
   ink: {
     densify: densify,
     polish: polish,

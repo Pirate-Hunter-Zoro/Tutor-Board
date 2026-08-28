@@ -4,7 +4,7 @@
 #
 #   bash test/all.sh
 #
-# Two of the suites drive the pages in a real DOM, which needs jsdom. That is a
+# Several suites drive the pages in a real DOM, which needs jsdom. That is a
 # development-only dependency and the board never touches it, so rather than
 # asking anyone to remember an install step, this fetches it on first run and
 # carries on without it if there is no network.
@@ -28,14 +28,14 @@ if ! node -e "require('jsdom')" >/dev/null 2>&1; then
     echo "installing jsdom (development only, not needed to run the board)…"
     npm install --no-save --silent jsdom >/dev/null 2>&1 \
       && echo "  installed" \
-      || echo "  could not install — the two real-DOM suites will skip"
+      || echo "  could not install — the real-DOM suites will skip"
   else
-    echo "no npm; the two real-DOM suites will skip"
+    echo "no npm; the real-DOM suites will skip"
   fi
   echo
 fi
 
-SUITES="markdown macros hidden chrome theme pages modes typeface export interactive answer sizing link"
+SUITES="markdown macros hidden chrome theme pages modes typeface export interactive plane answer sizing link"
 fails=0
 skipped=0
 

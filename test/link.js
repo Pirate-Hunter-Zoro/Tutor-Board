@@ -309,17 +309,46 @@ if (es) {
   if (notesend && !notesend.hidden) ok('marks can be sent with no question owed');
   else fail('marks made outside a question are stranded with no way to send');
 
-  // And when both exist, the student is asked which -- not guessed at.
+  // Send must never be a no-op.
+  //
+  // It used to be exactly that. With marks anywhere on the board, tapping Send
+  // on the writing surface issued no request at all and raised a "Send what?"
+  // bar instead; the answer went out only on a second tap. An evening's working
+  // sat in live/slate/ for two days while the student believed it had been handed
+  // in, and the board's own receipt never appeared, because the code that writes
+  // it was never reached. Nothing on the surface said a decision was owed.
+  //
+  // The old test for this called askWhatToSend directly and asserted the
+  // deferral, so the suite endorsed the bug. The working goes first now.
   var chooser = doc.getElementById('sendwhat');
-  if (chooser && chooser.hidden) ok('the chooser stays out of the way until asked for');
-  else fail('the send chooser is up when nothing is being sent');
+  if (chooser && chooser.hidden) ok('the follow-up offer stays down until there is something to offer');
+  else fail('the send bar is up before anything has been sent');
   var reached = false;
   window.askWhatToSend(function () { reached = true; });
-  if (!reached && !chooser.hidden) ok('sending working with marks present asks which');
-  else fail('it sent without asking, or never asked');
+  if (reached) ok('Send sends the working immediately, marks on the lesson or not');
+  else fail('Send sent nothing: the working is behind a prompt again');
+  if (!chooser.hidden) ok('and then offers the marks on the lesson as well');
+  else fail('unsent marks were dropped silently instead of offered');
   doc.getElementById('send-cancel').onclick();
-  if (chooser.hidden) ok('and the question can be dismissed');
-  else fail('the chooser cannot be dismissed');
+  if (chooser.hidden) ok('and the offer can be declined');
+  else fail('the offer cannot be dismissed');
+
+  // Ink already handed over does not come back to interrupt the next send.
+  window.Annotate.sent('0003');
+  if (window.Annotate.unsent().indexOf('0003') === -1) ok('a delivered card stops counting as unsent');
+  else fail('delivery was not recorded');
+  var reached2 = false;
+  window.askWhatToSend(function () { reached2 = true; });
+  if (reached2 && chooser.hidden) ok('and a send with nothing new to offer is not interrupted at all');
+  else fail('delivered marks still interrupt a send');
+
+  // And that survives a reload, because the server records it.
+  window.Annotate.load({ '0005': [{ c: '#e0b45c', w: 2, p: [0.2, 0.2, 0.6, 0.6] }] });
+  if (window.Annotate.unsent().indexOf('0005') !== -1) ok('marks restored with no record read as undelivered');
+  else fail('restored marks are assumed sent, which loses them');
+  window.Annotate.loadSent({ '0005': true });
+  if (window.Annotate.unsent().indexOf('0005') === -1) ok('and restored as delivered when the payload says so');
+  else fail('a reload resurrects delivered marks as undelivered');
 }
 
 // --- the annotation tools actually drive the annotation layer ----------------

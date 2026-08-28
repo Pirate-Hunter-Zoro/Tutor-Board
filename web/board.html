@@ -177,12 +177,16 @@
   <button id="kind-cancel" type="button" class="quiet">cancel</button>
 </div>
 
+<!-- Asked AFTER the working has gone, never before it. This bar used to stand
+     between the Send button and sending anything at all: with marks anywhere on
+     the board, Send issued no request and raised this instead, and a tap that
+     nobody noticed was a tap that lost an answer. Now the working is already
+     sent by the time this appears, so ignoring it costs nothing. -->
 <div id="sendwhat" class="sendwhat" hidden>
-  <span id="sendwhat-lead">Send what?</span>
-  <button id="send-work" type="button">my working</button>
-  <button id="send-notes" type="button">my annotations</button>
-  <button id="send-both" type="button" class="primary">both</button>
-  <button id="send-cancel" type="button" class="quiet">cancel</button>
+  <span id="sendwhat-lead">Working sent.</span>
+  <span>You have marks on the lesson too.</span>
+  <button id="send-notes" type="button" class="primary">send those as well</button>
+  <button id="send-cancel" type="button" class="quiet">no, just the working</button>
 </div>
 
 <button id="jump" class="jump" hidden>↓ new</button>

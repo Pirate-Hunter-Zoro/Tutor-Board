@@ -123,6 +123,41 @@ check("its ink is reachable from inside the archive",
 frozen = os.path.join(repo.archive, sessions[0]["id"], "answers", "t0001-r2.png")
 check("and the file it points at is really there", os.path.isfile(frozen))
 
+# --- a turn id is unique for the life of the course, not of one lesson -------
+#
+# `board archive` renames turns.jsonl into the archive and leaves messages.jsonl
+# where it is, because the inbox is the assistant's mailbox and is never
+# rotated. So the id counter used to go back to t0001 the moment a chapter was
+# filed, while the inbox still held every id ever issued -- and the next answer
+# arrived in the inbox as a second, different `t0001 rev 1`. Two turns, one
+# name.
+check("the transcript really was rotated away, which is what caused this",
+      not os.path.exists(repo.turns_path))
+# This lesson issued t0001 and t0002 before being filed.
+nxt = serve.next_turn_id(repo)
+check("the next turn after an archive does not reuse a filed id",
+      nxt not in ("t0001", "t0002"))
+check("it continues from the highest id the course has ever issued",
+      nxt == "t0003")
+check("and the high-water mark is on disk, outside the transcript",
+      os.path.isfile(os.path.join(repo.live, serve.TURN_SEQ)))
+
+# It survives the inbox being pruned as well, because it is not stored there --
+# messages.jsonl happens never to be rotated, and an invariant that holds by
+# accident is one that stops holding without warning.
+if os.path.exists(repo.messages_path):
+    os.remove(repo.messages_path)
+check("nor does pruning the inbox rewind it",
+      serve.next_turn_id(repo) == "t0003")
+
+# And it keeps advancing.
+serve.write_turn(repo, {"id": "t0003", "rev": 1, "kind": "ink", "answers": "0001",
+                        "t": 1.0, "from": "student", "strokes": 1})
+check("a new turn advances it", serve.next_turn_id(repo) == "t0004")
+check("a fresh id starts at revision 1", serve.turn_revision(repo, "t0004") == 1)
+check("and a live turn's next write is a revision, not an overwrite",
+      serve.turn_revision(repo, "t0003") == 2)
+
 shutil.rmtree(tmp, ignore_errors=True)
 print()
 print("%d FAILURES" % len(fails) if fails else "the lesson is a transcript, and it survives")
