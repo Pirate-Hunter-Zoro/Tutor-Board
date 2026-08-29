@@ -300,21 +300,6 @@ body.annotating #btn-annotate { background: var(--ask); color: #fff; border-colo
   padding: .08rem .32rem;
 }
 
-/* Every question keeps a way back to it. A proof is worked over hours and the
-   tutor asks other things in between; going back to add a line to an earlier one
-   is ordinary work, and it used to be impossible -- the surface only ever
-   answered the newest question, and arriving at a new one wiped the old page. */
-.card-pen {
-  display: inline-block; margin-top: .8rem;
-  font: 600 .74rem var(--ui); cursor: pointer;
-  padding: .35rem .75rem; border-radius: 1.2rem;
-  border: 1px dashed var(--rule);
-  background: transparent; color: var(--ink-3);
-}
-.card-pen:hover { border-style: solid; border-color: var(--ask); color: var(--ask); }
-.card.superseded .card-pen { display: none; }
-.card.superseded.open .card-pen { display: inline-block; }
-
 .card[data-kind="question"] { --accent: var(--ask); }
 .card[data-kind="correct"]  { --accent: var(--good); }
 .card[data-kind="wrong"]    { --accent: var(--bad); }
@@ -546,7 +531,13 @@ body.tools-out { padding-bottom: 5.5rem; }
    decoration: the surface swallows every touch that lands on it, so with the
    surface running to the edge of the glass there was nowhere on that screenful
    to put a thumb and scroll the lesson. It is the margin you scroll in. */
-#writer {
+/* A dormant board is a picture of a live one, and has to be indistinguishable
+   from it until it is touched. Everything below that describes a box -- the
+   bleed, the border, the corner, the head, the height of the writing area -- is
+   therefore shared between the two, and if a rule is added to one of them it
+   belongs in the shared selector or the illusion breaks the moment a board is
+   not the one you are on. */
+#writer, .board {
   --gap: max(2.5rem, env(safe-area-inset-left));
   --room: 22rem;
   --bleed: min(0px, max(calc(50% - 50vw + var(--gap)), calc(-1 * var(--room))));
@@ -557,16 +548,18 @@ body.tools-out { padding-bottom: 5.5rem; }
   background: #15161a;
   box-shadow: 0 2px 14px rgba(0,0,0,.18);
 }
-#writer-head {
+#writer-head, .board-head {
   display: flex; align-items: baseline; gap: .6rem;
   padding: .55rem .9rem;
   background: #1c1e23;
   border-bottom: 1px solid #2c2f37;
   font-family: var(--ui);
 }
-#writer-label { font-size: .78rem; font-weight: 700; color: #e9e7e2;
-                letter-spacing: .06em; text-transform: uppercase; }
-#writer-hint  { font-size: .74rem; color: #8b8f98; }
+#writer-label, .board-label {
+  font-size: .78rem; font-weight: 700; color: #e9e7e2;
+  letter-spacing: .06em; text-transform: uppercase;
+}
+#writer-hint, .board-hint { font-size: .74rem; color: #8b8f98; }
 #skip {
   margin-left: auto; flex: none; cursor: pointer;
   font: inherit; font-family: var(--ui); font-size: .74rem;
@@ -582,10 +575,27 @@ body.tools-out { padding-bottom: 5.5rem; }
    anything sized in it spends its first screenful underneath the browser chrome.
    The `vh` line stays as the fallback for anything that does not know `svh` --
    a browser that ignores the second declaration keeps the first. */
-#writer #slate {
+#writer #slate, .board-shot {
   height: clamp(18rem, 68vh, 60rem);
   height: clamp(18rem, 74svh, 60rem);
 }
+/* The picture fills its box exactly as the canvas does. `block` because an
+   inline image sits on a text baseline and leaves a strip of the box showing
+   under it -- which is precisely the kind of one-line difference that gives the
+   whole thing away. */
+.board-shot {
+  display: block; width: 100%;
+  object-fit: cover; object-position: top left;
+  background: #101114;
+}
+.board { cursor: pointer; touch-action: none; }
+.board-send {
+  margin-left: auto; flex: none; cursor: pointer;
+  font: inherit; font-family: var(--ui); font-size: .74rem; font-weight: 700;
+  padding: .3rem .7rem; border-radius: .35rem;
+  border: 1px solid var(--accent); background: var(--accent); color: var(--paper);
+}
+.board-send:hover { filter: brightness(1.1); }
 
 #btn-clip {
   cursor: pointer; user-select: none;

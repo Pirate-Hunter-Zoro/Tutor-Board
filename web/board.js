@@ -806,14 +806,13 @@ function render(data) {
      the end of the transcript, which is where it has always gone; for an earlier
      one it is directly under the feedback that question got, which is the same
      rule and the same reason. */
-  var runEnd = null;
-  var seenQ = false;
+  var runEndOf = Object.create(null);
+  var openQ = null;
   ordered.forEach(function (c) {
-    if (c.id === onQ) { seenQ = true; runEnd = c.id; return; }
-    if (!seenQ) return;
-    if (c.kind === "question") { seenQ = false; return; }
-    runEnd = c.id;
+    if (c.kind === "question") { openQ = c.id; runEndOf[c.id] = c.id; return; }
+    if (openQ) runEndOf[openQ] = c.id;
   });
+  var runEnd = runEndOf[onQ] || null;
   var qNode = runEnd
     ? els.cards.querySelector('[data-card="' + runEnd + '"]')
     : null;
@@ -829,7 +828,8 @@ function render(data) {
   /* A past lesson is read only: no pen, no box, nothing to send into a session
      that has already been filed. */
   placeWriter(owed && !data.archived, qNode);
-  paintQuestionPens(qids, onQ, codeMode || !!data.archived || !!reading);
+  paintBoards(qids, runEndOf, onQ, codeMode || !!data.archived || !!reading
+                                   || els.writer.hidden);
   /* Offered exactly when there is no surface to write on: in a maths lesson the
      tutor has written something, and nothing is owed. */
   if (els.reopen) {
@@ -1899,33 +1899,116 @@ function savePages() {
   try { localStorage.setItem(pagesKey(), JSON.stringify(questionPage)); } catch (e) {}
 }
 
-/* The button under every question that is not the one being answered: go back
-   and write on that one. This is what "each board has its own send" means in
-   practice -- the surface docks under the question you picked, on that
-   question's own page, and Send answers it. */
-function paintQuestionPens(qids, onQ, off) {
-  Array.prototype.forEach.call(els.cards.querySelectorAll("[data-card]"),
+/* Every question has a board under it, and one of them is real.
+
+   The board wanted, in the words it was asked for: it should LOOK like there
+   are several live infinite canvases on the page. It cannot be several -- a live
+   surface is two canvases at device resolution, about seventeen megabytes an
+   iPad, and iPadOS answers an exceeded canvas budget with blank canvases or a
+   reloaded tab. A dozen of those is not a slow board, it is a board that loses
+   your working.
+
+   So there is one live surface and the rest are photographs of themselves,
+   drawn by the same paint code with the same paper and the same ink, at CSS
+   resolution because nothing is going to be zoomed into them. Touch one and it
+   becomes the live one -- including under a pen already coming down, which is
+   handed straight through so its first stroke is not eaten by the swap. The
+   difference is invisible until you write, which is exactly when it stops
+   existing. */
+function boardSlot(qid) {
+  var slot = els.cards.querySelector('[data-board="' + qid + '"]');
+  if (slot) return slot;
+  slot = document.createElement("section");
+  slot.className = "board";
+  slot.dataset.board = qid;
+  slot.innerHTML =
+    '<div class="board-head">'
+    + '<span class="board-label">Your answer</span>'
+    + '<span class="board-hint"></span>'
+    + '<button type="button" class="board-send">Send</button>'
+    + "</div>"
+    + '<img class="board-shot" alt="what you have written here"'
+    + ' decoding="async" loading="lazy">';
+
+  var goLive = function (ev, andSend) {
+    if (workingOn === qid) return;
+    workingOn = qid;
+    reopenedFor = null;
+    if (lastLive) render(lastLive);
+    if (!writer) return;
+    /* Lay the real canvas out now rather than on the next frame: a pen is
+       already on the glass and its first sample is converted against the
+       canvas's rectangle. */
+    writer.relayout();
+    if (ev && writer.sheet) handOnStroke(ev, writer.sheet());
+    if (andSend) writer.save(true);
+  };
+
+  slot.addEventListener("pointerdown", function (ev) {
+    if (ev.target.closest && ev.target.closest(".board-send")) return;
+    goLive(ev, false);
+  });
+  slot.querySelector(".board-send").onclick = function () { goLive(null, true); };
+  return slot;
+}
+
+/* A stroke that landed on a picture, given to the canvas that replaced it.
+   Without this the first mark on a dormant board is always lost -- and a first
+   mark that does nothing is indistinguishable from a broken pen. */
+function handOnStroke(ev, sheet) {
+  if (!sheet || !sheet.dispatchEvent) return;
+  var Ctor = window.PointerEvent || window.MouseEvent;
+  var copy;
+  try {
+    copy = new Ctor("pointerdown", {
+      bubbles: true, cancelable: true,
+      clientX: ev.clientX, clientY: ev.clientY,
+      pointerId: ev.pointerId, pointerType: ev.pointerType || "pen",
+      pressure: ev.pressure || 0.5, isPrimary: true,
+    });
+  } catch (e) { return; }
+  sheet.dispatchEvent(copy);
+}
+
+/* One board per question, each at the end of its own question's run, and the
+   live one swapped in for whichever is being answered. */
+function paintBoards(qids, runEndOf, onQ, off) {
+  var live = {};
+  qids.forEach(function (qid) { live[qid] = true; });
+  Array.prototype.forEach.call(els.cards.querySelectorAll("[data-board]"),
                                function (node) {
-    var id = node.dataset.card;
-    var wanted = !off && qids.indexOf(id) !== -1 && id !== onQ;
-    var pen = node.querySelector(".card-pen");
-    if (!wanted) { if (pen) pen.remove(); return; }
-    if (pen) return;
-    pen = document.createElement("button");
-    pen.type = "button";
-    pen.className = "card-pen";
-    pen.textContent = "write on this one";
-    pen.onclick = function () {
-      workingOn = id;
-      reopenedFor = null;
-      if (lastLive) render(lastLive);
-      setTimeout(function () {
-        if (!els.writer.hidden && els.writer.scrollIntoView) {
-          els.writer.scrollIntoView({ block: "center", behavior: "smooth" });
-        }
-      }, 60);
-    };
-    node.appendChild(pen);
+    /* The question being answered has the real surface, so its picture goes --
+       leaving it would show the board twice, once alive and once as a
+       photograph of a moment ago. */
+    if (off || !live[node.dataset.board] || node.dataset.board === onQ) {
+      node.remove();
+    }
+  });
+  if (off || !writer) return;
+
+  qids.forEach(function (qid) {
+    if (qid === onQ) return;                       /* the real one goes here */
+    var anchor = els.cards.querySelector('[data-card="' + runEndOf[qid] + '"]');
+    if (!anchor || !anchor.parentNode) return;
+    var slot = boardSlot(qid);
+    if (anchor.nextSibling !== slot) {
+      anchor.parentNode.insertBefore(slot, anchor.nextSibling);
+    }
+    var page = questionPage[qid];
+    if (page === undefined) { slot.hidden = true; return; }
+    slot.hidden = false;
+    slot.querySelector(".board-hint").textContent = "question " + qid + " · tap to write";
+    /* Redrawn only when the page it is a picture of has actually changed. */
+    var mark = page + ":" + (writer.inkOn ? writer.inkOn(page) : 0);
+    if (slot.dataset.shot === mark) return;
+    var shot = slot.querySelector(".board-shot");
+    var box = slot.getBoundingClientRect();
+    var w = Math.round(box.width) || 900;
+    var h = Math.round(shot.getBoundingClientRect().height) || 420;
+    var url = writer.preview ? writer.preview(page, w, h) : "";
+    if (!url) return;
+    shot.src = url;
+    slot.dataset.shot = mark;
   });
 }
 

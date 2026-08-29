@@ -78,8 +78,10 @@ for (const [htmlName, cssName] of PAIRS) {
   const coreJs = fs.readFileSync(path.join(WEB, 'slate-core.js'), 'utf8');
 
   // A definite, generous height that does not depend on anyone dragging.
-  /#writer\s+#slate\s*\{[^}]*height:\s*clamp\(\s*(\d+(?:\.\d+)?)rem/.test(boardCss)
-    ? (parseFloat(/#writer\s+#slate\s*\{[^}]*height:\s*clamp\(\s*(\d+(?:\.\d+)?)rem/.exec(boardCss)[1]) >= 18
+  // The selector also carries `.board-shot`, the picture a dormant board shows:
+  // the two must be exactly as tall or the illusion is given away by a strip.
+  /#writer\s+#slate,\s*\.board-shot\s*\{[^}]*height:\s*clamp\(\s*(\d+(?:\.\d+)?)rem/.test(boardCss)
+    ? (parseFloat(/#writer\s+#slate,\s*\.board-shot\s*\{[^}]*height:\s*clamp\(\s*(\d+(?:\.\d+)?)rem/.exec(boardCss)[1]) >= 18
         ? console.log('ok   the answer block has a usable minimum height')
         : (fails++, console.log('FAIL the answer block can be too short to write in')))
     : (fails++, console.log('FAIL the answer block has no definite height'));

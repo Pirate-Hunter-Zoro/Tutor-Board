@@ -146,7 +146,9 @@ comp ? ok('#composer has a rule') : fail('#composer has no styling at all');
 // inside it was therefore about half an iPad in landscape, on a tool whose whole
 // value is the area you have to write in.
 {
-  const wr = block('#writer') || '';
+  // The live surface and a dormant board share one rule, so that a board nobody
+  // is writing on is indistinguishable from the one they are.
+  const wr = block('#writer, .board') || '';
   /\bmargin:[^;]*var\(--bleed\)/.test(wr) || /margin-(left|inline)/.test(wr)
     ? ok('#writer breaks out of the reading column')
     : fail('#writer is still confined to the 46rem prose measure');
@@ -160,7 +162,7 @@ comp ? ok('#composer has a rule') : fail('#composer has no styling at all');
     ? ok('and without a transform, which would land the canvas on a half pixel')
     : fail('#writer is translated; the canvas will be soft');
 
-  const sl = block('#writer #slate') || '';
+  const sl = block('#writer #slate, .board-shot') || '';
   /svh/.test(sl)
     ? ok('the surface height uses svh, so iOS chrome does not eat the top of it')
     : fail('the surface is sized in vh; on iOS its first screenful hides under the chrome');

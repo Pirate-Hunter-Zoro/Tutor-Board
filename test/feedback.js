@@ -387,24 +387,62 @@ const withNew = Object.assign({}, lesson, {
     ? ok('and a page with ink on it is never overwritten from the server')
     : fail('the server can still replace working written since the last send');
 
-  // And an earlier question can be gone back to.
-  const back = nodeFor('0001') && nodeFor('0001').querySelector('.card-pen');
-  back
-    ? ok('an earlier question offers a way back to writing on it')
-    : fail('once the tutor asks something else, the previous question can never '
-           + 'be answered again');
-  !(nodeFor('0012') && nodeFor('0012').querySelector('.card-pen'))
-    ? ok('and the one being answered does not offer it, being already here')
-    : fail('the current question offers to switch to itself');
+  // Every question carries a board, and exactly one of them is real. The rest
+  // are pictures of themselves drawn by the same paint code -- because a live
+  // surface is two canvases at device resolution, and a dozen of those is not a
+  // slow board, it is a board that hands back blank canvases.
+  const slot = doc.querySelector('[data-board="0001"]');
+  slot
+    ? ok('an earlier question still has a board under it')
+    : fail('once the tutor asks something else, the previous question has no '
+           + 'surface at all');
+  !doc.querySelector('[data-board="0012"]')
+    ? ok('and the question being answered has the real one, not a picture')
+    : fail('the live question is showing a photograph of itself');
+  slot && slot.querySelector('.board-send')
+    ? ok('and its own Send')
+    : fail('a dormant board cannot be sent');
 
-  if (back) {
-    back.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  {
+    const css = fs.readFileSync(path.join(WEB, 'board.css'), 'utf8');
+    /#writer,\s*\.board\s*\{/.test(css)
+      ? ok('a dormant board is styled by the same rules as the live one')
+      : fail('the two boards are styled separately and will drift apart');
+    /#writer #slate,\s*\.board-shot\s*\{/.test(css)
+      ? ok('and is exactly as tall')
+      : fail('a dormant board is a different height, which gives it away');
+  }
+
+  // Touching one makes it the live one.
+  if (slot) {
+    slot.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true }));
     !els.writer.hidden
-      ? ok('and taking it opens the surface')
-      : fail('going back to a question left nothing to write on');
-    nodeFor('0001') && !nodeFor('0001').querySelector('.card-pen')
-      ? ok('on that question, which now stops offering')
-      : fail('the board did not actually switch questions');
+      ? ok('touching a dormant board opens the real surface')
+      : fail('touching a board left nothing to write on');
+    !doc.querySelector('[data-board="0001"]')
+      ? ok('and it is the live one now, not a picture of itself')
+      : fail('the board did not actually go live');
+    doc.querySelector('[data-board="0012"]')
+      ? ok('while the one just left behind becomes a picture')
+      : fail('the question left behind lost its board entirely');
+  }
+
+  // And a pen already on the glass is not asked to lift and try again.
+  {
+    const js = fs.readFileSync(path.join(WEB, 'board.js'), 'utf8');
+    /function handOnStroke/.test(js) && /dispatchEvent\(copy\)/.test(js)
+      ? ok('a stroke that landed on a picture is handed to the canvas that '
+           + 'replaced it')
+      : fail('the first mark on a dormant board is eaten by the swap, which is '
+             + 'indistinguishable from a broken pen');
+    const core = fs.readFileSync(path.join(WEB, 'slate-core.js'), 'utf8');
+    /try \{ sheet\.setPointerCapture/.test(core)
+      ? ok('and the canvas does not throw on a pointer it never saw natively')
+      : fail('handing a stroke on will throw inside the pointerdown handler');
+    /c\.width = c\.height = 1;/.test(core)
+      ? ok('a preview throws its pixels away as soon as it has them')
+      : fail('every preview leaves a canvas behind, which is the whole problem '
+             + 'this exists to avoid');
   }
 }
 
@@ -439,7 +477,7 @@ const withNew = Object.assign({}, lesson, {
     ? ok('the surface height is not clamped to the visible window')
     : fail('the surface is capped against the viewport again: zooming into the '
            + 'writing will do nothing');
-  const wr = (css.match(/#writer\s*\{[^}]*\}/) || [''])[0];
+  const wr = (css.match(/#writer,\s*\.board\s*\{[^}]*\}/) || [''])[0];
   !/--gap-zoom/.test(wr)
     ? ok('and neither is its width')
     : fail('the width is capped against the viewport again');

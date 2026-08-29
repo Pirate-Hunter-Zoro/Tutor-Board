@@ -935,7 +935,10 @@ function create(opts) {
       pinch = null;
     }
     ev.preventDefault();
-    sheet.setPointerCapture(ev.pointerId);
+    /* A pointer the sheet never received natively -- a stroke handed on from a
+       dormant board as it goes live -- has nothing to capture, and asking throws
+       rather than returning false. */
+    try { sheet.setPointerCapture(ev.pointerId); } catch (e) { /* not fatal */ }
 
     if (ev.pointerType === "touch") {
       /* Condemned for life ONLY when the nib is actually on the glass, which is
@@ -1661,6 +1664,68 @@ function create(opts) {
     var p = pages[n === undefined ? current : n];
     return p ? p.strokes.length : 0;
   };
+  /* A picture of a page, drawn by the code that draws the live surface.
+
+     This is what lets every question look like it has its own writing surface
+     while only ONE is ever live. A live surface is two canvases at device
+     resolution -- the sheet and its cache -- which on an iPad is about
+     seventeen megabytes each, and iPadOS does not report a canvas budget being
+     exceeded so much as act on it: blank canvases, or the tab reloading. A dozen
+     of them is not a slow board, it is a board that loses your working.
+
+     So a dormant board is a picture: drawn once, at CSS resolution rather than
+     device resolution because nothing is going to be zoomed into it, handed over
+     as a data URL and the canvas thrown away in the same breath. The transform
+     is the one `fitPage` computes, so a dormant board is framed exactly as the
+     live one frames a page it has just opened. */
+  api.preview = function (n, cssW, cssH) {
+    var p = pages[n];
+    if (!p || !(cssW > 0) || !(cssH > 0)) return "";
+    var c = document.createElement("canvas");
+    c.width = Math.round(cssW);
+    c.height = Math.round(cssH);
+    var g = c.getContext("2d");
+    if (!g) return "";
+    var k = cssW / p.w;
+    var drawn = p.h * k;
+    var oy = drawn < cssH ? (cssH - drawn) / 2 : 0;
+    var skin = PAPERS[tool.paper];
+    g.setTransform(k, 0, 0, k, 0, oy);
+    var x0 = 0, y0 = -oy / k, x1 = cssW / k, y1 = y0 + cssH / k;
+    g.fillStyle = skin.bg;
+    g.fillRect(x0, y0, x1 - x0, y1 - y0);
+    if (tool.rule !== "plain") {
+      var step = ruleStep(p);
+      g.strokeStyle = skin.rule;
+      g.lineWidth = 1 / k;
+      g.beginPath();
+      for (var y = Math.ceil(y0 / step) * step; y < y1; y += step) {
+        g.moveTo(x0, y); g.lineTo(x1, y);
+      }
+      if (tool.rule === "grid") {
+        for (var x = Math.ceil(x0 / step) * step; x < x1; x += step) {
+          g.moveTo(x, y0); g.lineTo(x, y1);
+        }
+      }
+      g.stroke();
+    }
+    var dark = tool.paper === "black";
+    p.strokes.forEach(function (s) { if (s.hl) paintStroke(g, s, dark); });
+    p.strokes.forEach(function (s) { if (!s.hl) paintStroke(g, s, dark); });
+    var url = "";
+    try { url = c.toDataURL("image/png"); } catch (e) { url = ""; }
+    /* Painting a stroke caches its resampled curve. On the page in hand that is
+       the point; on a page being photographed once it is memory held for nothing,
+       and the pages not in hand are all of them. */
+    if (n !== current) p.strokes.forEach(function (st) { st.dense = null; });
+    c.width = c.height = 1;             /* let the pixels go now, not eventually */
+    return url;
+  };
+
+  /* The live canvas, for a board going live under a pen that has already landed
+     on it: the stroke is handed to this so its first sample is not lost. */
+  api.sheet = function () { return sheet; };
+
   api.clear = function () {
     var p = page();
     if (!p) return;
