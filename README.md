@@ -24,85 +24,77 @@ which kind of subject it is and the board adapts.
 
 ## Picking this up in a new session
 
-> **Where this is right now, 26 August 2026, end of the first real evening.** The board has now
-> been used in anger, for about two hours, across Galois Theory and Probability. Most of what
-> follows was found by a person holding an iPad, not by a test.
->
 > **If you are reading this in a fresh session on Tutor-Board: your job is fixing the board from
 > a person's account of using it.** Not teaching the subject — that is the other session's job,
 > in the course repository, and it does not know or care about this one.
 >
-> **Since then, 28 August, later still:** the fix above had a defect of its own, found within
-> the hour and by the worst possible route — the person using it. Moving the scroll destination
-> from the bottom of the document to the newest card's first line turned a harmless no-op into a
-> screenful of movement on every heartbeat, so the board dragged itself away from the writing
-> surface every thirty seconds while nobody was touching it. Nothing arriving now means nothing
-> moves, and a hand mid-answer outranks a card arriving. The same sitting produced palm rejection
-> that survives a pause mid-stroke, and `#panic` — a small movable button that is always on the
-> glass and puts the magnification and the lesson back.
+> **The one thing to understand before touching anything.** The person reporting these defects is
+> *using the board at the same time*, on an iPad, in the middle of a Galois Theory proof. A
+> regression here does not annoy them later; it stops the lesson now. That has two consequences
+> and they are not negotiable:
 >
-> **Since then, 28 August, later:** three sittings on Exercise 1.3 exposed the reading order.
-> Every reply the tutor had written stayed open, so the newest one — the only one about the ink
-> actually on screen — was the third of three; and the board scrolled past all of it to the
-> writing surface. Replaced replies now fold to one line, the board lands on the first line of
-> the newest one, and the surface no longer runs to both edges of the glass or grows past them
-> when the page is pinch-zoomed. `test/feedback.js` holds all four.
+> - **Ship, do not merely commit.** `bash scripts/ship.sh "message"` commits, pushes, and restarts
+>   every board — a board is a long-lived process that read `serve.py` when it started, so a commit
+>   alone changes nothing for them. Then bump `VERSION` in `web/sw.js` when a shell file changed,
+>   or the installed app serves its cached copy and your fix is invisible.
+> - **Check the address after every ship.** `tutor restart` bounces every course, and until 28
+>   August each restart handed the tailnet name to whichever course came last — dropping somebody
+>   mid-proof into a different lesson. That is fixed (`ts_repoint` will not take a name from a
+>   board that is answering) but it is worth confirming: the port the HTTPS name points at should
+>   be the course they are working in.
 >
-> **Since then, 28 August:** sending from the board was found to be broken outright, and it
-> had been broken the whole time. Pressing **Send** on the writing surface issued no request
-> at all whenever there were marks anywhere on the lesson — it raised the *Send what?* chooser
-> instead — so two sittings' working (Galois Theory, Exercise 1.3) sat in `live/slate/` having
-> never been handed in. `live/answers/` in that course was empty and always had been. The
-> working goes first now and the marks are offered afterwards; `board.log` records what
-> arrives, which is what made the diagnosis take an afternoon instead of a week.
+> ### Where this is right now, end of 28 August 2026
 >
-> **What has never been tried, in rough order of how likely it is to be broken:**
+> A long evening of use, and roughly a dozen shipped changes. Shell version `board-shell-v54`.
+> Three new suites: `test/feedback.js` (reading order, the surface, the boards), `test/panic.js`
+> (the way back from a zoom), `test/address.py` (the tailnet name stays with its course).
 >
-> 1. **The reworked Send, on a device.** It is pressed by `test/interactive.js` now, in a real
->    DOM, and the request is checked on the wire — but no hand has touched it. The follow-up
->    offer (*send those as well*) has never been looked at on a screen either.
-> 2. **The plane, the finger setting and the wider surface, on a device.** All three came from
->    somebody holding an iPad and all three are asserted in `test/plane.js` and `test/chrome.js`
->    — in jsdom, with no layout engine and no canvas backend. What a test cannot tell you: how
->    far out the zoom *feels* like it should go, whether half a second of palm suppression is
->    the right half second, and whether the bled-out surface looks right beside cards that keep
->    the 46rem measure. The knobs are `ROOM`, `ZOOM_MIN` and `PALM_MS` at the top of
->    `web/slate-core.js`, and `--room` on `#writer` in `web/board.css`.
-> 3. **Everything shipped after about 20:20 on 26 August is unverified on a device.** The marker fix (a
->    highlighter now stays pale in the export instead of coming out as a black smudge), the
->    receipt under the writing surface, the writing surface moving *below* the tutor's feedback,
->    the six-control title bar with the `⋯` menu, and the contents panel (`☰`). All of it passes
->    tests; none of it has been looked at.
-> 4. **The writing surface after a reload.** It vanished entirely once, because it survived a
->    send only through an in-memory pin. It is now decided from the transcript — a question stays
->    open until a `correct` card settles it. Close the app mid-correction and check there is
->    still somewhere to write.
-> 5. **Leaving and saving.** The exit offer appears, but nobody has ever tapped *Save and push*.
->    The server side is tested; the button reaching it is not.
-> 6. **Asking a question on the slate.** The tutor is now told to answer a question before
->    assessing any working, and never to label a question `wrong`. Write *"am I on the right
->    track?"* with no working and see what comes back.
-> 7. **A second turn in a headless session.** Turns after the first now resume the agent's own
->    session rather than re-reading the whole contract. If a resume fails it retries once as a
->    fresh turn. Only the first turn of each course has actually been watched.
-> 8. **The homework write-up, end to end.** Statements are transcribed and `hw01.pdf` compiles.
->    Nobody has yet agreed an answer and watched it land in a solution region.
-> 9. **`board eyes`** has never been run against the headless agent, and a homework sitting
->    depends on it reading an assignment PDF. It read one tonight, so it works — but that is one
->    observation, not a check.
+> **Read the defect table below before proposing anything.** Most of that table was written today,
+> and about half of its entries are defects *this session introduced and then fixed* — the scroll
+> that fired on every heartbeat, palm rejection that latched the surface shut, a cap that made
+> zooming into the writing pointless, a selection lockout that stopped the lesson scrolling. The
+> pattern is worth naming: **every one of them was a rule with no way to expire, or a fix whose
+> blast radius was wider than its author checked.** When you add a rule that refuses input, ask
+> what clears it.
 >
-> 10. **`tutor restart --tutors` on a busy daemon.** It now refuses to claim a restart it did
->    not perform — the first run of `ship.sh` reported "tutors restarted: Probability" while the
->    old process was still writing its handoff, because `agent_start` answers "already
->    listening" with a success code. Fixed by comparing pids; worth watching once.
-> 11. **Galois Theory** had no tutor attached on the 26th; it has one again as of 28 August
->    (`claude`, listening). `tutor headless galois` is what starts one.
+> **What changed today, in one line each:**
 >
-> **What was learned tonight that is worth not relearning:** a board is a process and holds old
-> code (hence `scripts/ship.sh`); a headless agent with no `.claude/settings.local.json` reads,
-> thinks, composes a whole card and writes nothing; five of the visual defects were invisible to
-> every test and obvious in one screenshot. Ask for a screenshot early. Read the CSS before
-> theorising about the platform.
+> - Feedback folds per question, so a two-hour exercise is not a wall of eleven cards.
+> - Each question owns a slate page; nothing is ever wiped, and every question shows a board.
+>   One is live, the rest are photographs drawn by the same paint code — see the table.
+> - Palm rejection judges by the pen and nothing else, and every refusal expires.
+> - The eraser sweeps the segment between samples instead of the point each event landed on.
+> - Send lands you under the working, where the receipt is, and no longer re-fits the page.
+> - Saving compiles the write-up first, so what is committed is the document and not just its source.
+> - A picture can be handed over from the device at all, and the tutor is told to open it.
+> - `#panic`, a movable button that puts the page magnification back.
+>
+> **What has never been tried on a device, in rough order of how likely it is to be wrong:**
+>
+> 1. **Everything shipped on 28 August.** All of it passes in jsdom, which has no layout engine
+>    and no canvas backend. jsdom cannot tell you whether the swap from a dormant board to the
+>    live one flickers, whether the palm timings feel right, or whether a preview looks identical
+>    to the surface it stands for. Those are the three most likely things to be wrong.
+> 2. **The dormant boards, on a real lesson with several questions.** The memory argument behind
+>    them is sound and untested: watch for blank boards or the app reloading, which is what
+>    iPadOS does instead of reporting a canvas budget.
+> 3. **Handing a stroke on.** A pen landing on a dormant board should start its line there, not
+>    lose it. This is a synthetic `pointerdown` re-dispatched at the live canvas and nothing but a
+>    hand can confirm it.
+> 4. **The eraser's reach.** `ERASE_R` is 26 screen pixels, chosen by argument rather than by use.
+> 5. **`board hw build` inside a push**, against real LaTeX rather than the stub `test/homework.py`
+>    uses.
+> 6. **Leaving and saving.** The exit offer appears; nobody has tapped *Save and push*.
+> 7. **A second turn in a headless session**, and **`board eyes`** against the headless agent.
+> 8. **`tutor restart --tutors` on a busy daemon.** It refuses to claim a restart it did not
+>    perform; worth watching once.
+>
+> **What is worth not relearning:** a board is a process and holds old code. A stub DOM will
+> report a broken page as a working one, which is why the interactive suites use jsdom. Five
+> visual defects were invisible to every test and obvious in one screenshot — ask for one early.
+> Read the CSS before theorising about the platform. And when the person says a fix did not land,
+> check what is actually being served (`curl` the file off the running board) before proposing a
+> mechanism for why.
 
 Read [`AI_INSTRUCTIONS.md`](./AI_INSTRUCTIONS.md) first — it is the contract for working on this
 repository and it carries the invariants that were learned the hard way. Then:
