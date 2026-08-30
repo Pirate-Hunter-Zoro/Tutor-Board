@@ -184,6 +184,52 @@ def card_markdown(text):
     return kind, title, body
 
 
+KINDS = ("lesson", "question", "correct", "wrong", "review", "note", "recap")
+
+# A reply that plans the card rather than being the card opens with a lead-in and
+# then says what the card "should" do. These markers catch that failure mode.
+META_MARKERS = ("card body should", "the card should", "a card should",
+                "should state", "should explain", "should describe", "should say",
+                "step 1", "step 2", "steps:", "write a card that")
+
+
+def extract_json(text):
+    """Recover the JSON object from a reply that may open with prose or a fence."""
+    t = (text or "").strip()
+    t = re.sub(r"^```(json)?\s*", "", t, flags=re.IGNORECASE)
+    t = t.rstrip("`").strip()
+    start = min((i for i in (t.find("{"), t.find("[")) if i >= 0), default=-1)
+    end = max(t.rfind("}"), t.rfind("]"))
+    if start < 0 or end <= start:
+        return {}
+    try:
+        data = json.loads(t[start:end + 1])
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def looks_meta(body):
+    b = (body or "").strip()
+    if not b:
+        return False
+    low = b.lower()
+    first = (b.splitlines() or [b])[0].lower()
+    if first.startswith(("the card", "card body", "a card", "this card", "the answer",
+                         "write a card", "the response", "card:")):
+        return True
+    return any(m in low[:300] for m in META_MARKERS)
+
+
+def parse_card(reply):
+    """(kind, title, body) from a reply that may be JSON or markdown front matter."""
+    data = extract_json(reply)
+    if data and data.get("body"):
+        kind = data.get("kind") if data.get("kind") in KINDS else "lesson"
+        return kind, str(data.get("title") or "").strip(), (data.get("body") or "").strip()
+    return card_markdown(reply)
+
+
 BRIEF_LIMIT = 800   # tokens for the distilled brief
 
 
@@ -304,25 +350,42 @@ def main(argv):
 
     system = (
         "You are a mathematics tutor on a live board. The student writes on an iPad; "
-        "you never see them type and there is no chat. Your whole job each turn is to "
-        "write ONE card. Output ONLY the card, in this exact shape:\n\n"
-        "---\nkind: lesson|question|correct|wrong|review|note|recap\n"
-        "title: a short title\n---\n\n"
-        "the card body written directly as teaching prose in markdown, with LaTeX $...$ "
-        "and $$...$$ — the actual content, never a plan of what to write. Teach only what "
-        "this step needs, then pose at most ONE question and stop. A wrong answer gets its "
-        "break located, not repaired; never re-explain what they already got right.\n\n"
+        "you never see them type and there is no chat. Each turn you write ONE card.\n\n"
+        "Output ONLY the card, as markdown front matter plus the body, nothing else:\n\n"
+        "---\nkind: <lesson|question|correct|wrong|review|note|recap>\n"
+        "title: <a short title>\n---\n\n"
+        "<the card itself, spoken to the student, in markdown with $...$ and $$...$ math>\n\n"
+        "Example:\n\n"
+        "---\nkind: question\ntitle: Which subfield is fixed?\n---\n\n"
+        "Take $L = \\QQ(\\sqrt[3]{2}, \\omega)$ and the subgroup $H = \\gen{\\sigma}$ of "
+        "order 3.\n\n"
+        "Which of the three intermediate fields is $\\Fix(H)$, and why can it not be "
+        "$\\QQ(\\sqrt[3]{2})$?\n\n"
+        "Teach only what this step needs, then pose at most ONE question and stop. A wrong "
+        "answer gets its break located, not repaired; never re-explain what they already "
+        "got right.\n\n"
         + (("The session brief (your compact guide):\n\n%s" % brief) if brief else "")
     )
 
-    try:
-        reply = chat([{"role": "system", "content": system},
-                      {"role": "user", "content": user}])
-    except RuntimeError as exc:
-        sys.stderr.write("free tutor: %s\n" % exc)
-        return 1
+    kind, title, body = "lesson", "", ""
+    for attempt in range(2):
+        try:
+            reply = chat([{"role": "system", "content": system},
+                          {"role": "user", "content": user}], max_tokens=800)
+        except RuntimeError as exc:
+            if attempt:
+                sys.stderr.write("free tutor: %s\n" % exc)
+                return 1
+            sys.stderr.write("free tutor: %s (retrying)\n" % exc)
+            continue
+        kind, title, body = parse_card(reply)
+        if body and not looks_meta(body):
+            break
+        sys.stderr.write("free tutor: got a plan instead of a card; correcting\n")
+        user += ("\n\n(Your previous reply was not the card itself. Output ONLY the card "
+                 "again, as markdown front matter plus body, with the body being the actual "
+                 "teaching prose — state the mathematics directly.)")
 
-    kind, title, body = card_markdown(reply)
     if not body:
         sys.stderr.write("free tutor produced an empty card\n")
         return 1
