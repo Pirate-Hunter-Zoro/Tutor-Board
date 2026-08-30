@@ -1,9 +1,9 @@
 // A repository declares whether it is a mathematics course or a code course,
-// and the board has to obey it. In maths there is no text box at all -- the only
-// way to answer is to write on the slate. In code a sentence is usually the
-// right unit, so the box is there.
+// and the board has to obey it. The answer panel is the same either way -- a
+// writing surface and a typed half, one panel -- but the three code signals
+// (ready to check, help, confused) belong to a code course and never to maths.
 //
-// The markup ships both controls hidden and the script decides, so nothing about
+// The markup ships the controls hidden and the script decides, so nothing about
 // this is visible in the HTML. It has to be exercised.
 
 const fs = require('fs');
@@ -104,8 +104,8 @@ function paint(mode, cards, turns) {
 const question = [{ id: '0001', kind: 'question', title: 'Which subfield?', body: 'q', mtime: now }];
 
 let r = paint('math', question, []);
-check('math: no text box, ever', r.composer === true);
-check('math: the slate is offered while an answer is owed', r.answer === false);
+check('math: no signals, ever', r.composer === true);
+check('math: the answer panel is offered while an answer is owed', r.answer === false);
 
 // Sending is a checkpoint, not an exit. The tutor's next move is usually to
 // point at a mistake in what was just sent, so the panel and the ink have to
@@ -149,11 +149,11 @@ r = paint('math', [{ id: '0001', kind: 'lesson', body: 'x', mtime: now }], []);
 check('math: no offer when nothing was asked', r.answer === true);
 
 r = paint('code', question, []);
-check('code: the text box is present', r.composer === false);
-check('code: the slate button stays out of the way', r.answer === true);
+check('code: the signals are present', r.composer === false);
+check('code: the answer panel is there too, to write or type', r.answer === false);
 
 r = paint('code', [], []);
-check('code: the box is there before anything is asked', r.composer === false);
+check('code: the signals are there before anything is asked', r.composer === false);
 
 r = paint(undefined, question, []);
 check('missing mode falls back to maths, the stricter one', r.composer === true);
@@ -165,7 +165,7 @@ check('missing mode falls back to maths, the stricter one', r.composer === true)
 r = paint('math', question, [{ id: 't0009', rev: 1, kind: 'text', signal: 'skip',
                                answers: '0001', t: now + 10, t0: now + 10 }]);
 check('math: skipping closes the answer block', r.answer === true);
-check('math: and does not conjure a text box', r.composer === true);
+check('math: and does not conjure the signals', r.composer === true);
 
 // A skip belongs to the question it declined. The next question is a fresh ask.
 r = paint('math', question.concat([{ id: '0002', kind: 'question', title: 'Next',
@@ -180,7 +180,7 @@ check('math: a later question is still asked after a skip', r.answer === false);
 // terminal, and the board's whole promise is that it does not.
 r = paint('math', [], []);
 check('math: an empty board still says it is empty', r.empty === false);
-check('math: and still has no text box', r.composer === true);
+check('math: and still has no signals', r.composer === true);
 check('math: the cold start is a button, not a composer',
       ids.has('begin') && /id="begin"[\s\S]*?<\/button>/.test(html));
 check('math: the begin button lives in the empty state, so a card retires it',

@@ -569,6 +569,37 @@ body.tools-out { padding-bottom: 5.5rem; }
 #skip:hover { background: #2c2f37; color: #e9e7e2; }
 #skip:disabled { opacity: .5; cursor: default; }
 
+/* One answer panel, two surfaces. The tabs pick the half; the last one used
+   opens next time, and the label is the remembered choice. */
+#writer-head .tabs { display: inline-flex; gap: .2rem; }
+#writer-head .tab {
+  font: inherit; font-family: var(--ui); font-size: .74rem; cursor: pointer;
+  padding: .28rem .55rem; border-radius: .35rem;
+  border: 1px solid transparent; background: transparent; color: #8b8f98;
+}
+#writer-head .tab:hover { color: #e9e7e2; }
+#writer-head .tab.on { background: #2c2f37; color: #e9e7e2; border-color: #3a3e47; }
+
+/* The typed half. Same dark paper as the writer it sits in, so it reads as one
+   block whether the page is light or dark. */
+#typebox { display: flex; gap: .5rem; align-items: flex-end; padding: .7rem .9rem; }
+#typebox textarea {
+  flex: 1 1 auto; min-width: 0;
+  font: inherit; font-family: var(--ui); font-size: .92rem; line-height: 1.4;
+  padding: .55rem .7rem;
+  border: 1px solid #3a3e47; border-radius: .45rem;
+  background: #101114; color: #e9e7e2;
+  resize: none; overflow-y: auto;
+}
+#typebox textarea:focus { outline: none; border-color: #e0827c; }
+#typebox button {
+  flex: none; font: inherit; font-weight: 600; cursor: pointer;
+  padding: .55rem 1rem; border-radius: .45rem;
+  border: 1px solid #e0827c; background: #e0827c; color: #16171a;
+}
+#typebox button:hover { filter: brightness(1.08); }
+#typebox button.sent { background: #7fc79a; border-color: #7fc79a; }
+
 /* And taller, scaled to the device.
  
    `svh` rather than `vh`: on iOS `vh` is the tallest the viewport ever gets, so

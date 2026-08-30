@@ -72,80 +72,60 @@ function paint(mode, turns) {
   });
 }
 
-const block = () => doc.getElementById('codeanswer');
+const block = () => doc.getElementById('writer');
+const typebox = () => doc.getElementById('typebox');
+const signals = () => doc.getElementById('composer');
 
 // --- a code project -------------------------------------------------------
 paint('code');
 const b = block();
 b && !b.hidden
-  ? ok('a question in a code project offers a way to answer it')
-  : fail('a question in a code project has no answer block at all — the three '
-         + 'signals are not one');
+  ? ok('a question in a code project offers an answer panel')
+  : fail('a code question has no answer panel at all');
 
 const card = doc.querySelector('.card[data-card="0001"]');
 b && card && card.nextElementSibling === b
   ? ok('and it sits directly under the question, not at the end of the page')
-  : fail('the answer block is not under the question it answers');
+  : fail('the answer panel is not under the question it answers');
 
-const ink = doc.getElementById('codeanswer-ink');
-const type = doc.getElementById('codeanswer-type');
-ink && type
-  ? ok('offering both ways: write on the card, or type')
+const write = doc.getElementById('tab-write');
+const type = doc.getElementById('tab-type');
+write && type
+  ? ok('offering both ways: write, or type')
   : fail('one of the two ways to answer is missing');
 
-// Typing must open the box WITHOUT a signal: this is an answer, not a cry for
-// help, and sending it as `help` tells the tutor something untrue.
-const row = doc.getElementById('composer-row');
-row.hidden = true;
-row.dataset.signal = 'help';
+// Typing opens the typed half of the SAME panel, not a separate box.
+typebox().hidden = true;
 type.onclick();
-!row.hidden
-  ? ok('typing opens the box')
-  : fail('the text box stays shut, which is the whole defect');
-!row.dataset.signal
-  ? ok('and does not send it as "I need help", which would be untrue')
-  : fail('a typed answer would go out tagged as a signal');
+!typebox().hidden
+  ? ok('typing opens the typed half')
+  : fail('the typed half stays shut, which is the whole defect');
 
-// Writing on the card turns annotate mode on, so the pen works immediately
-// rather than after finding a control in the title bar.
-window.Annotate.setOn(false);
-ink.onclick();
-window.Annotate.isOn()
-  ? ok('and "write on this card" turns the pen on there and then')
-  : fail('the pen has to be found in the title bar first');
-
-// Marks on the card that is asking are an answer, and the control has to say so.
-window.Annotate.load({ '0001': [{ c: '#e0b45c', w: 2, p: [0.1, 0.1, 0.4, 0.4] }] });
-window.__paintNotesSend ? window.__paintNotesSend() : ink.onclick();
-const send = doc.getElementById('notesend');
-!send.hidden
-  ? ok('marks on the question can be sent')
-  : fail('annotations on the open question cannot be sent anywhere');
-/as my answer/.test(send.textContent)
-  ? ok('and the button says they are the answer, not a passing note')
-  : fail('the send button reads "' + send.textContent + '" — it does not say '
-         + 'that these marks answer the question');
+// The three signals remain, for pace control.
+signals() && !signals().hidden
+  ? ok('the three signals are still there')
+  : fail('the signals vanished when the answer panel appeared');
 
 // Skipping is available here too: a prompt that cannot be declined gets
 // answered badly to make it go away.
-doc.getElementById('codeanswer-skip')
+doc.getElementById('skip')
   ? ok('and the question can be declined, as in a maths course')
   : fail('a code question cannot be skipped');
 
 paint('code', [{ id: 't1', rev: 1, signal: 'skip', answers: '0001', t: now + 1,
                  from: 'student', kind: 'text', text: '' }]);
 block().hidden
-  ? ok('and a skipped question retires the block')
-  : fail('the block survives a skip, so the prompt does not go away');
+  ? ok('and a skipped question retires the panel')
+  : fail('the panel survives a skip, so the prompt does not go away');
 
-// --- a maths course is unchanged -----------------------------------------
+// --- a maths course gets the same panel ----------------------------------
 paint('math');
-block().hidden
-  ? ok('a maths course does not get it: the writing surface is the answer there')
-  : fail('the code answer block appeared in a maths course, beside the slate');
-!doc.getElementById('writer').hidden
-  ? ok('and still gets its writing surface')
-  : fail('the maths answer block stopped appearing');
+!block().hidden
+  ? ok('a maths course gets the same answer panel')
+  : fail('the maths answer panel did not appear');
+signals().hidden
+  ? ok('and no signals — the panel is the answer there')
+  : fail('the code signals appeared in a maths course');
 
 // --- a minute of writing must not look like a minute of nothing ----------
 // A card is a file and the lesson shows nothing until it exists, so the tutor

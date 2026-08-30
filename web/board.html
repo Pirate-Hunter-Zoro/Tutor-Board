@@ -54,6 +54,7 @@
   <button id="btn-bigger" title="larger type">A+  larger type</button>
   <button id="btn-face" title="typeface">Aa  reading face</button>
   <button id="btn-theme" title="light / dark / auto">◐  light / dark</button>
+  <button id="btn-notes-again" title="ask about annotations again" hidden>✎  ask about annotations</button>
   <button id="btn-scratch" title="photos and PDFs">▤  photos and PDFs</button>
   <button id="btn-history" title="past lessons" hidden>◷  past lessons</button>
   <button id="btn-print" title="print or save as PDF">⎙  print</button>
@@ -196,6 +197,7 @@
   <span>You have marks on the lesson too.</span>
   <button id="send-notes" type="button" class="primary">send those as well</button>
   <button id="send-cancel" type="button" class="quiet">no, just the working</button>
+  <button id="send-no-ask" type="button" class="quiet">no, and don't ask again</button>
 </div>
 
 <button id="jump" class="jump" hidden>↓ new</button>
@@ -274,13 +276,25 @@
 <section id="writer" hidden>
   <div id="writer-head">
     <span id="writer-label">Your answer</span>
-    <span id="writer-hint">write below, then Send</span>
-    <!-- Not every prompt is worth writing out, and a prompt that cannot be
+    <!-- One answer panel, two surfaces. The student flips between writing and
+         typing, and whichever they used last is the one that opens next time. -->
+    <span class="tabs">
+      <button id="tab-write" type="button" class="tab on">✎ write</button>
+      <button id="tab-type" type="button" class="tab">⌨ type</button>
+    </span>
+    <span id="writer-hint"></span>
+    <!-- Not every prompt is worth answering, and a prompt that cannot be
          declined is a prompt that gets answered badly to make it go away. It
          lives in this header so it dies with the block it belongs to. -->
     <button id="skip" type="button">skip this one</button>
   </div>
   <div id="slate"></div>
+  <!-- The typed half of the same panel. Saved as it is typed, so flipping to the
+       pen and back does not lose the sentence. -->
+  <div id="typebox" hidden>
+    <textarea id="saybox" rows="3" placeholder="type your answer"></textarea>
+    <button id="send-type" type="button">send</button>
+  </div>
   <!-- Sending into silence is the thing that makes a person wonder whether it
        arrived. This sits under the surface they sent from and says it did. -->
   <div id="sent" class="sent" hidden>
@@ -289,40 +303,18 @@
   </div>
 </section>
 
-<!-- A question in a code project is still a question, and it used to have
-     nowhere to go. The three signals are pace control -- ready to check, help,
-     confused -- and none of them is "here is my answer", while the text row
-     stays shut until one of the two that need a sentence is picked. So a card
-     that asked the student to decide something left them with no way to say
-     what they had decided. This is that way, and it sits under the question it
-     answers, exactly where the writing surface goes in a maths course. -->
-<section id="codeanswer" hidden>
-  <div id="codeanswer-head">
-    <span id="codeanswer-label">Your answer</span>
-    <span id="codeanswer-hint">write on the card above, or type it</span>
-    <button id="codeanswer-skip" type="button">skip this one</button>
-  </div>
-  <div id="codeanswer-acts">
-    <button id="codeanswer-ink" type="button" class="primary">✎ write on this card</button>
-    <button id="codeanswer-type" type="button">type an answer</button>
-  </div>
-</section>
-
 <!-- Code: the work happens in the editor on the real machine. What the board is
      for is the three things worth saying about it, and none of them is worth
-     typing on a tablet. The box only opens when there is something to explain. -->
-<form id="composer" autocomplete="off" hidden>
+     typing on a tablet. "Ready to check" is one tap; the other two open the
+     answer panel's typing half, because "I need help" is only useful with a
+     sentence after it. -->
+<div id="composer" hidden>
   <div id="signals">
     <button id="sig-done" type="button" class="sig primary" data-signal="done">Ready to check</button>
     <button id="sig-help" type="button" class="sig" data-signal="help">I need help</button>
     <button id="sig-confused" type="button" class="sig" data-signal="confused">I'm confused</button>
   </div>
-  <div id="composer-row" hidden>
-    <a id="composer-slate" href="/slate" title="sketch something instead">✎</a>
-    <textarea id="say" rows="1" placeholder="what is going wrong?"></textarea>
-    <button id="send" type="submit">send</button>
-  </div>
-</form>
+</div>
 
 <input id="file" type="file" multiple accept="image/*,application/pdf" hidden>
 

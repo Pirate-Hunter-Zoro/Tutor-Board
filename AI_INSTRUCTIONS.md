@@ -227,10 +227,12 @@ in the admin console still has the old name in its local state, and a missing
   nodes on a shared home, so every command that re-points `tailscale serve` checks `alive()` first.
   `board net` did not, and a stale record from an ended allocation was enough for a command that
   reads like a diagnostic to park the iPad's one baked-in address on a dead port.
-- **No text box in math mode, ever.** Answering means writing on the slate. A composer there
-  would quietly become the path of least resistance and undo the point of the thing. Code mode is
-  the opposite and has one, because a sentence is the right unit for "look at what I just wrote".
-  `test/modes.js` holds both halves of that.
+- **One answer panel, not two.** Every course has a writing surface and a typed half, one
+  toggle, and whichever the student used last opens next. The mode no longer decides how a
+  question is answered — the student does. What stays split is the code signals (*ready to
+  check*, *help*, *confused*), which belong to a code course and never to mathematics. Do not
+  reintroduce a mode that hides the typed half or the slate. `test/modes.js` and `test/answer.js`
+  hold it.
 - **`tutor` is the entry point; `board` is the assistant's tool.** A person runs `tutor` and gets
   a session. Never add a step that asks them to start the board themselves, or to tell an
   assistant to — that ceremony is the thing the launcher exists to remove.

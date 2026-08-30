@@ -240,14 +240,13 @@ order and the earlier ones did not know the later ones were coming.
 |---|---|---|
 | **Home** (`/`) | — | what you are in the middle of, every course found beside it, and the way in |
 | **The board** (`/board`) | the assistant | the lesson: prose, typeset mathematics, tables, compiled diagrams |
-| **The slate** (`/slate`) | the student, with a Pencil | working, proofs, anything handwritten — **this is the main way to answer** |
+| **The answer panel** (`/board`) | the student | one block under the question — write on the slate, or type, with a toggle |
 | **The drop zone** | the student | a file that was not written on the slate |
-| **The text box** | the student | *code courses only* — a sentence back to the assistant |
+| **The signals** | the student | *code courses only* — ready to check, help, confused, in one tap |
 
-**There is no text box.** Answering means writing, and writing happens on the slate: a question
-card puts a *Write your answer* button on the board, which opens the slate with that question
-pinned at the top, and **review** sends the page. Nothing has to be typed anywhere, in the app or
-in a terminal.
+Answering happens in one panel under the question: the slate and a typed half, and a toggle
+between them. Whichever the student used last is the one that opens next. Nothing has to be
+typed anywhere else, in the app or in a terminal.
 
 ### The first turn
 
@@ -886,14 +885,16 @@ nothing has run.
 
 | | `"mode": "math"` | `"mode": "code"` |
 |---|---|---|
-| Answering | write on the slate, tap **review** | type in the box on the board |
-| Text box | **none** | yes, and the slate is one tap away for sketching |
+| Answering | the answer panel — write on the slate, or type | the answer panel, plus the three signals |
+| The panel | write half and type half, one toggle | the same panel, whichever they used last |
 | Suits | proofs, derivations, anything worked by hand | being walked through code, reviewing what you wrote, "do it yourself" |
 
-The distinction is not decoration. In a mathematics course a text box is the path of least
-resistance and quietly destroys the point — you end up typing `sqrt(2)` instead of working the
-problem. In a code course the useful things to say *are* sentences: *look at what I just wrote*,
-*this test fails*, *stop explaining and write it*. So the box exists there and not here.
+The answer panel is the same in both modes: a writing surface and a typed half, one toggle,
+and whichever the student used last is the one that opens next time. What still differs is
+the signals — in a code course the work happens in the editor on the real machine, so the
+board carries *ready to check*, *I need help* and *I'm confused* as one-tap pace control, and
+none of those belongs in a mathematics course. The write/type choice is the student's, not the
+course's; a mode no longer decides how anyone is allowed to answer.
 
 `board init` writes the file:
 
@@ -1818,7 +1819,7 @@ node test/markdown.js    26 cases on the markdown renderer, including the math-s
 node test/macros.js      every KaTeX macro, plus real formulas from both courses
 node test/hidden.js      that `hidden` elements are actually hidden
 node test/pages.js       every page's script runs against its own markup
-node test/modes.js       that math mode has no text box and code mode does
+node test/modes.js       that the answer panel is one, and the signals stay in code
 node test/typeface.js    that the reading face reaches prose and never the maths
 node test/interactive.js drives the real board in a real DOM and writes on it
 node test/sizing.js      that every screen size opens at natural writing size

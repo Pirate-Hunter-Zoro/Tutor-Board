@@ -73,8 +73,11 @@ class Repo:
         # a card is the thing an annotation is about and the only anchor that
         # survives the lesson reflowing at a different type size.
         self.notes = os.path.join(self.live, "annotations")
+        # Typed answers, drafted per question the way the slate drafts per page,
+        # so switching from typing to writing and back does not lose the sentence.
+        self.text = os.path.join(self.live, "text")
         for d in (self.live, self.cards, self.inbox, self.uploads, self.tikz,
-                  self.archive, self.slate, self.answers, self.notes):
+                  self.archive, self.slate, self.answers, self.notes, self.text):
             os.makedirs(d, exist_ok=True)
 
     @property
@@ -681,6 +684,32 @@ def load_notes(repo):
     return out
 
 
+def load_text_drafts(repo):
+    """Typed answers in progress, keyed by the question they answer.
+
+    The slate keeps a page per question so going back to an earlier one does not
+    lose the working on it. A typed answer needs the same: the sentence you were
+    half way through when the tutor asked something else is still yours.
+    """
+    out = {}
+    try:
+        names = sorted(os.listdir(repo.text))
+    except OSError:
+        return out
+    for name in names:
+        if not name.endswith(".txt"):
+            continue
+        qid = name[:-4]
+        if not re.match(r"^\d{1,4}$", qid):
+            continue
+        try:
+            with open(os.path.join(repo.text, name), "r", encoding="utf-8") as fh:
+                out[qid] = fh.read()
+        except OSError:
+            continue
+    return out
+
+
 # Whether this repository has work that is not committed. Asked on every poll,
 # answered from a cache: `git status` on a network filesystem is not something to
 # run four times a second, and the answer does not change that fast.
@@ -1227,6 +1256,7 @@ class Hub:
             "slate": load_slate(self.repo),
             "notes": load_notes(self.repo),
             "notes_sent": load_notes_sent(self.repo),
+            "text_drafts": load_text_drafts(self.repo),
             "unsaved": repo_dirty(self.repo),
             "push": load_push(self.repo),
             "agent": load_agent(self.repo),
@@ -1788,29 +1818,52 @@ class Handler(BaseHTTPRequestHandler):
                     "ink": "/answers/" + base + ".json",
                     "read": False,
                 }
-                write_turn(repo, record)
-                msg = dict(record)
-                # What arrived is a page, not a verdict. It may be an attempt,
-                # a question written in the margin, or "I don't know how to
-                # start" -- and reading it as a wrong answer when it is a
-                # question is the most discouraging thing this can do.
-                msg["text"] = ("[slate] %s rev %d, %d strokes. Open the image and "
-                               "read what is actually on it: if there is a question "
-                               "anywhere on the page, answer that first, in its own "
-                               "card, before assessing any working. Do not mark a "
-                               "question wrong."
-                               % (tid, rev, len(strokes)))
-                msg["slate"] = os.path.join(repo.answers, base + ".png")
-                with open(repo.messages_path, "a", encoding="utf-8") as fh:
-                    fh.write(json.dumps(msg) + "\n")
-                self.server.hub.worker.dirty.set()
-                self.note("slate page %d: %d strokes, SENT as %s rev %d answering %s"
-                          % (n, len(strokes), tid, rev, record["answers"] or "-"))
-                return self.send_json({"ok": True, "page": n, "turn": tid, "rev": rev})
+            write_turn(repo, record)
+            msg = dict(record)
+            # What arrived is a page, not a verdict. It may be an attempt,
+            # a question written in the margin, or "I don't know how to
+            # start" -- and reading it as a wrong answer when it is a
+            # question is the most discouraging thing this can do.
+            msg["text"] = ("[slate] %s rev %d, %d strokes. Open the image and "
+                           "read what is actually on it: if there is a question "
+                           "anywhere on the page, answer that first, in its own "
+                           "card, before assessing any working. Do not mark a "
+                           "question wrong."
+                           % (tid, rev, len(strokes)))
+            msg["slate"] = os.path.join(repo.answers, base + ".png")
+            with open(repo.messages_path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(msg) + "\n")
+            self.server.hub.worker.dirty.set()
+            self.note("slate page %d: %d strokes, SENT as %s rev %d answering %s"
+                      % (n, len(strokes), tid, rev, record["answers"] or "-"))
+            return self.send_json({"ok": True, "page": n, "turn": tid, "rev": rev})
             self.server.hub.worker.dirty.set()
             self.note("slate page %d: %d strokes, saved only (not sent)"
                       % (n, len(payload.get("strokes") or [])))
             return self.send_json({"ok": True, "page": n})
+
+        if path == "/text/save":
+            # A typed answer in progress, kept per question so the panel can flip
+            # between writing and typing without losing either.
+            try:
+                payload = json.loads(self.read_body().decode("utf-8"))
+            except Exception:
+                return self.send_json({"ok": False, "error": "bad json"}, status=400)
+            qid = str(payload.get("question") or "")
+            if not re.match(r"^\d{1,4}$", qid):
+                return self.send_json({"ok": False, "error": "bad question"}, status=400)
+            text = payload.get("text") or ""
+            stem = os.path.join(repo.text, qid + ".txt")
+            if text.strip():
+                with open(stem, "w", encoding="utf-8") as fh:
+                    fh.write(text)
+            else:
+                try:
+                    os.remove(stem)
+                except OSError:
+                    pass
+            self.server.hub.worker.dirty.set()
+            return self.send_json({"ok": True, "question": qid})
 
         if path == "/say":
             try:
@@ -1845,6 +1898,14 @@ class Handler(BaseHTTPRequestHandler):
                 "read": False,
             }
             write_turn(repo, record)
+            # The typed draft for this question is now the answer itself; it has
+            # been said and should not come back to haunt the next prompt.
+            a = record.get("answers")
+            if a:
+                try:
+                    os.remove(os.path.join(repo.text, str(a) + ".txt"))
+                except OSError:
+                    pass
             # What lands in the inbox is what `board wait` prints, and in a
             # headless session that string IS the prompt the assistant is woken
             # with. A bare "[begin]" tells it nothing, so a signal sent without a

@@ -62,6 +62,7 @@ var els = {
   finishSub: document.getElementById("finish-sub"),
   save: document.getElementById("btn-save"),
   barmenu: document.getElementById("barmenu"),
+  notesAgain: document.getElementById("btn-notes-again"),
   home: document.getElementById("btn-home"),
   finishLeave: document.getElementById("finish-leave"),
   finishYes: document.getElementById("finish-yes"),
@@ -73,15 +74,13 @@ var els = {
   busy: document.getElementById("busy"),
   busyText: document.getElementById("busy-text"),
   busySince: document.getElementById("busy-since"),
-  codeanswer: document.getElementById("codeanswer"),
-  codeanswerInk: document.getElementById("codeanswer-ink"),
-  codeanswerType: document.getElementById("codeanswer-type"),
-  codeanswerSkip: document.getElementById("codeanswer-skip"),
-  codeanswerHint: document.getElementById("codeanswer-hint"),
   composer: document.getElementById("composer"),
-  composerRow: document.getElementById("composer-row"),
-  say: document.getElementById("say"),
-  send: document.getElementById("send"),
+  typebox: document.getElementById("typebox"),
+  saybox: document.getElementById("saybox"),
+  sendType: document.getElementById("send-type"),
+  tabWrite: document.getElementById("tab-write"),
+  tabType: document.getElementById("tab-type"),
+  sendNoAsk: document.getElementById("send-no-ask"),
   file: document.getElementById("file"),
   drop: document.getElementById("drop")
 };
@@ -710,6 +709,7 @@ function render(data) {
   paintSession(state, data.push, data.agent);
   paintHomework(data.hw);
   if (!started) paintWaiting(data);
+  seedTextDrafts(data);
   paintNotesSend();
   paintSent();
   paintSave(data.unsaved);
@@ -719,15 +719,10 @@ function render(data) {
 
   var codeMode = (state.mode || "math") === "code";
   document.body.dataset.mode2 = state.mode || "math";
+  /* The signals -- ready to check, help, confused -- are pace control for a code
+     project. They ride above the answer panel, which every course has now. */
   els.composer.hidden = !codeMode;
 
-  /* In maths, offer the slate only while an answer is actually owed: a question
-     card with nothing sent after it. A permanent button would be furniture.
-
-     Sending is a checkpoint, not an exit. Once the panel has opened for a
-     question it stays open for that question however many times the page is
-     sent, because the next thing that happens is usually the tutor pointing at
-     a mistake in it. It closes when a *different* question arrives. */
   var lastQuestion = 0, lastSent = 0, newestQ = null;
   (data.cards || []).forEach(function (c) {
     if (c.kind === "question" && c.mtime > lastQuestion) {
@@ -736,31 +731,14 @@ function render(data) {
     }
   });
   (data.turns || []).forEach(function (m) { if (m.t > lastSent) lastSent = m.t; });
-  /* A question stays open until it is settled, and what settles it is the tutor
-     saying so -- a `correct` card written after it, or another question taking
-     its place. Not the clock.
-
-     It used to be "the newest question is newer than your newest send", plus an
-     in-memory pin so the surface survived a send. That pin is a variable, and a
-     variable does not survive closing the app: reopening a lesson where the
-     tutor had replied with anything other than a question left no writing
-     surface at all, on a board whose whole purpose is being written on. The
-     transcript on disk has to be enough to decide this. */
   var settled = false;
   (data.cards || []).forEach(function (c) {
     if (c.kind === "correct" && c.mtime >= lastQuestion) settled = true;
   });
-  var owed = !codeMode && !!newestQ && !settled;
+  var owed = !!newestQ && !settled;
 
-  /* And asked for. The surface closes when the tutor says the answer is right,
-     which is correct almost always and a dead end the rest of the time: "right,
-     now strike that line" is a `correct` card that still wants a pen, and so is
-     wanting to tell the tutor about three more exercises. Reaching a state with
-     nowhere to write, by finishing an exercise, is the worst possible moment for
-     one. The request lasts until the tutor asks something else, at which point
-     the surface would be open anyway. */
   if (reopenedFor !== null && reopenedFor !== (newestQ || "")) reopenedFor = null;
-  if (!codeMode && reopenedFor !== null && !data.archived) owed = true;
+  if (reopenedFor !== null && !data.archived) owed = true;
 
   pinnedTo = owed ? newestQ : null;
 
@@ -828,20 +806,14 @@ function render(data) {
   /* A past lesson is read only: no pen, no box, nothing to send into a session
      that has already been filed. */
   placeWriter(owed && !data.archived, qNode);
-  paintBoards(qids, runEndOf, onQ, codeMode || !!data.archived || !!reading
-                                   || els.writer.hidden);
-  /* Offered exactly when there is no surface to write on: in a maths lesson the
-     tutor has written something, and nothing is owed. */
+  paintBoards(qids, runEndOf, onQ, !!data.archived || !!reading || els.writer.hidden);
+  /* Offered exactly when there is no surface to write on: the tutor has written
+     something, and nothing is owed. */
   if (els.reopen) {
-    els.reopen.hidden = codeMode || !!data.archived || !!reading
+    els.reopen.hidden = !!data.archived || !!reading
                         || !(data.cards || []).length
                         || !els.writer.hidden;
   }
-  /* A question in a code project owes an answer just as much as one in a maths
-     course; what differs is how it is given. `owed` stays false there because it
-     governs the writing surface, so this is decided separately. */
-  placeCodeAnswer(codeMode && !!newestQ && !settled && !skipped && !data.archived,
-                  qNode, newestQ);
   paintComposer(codeMode && !data.archived, data);
   paintBusy(data);
   /* KaTeX walks the DOM it is handed. Handing it the whole lesson every frame
@@ -1393,8 +1365,10 @@ if (window.Annotate) {
     paintAnnTools();
     paintNotesSend();
   });
-  /* A closing tab must not take the last stroke with it. */
+  /* A closing tab must not take the last stroke with it -- or the last sentence
+     still being typed. */
   window.addEventListener("pagehide", function () { saveNotes(false); });
+  window.addEventListener("pagehide", function () { flushTextDraft(); });
 }
 
 function setAnnotating(next) {
@@ -1475,7 +1449,24 @@ function askWhatToSend(sendWork) {
     return;
   }
   sendWork();
-  if (marks) els.sendwhat.hidden = false;
+  if (marks && !notesOff()) els.sendwhat.hidden = false;
+}
+
+/* Whether the student has said "no, and don't ask again". Persisted, so it
+   survives the app being put down, and re-armed from the ⋯ menu when they change
+   their mind and want to hand the marks over after all. */
+var NOTES_OFF = "notes-off";
+
+function notesOff() {
+  try { return localStorage.getItem(NOTES_OFF) === "1"; } catch (e) { return false; }
+}
+
+function setNotesOff(v) {
+  try {
+    if (v) localStorage.setItem(NOTES_OFF, "1");
+    else localStorage.removeItem(NOTES_OFF);
+  } catch (e) {}
+  paintNotesSend();
 }
 
 function closeChooser() {
@@ -1487,6 +1478,17 @@ els.sendNotes.onclick = function () {
   saveNotes(true).then(function () { paintNotesSend(); toastSent(); });
 };
 els.sendCancel.onclick = closeChooser;
+els.sendNoAsk.onclick = function () {
+  closeChooser();
+  setNotesOff(true);
+};
+
+if (els.notesAgain) {
+  els.notesAgain.onclick = function () {
+    setNotesOff(false);
+    paintNotesSend();
+  };
+}
 
 els.notesend.onclick = function () {
   els.notesend.disabled = true;
@@ -1507,52 +1509,14 @@ window.askWhatToSend = askWhatToSend;
 function paintNotesSend() {
   var any = haveNotes();
   var owedSurface = !els.writer.hidden;
-  els.notesend.hidden = !(any && !owedSurface);
-  /* Marks on the card that is asking are an ANSWER, and the button should say
-     so -- otherwise sending them reads like filing a note rather than replying,
-     which is exactly the doubt that sends somebody looking for a text box. */
-  var answeringNow = els.codeanswer && !els.codeanswer.hidden
-                     && window.Annotate
-                     && window.Annotate.unsent().indexOf(els.codeanswer.dataset.card) !== -1;
-  els.notesend.textContent = answeringNow ? "send my annotations as my answer"
-                                          : "send my annotations";
-  els.notesend.classList.toggle("answering", !!answeringNow);
+  els.notesend.hidden = !(any && !owedSurface && !notesOff());
+  /* The re-arm control is only meaningful while the offer is actually off, and
+     only if there are marks to hand over. */
+  if (els.notesAgain) {
+    els.notesAgain.hidden = !(notesOff() && any);
+  }
 }
 
-
-if (els.codeanswerInk) {
-  els.codeanswerInk.onclick = function () {
-    if (window.Annotate && !window.Annotate.isOn()) {
-      var btn = document.getElementById("btn-annotate");
-      if (btn && btn.onclick) btn.onclick();
-      else window.Annotate.setOn(true);
-    }
-    var card = els.codeanswer.dataset.card;
-    var node = card && document.querySelector('[data-card="' + card + '"]');
-    if (node && node.scrollIntoView) node.scrollIntoView({ block: "start" });
-    paintNotesSend();
-  };
-}
-
-if (els.codeanswerType) {
-  els.codeanswerType.onclick = function () {
-    /* The row, with no signal attached: this is an answer, not a cry for help. */
-    els.composerRow.hidden = false;
-    els.composerRow.dataset.signal = "";
-    var box = document.getElementById("say");
-    if (box) {
-      box.placeholder = "your answer";
-      box.focus();
-    }
-  };
-}
-
-if (els.codeanswerSkip) {
-  els.codeanswerSkip.onclick = function () {
-    els.codeanswerSkip.disabled = true;
-    say("skip");        /* anchored by `answering.question`, like any turn */
-  };
-}
 
 /* --------------------------------------------------- something to save yet? */
 /* Leaving is silent. An app is swiped away, a lid closes, a lesson is put down
@@ -2099,22 +2063,6 @@ function tickBusy() {
     : "the tutor is writing";
 }
 
-function placeCodeAnswer(owed, questionNode, card) {
-  if (!els.codeanswer) return;
-  els.codeanswer.hidden = !owed;
-  if (!owed) return;
-  els.codeanswer.dataset.card = card || "";
-  /* Same as the writing surface: the anchor is a node found by card id, so it
-     has to be in the lesson before anything is inserted beside it. */
-  var host = questionNode && questionNode.parentNode;
-  if (host && questionNode.nextSibling !== els.codeanswer) {
-    host.insertBefore(els.codeanswer, questionNode.nextSibling);
-  } else if (!host && els.codeanswer.parentNode !== els.cards) {
-    els.cards.appendChild(els.codeanswer);
-  }
-  paintNotesSend();
-}
-
 /* The writing surface used to be capped against the visual viewport here, so
    that pinch-zooming the page could not make it swallow the glass. The cap
    worked and was still wrong: it was a fraction of what could be SEEN, so it
@@ -2131,10 +2079,10 @@ function placeCodeAnswer(owed, questionNode, card) {
 
 function placeWriter(owed, questionNode) {
   els.writer.hidden = !owed;
-  document.getElementById("drawbar").hidden = !owed;
   /* The tool bar is fixed to the bottom of the window, so the page has to give
      up the height it occupies or the last card sits underneath it. */
   document.body.classList.toggle("tools-out", !!owed);
+  paintPanel();
   if (!owed) return;
 
   /* The anchor is looked up by card id now, so it can be any node in the lesson
@@ -2256,15 +2204,95 @@ function toastSent() {
    there is no text box at all -- answering means writing on the slate. In a code
    course a sentence is usually the right unit ("look at what I just wrote"), so
    the box is there and the slate is one tap away for sketching. */
+/* --------------------------------------- one answer panel, two surfaces */
+/* The student writes on the slate or types, whichever they used last. A typed
+   draft is kept per question the way the slate keeps a page per question, so
+   flipping between the two does not lose either half. */
+
+var ANSWER_KIND = "answer-kind";
+var pendingSignal = null;       /* a code signal waiting on its sentence */
+var textDrafts = {};            /* question id -> typed draft */
+var textDraftsSeeded = false;
+var lastTextQuestion = null;
+var textSaveTimer = null;
+
+function answerKind() {
+  try {
+    if (localStorage.getItem(ANSWER_KIND) === "type") return "type";
+  } catch (e) {}
+  return "write";
+}
+
+function setAnswerKind(kind) {
+  try { localStorage.setItem(ANSWER_KIND, kind); } catch (e) {}
+}
+
+function seedTextDrafts(data) {
+  if (textDraftsSeeded) return;
+  textDraftsSeeded = true;
+  var d = data.text_drafts || {};
+  Object.keys(d).forEach(function (q) { textDrafts[q] = d[q]; });
+}
+
+function flushTextDraft() {
+  clearTimeout(textSaveTimer);
+  textSaveTimer = null;
+  if (!lastTextQuestion) return;
+  fetch("/text/save", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question: lastTextQuestion,
+                           text: textDrafts[lastTextQuestion] || "" })
+  }).catch(function () {});
+}
+
+function saveTextDraft() {
+  if (!answering.question) return;
+  var q = answering.question;
+  textDrafts[q] = els.saybox.value;
+  clearTimeout(textSaveTimer);
+  textSaveTimer = setTimeout(function () {
+    fetch("/text/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question: q, text: textDrafts[q] || "" })
+    }).catch(function () {});
+  }, 800);
+}
+
+function restoreTextDraft() {
+  if (!answering.question) { els.saybox.value = ""; return; }
+  if (lastTextQuestion === answering.question) return;
+  if (lastTextQuestion !== null) flushTextDraft();
+  lastTextQuestion = answering.question;
+  els.saybox.value = textDrafts[answering.question] || "";
+  autosize();
+}
+
+/* The write half or the type half, decided by the tab and the remembered kind. */
+function paintPanel() {
+  var open = !els.writer.hidden;
+  var typing = open && answerKind() === "type";
+  els.typebox.hidden = !typing;
+  var slate = document.getElementById("slate");
+  if (slate) slate.hidden = typing;
+  document.getElementById("drawbar").hidden = !(open && !typing);
+  els.tabWrite.classList.toggle("on", !typing);
+  els.tabType.classList.toggle("on", typing);
+  if (typing) restoreTextDraft();
+  else if (writer) requestAnimationFrame(writer.relayout);
+}
+
 function autosize() {
-  els.say.style.height = "auto";
-  els.say.style.height = Math.min(els.say.scrollHeight, 9 * 16) + "px";
+  els.saybox.style.height = "auto";
+  els.saybox.style.height = Math.min(els.saybox.scrollHeight, 9 * 16) + "px";
 }
 
 function say(signal) {
-  var text = els.say.value.trim();
+  var text = els.saybox.value.trim();
   if (!text && !signal) return;
-  els.say.value = "";
+  els.saybox.value = "";
+  if (answering.question) { textDrafts[answering.question] = ""; }
   autosize();
   return fetch("/say", {
     method: "POST",
@@ -2272,22 +2300,44 @@ function say(signal) {
     body: JSON.stringify({ text: text, signal: signal || null,
                            answers: answering.question })
   }).then(function () {
-    els.send.classList.add("sent");
-    setTimeout(function () { els.send.classList.remove("sent"); }, 900);
+    els.sendType.classList.add("sent");
+    setTimeout(function () { els.sendType.classList.remove("sent"); }, 900);
   });
 }
 
+els.tabWrite.onclick = function () { setAnswerKind("write"); paintPanel(); };
+els.tabType.onclick = function () { setAnswerKind("type"); paintPanel(); };
+
+function sendTyped() {
+  var sig = pendingSignal;
+  pendingSignal = null;
+  var text = els.saybox.value.trim();
+  if (!text && !sig) return;
+  say(sig).then(function () {
+    /* A typed answer can still have marks sitting on the lesson, and those are
+       worth offering too -- the same follow-up the slate send raises. */
+    if (haveNotes() && !notesOff()) els.sendwhat.hidden = false;
+  });
+}
+
+els.sendType.onclick = sendTyped;
+
+els.saybox.addEventListener("input", function () { autosize(); saveTextDraft(); });
+els.saybox.addEventListener("keydown", function (e) {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+    e.preventDefault();
+    sendTyped();
+  }
+});
+
 /* In a code course the answer is in the editor on the real machine, so the
    board carries the three things worth saying about it. "Ready to check" is one
-   tap. The other two open the box, because "I need help" is only useful with a
-   sentence after it -- and that is the moment a keyboard should appear, not
-   before. */
+   tap. The other two open the panel's typing half, because "I need help" is only
+   useful with a sentence after it -- and that is the moment a keyboard should
+   appear, not before. */
 function paintComposer(codeMode, data) {
   els.composer.hidden = !codeMode;
-  if (!codeMode) {
-    if (els.composerRow) els.composerRow.hidden = true;
-    return;
-  }
+  if (!codeMode) return;
   var last = (data.turns || []).filter(function (t) { return t.signal; }).pop();
   Array.prototype.forEach.call(document.querySelectorAll(".sig"), function (b) {
     b.classList.toggle("on", !!last && last.signal === b.dataset.signal);
@@ -2295,32 +2345,22 @@ function paintComposer(codeMode, data) {
 }
 
 function openComposer(signal) {
-  els.composerRow.hidden = false;
-  els.composerRow.dataset.signal = signal;
-  els.say.placeholder = signal === "confused"
+  pendingSignal = signal;
+  setAnswerKind("type");
+  paintPanel();
+  els.saybox.placeholder = signal === "confused"
     ? "what is not making sense?" : "what is going wrong?";
-  els.say.focus();          /* the keyboard, at the moment it is wanted */
+  els.saybox.focus();          /* the keyboard, at the moment it is wanted */
 }
-
-els.composer.addEventListener("submit", function (e) {
-  e.preventDefault();
-  say(els.composerRow.dataset.signal || null);
-  els.composerRow.hidden = true;
-  els.composerRow.dataset.signal = "";
-});
 
 Array.prototype.forEach.call(document.querySelectorAll(".sig"), function (b) {
   b.addEventListener("click", function () {
     var signal = b.dataset.signal;
     /* "Ready to check" needs no sentence. The other two are useless without
-       one, so they open the box rather than sending a bare flag. */
-    if (signal === "done") { say("done"); els.composerRow.hidden = true; return; }
+       one, so they open the typing half rather than sending a bare flag. */
+    if (signal === "done") { say("done"); return; }
     openComposer(signal);
   });
-});
-els.say.addEventListener("input", autosize);
-els.say.addEventListener("keydown", function (e) {
-  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); say(); }
 });
 
 function upload(files) {
