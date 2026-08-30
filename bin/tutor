@@ -499,6 +499,51 @@ def sync(root, quiet=False):
     return True
 
 
+def sync_transcript(root, log=None):
+    """Commit and push the lesson transcript, pulling first.
+
+    The transcript -- cards, turns, ink, answers, session state and the archive
+    -- is versioned, so a lecture is the same wherever it is picked up. This runs
+    on a beat while the headless tutor is alive: an allocation that dies
+    mid-lesson costs one beat of work, not the evening. The pull is
+    fast-forward-only and everything here is non-fatal -- a diverged branch or a
+    dead remote is logged and retried next beat, never resolved by hand, because
+    a transcript is append-only on one machine at a time and a merge is the last
+    thing it should ever need.
+    """
+    if not os.path.isdir(os.path.join(root, ".git")):
+        return
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_ASKPASS="/bin/false")
+
+    def note(line):
+        if log:
+            try:
+                log.write(line + "\n")
+            except (OSError, ValueError):
+                pass
+
+    def git(*args, **kw):
+        return subprocess.run(["git"] + list(args), cwd=root, env=env,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              timeout=kw.get("timeout", 60))
+    try:
+        if git("remote", "get-url", "origin").returncode != 0:
+            return
+        p = git("pull", "--ff-only")
+        if p.returncode != 0:
+            out = p.stdout.decode("utf-8", "replace").strip().splitlines()
+            note("transcript: not pulled (%s)" % (out[-1] if out else "pull failed"))
+        git("add", "-A", "live")
+        if git("diff", "--cached", "--quiet").returncode == 0:
+            return
+        if git("commit", "-m", "lesson transcript").returncode != 0:
+            return
+        q = git("push")
+        note("transcript: pushed" if q.returncode == 0 else "transcript: push failed")
+    except (OSError, subprocess.TimeoutExpired):
+        note("transcript: could not reach the remote")
+
+
 def agent_live(root):
     """The daemon recorded for this course, if it is really there.
 
@@ -674,6 +719,20 @@ def headless(cfg, course, agent_name, session):
                 pass
     signal.signal(signal.SIGTERM, bye)
     signal.signal(signal.SIGINT, bye)
+
+    def beat_transcript():
+        # The transcript is versioned so a lesson survives the host it was taught
+        # on. Push it on a beat -- pulling first, so whichever machine is active
+        # stays caught up with the other. This is what makes a course read the
+        # same on the compute node and the Mac mini without anyone remembering to
+        # push, and it is what makes an allocation dying mid-lesson cost one beat
+        # of work rather than the evening.
+        while running["go"]:
+            sync_transcript(root, log)
+            end = time.time() + 90
+            while running["go"] and time.time() < end:
+                time.sleep(1)
+    threading.Thread(target=beat_transcript, daemon=True).start()
 
     turns = 0
     carried = 0          # turns the agent's current session is carrying

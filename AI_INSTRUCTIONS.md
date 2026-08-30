@@ -21,8 +21,10 @@ A fix shipped from the other machine has to be in front of you before you build 
 it, or you will be fixing a board that is not the one running. It is deliberately
 never fatal: no remote, no network, or a diverged branch say so in one line and you
 carry on. But start from what is on disk, not from what was there when you last
-opened it. The same rule applies to a course repository the moment you touch its
-files rather than its `live/` cards.
+opened it. The same rule applies to a course repository — its lesson transcript
+(cards, turns, ink, answers) is versioned too, so a lecture picked up here is the
+same one taught there. The headless tutor pushes that transcript on a beat and the
+session start pulls it; do not re-commit a card the other machine already wrote.
 
 **Then check the machine you are standing on.** This repository runs on an
 always-on Mac mini (`board` on the tailnet) and on a compute node, and each has

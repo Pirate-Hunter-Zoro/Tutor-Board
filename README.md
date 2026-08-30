@@ -1160,9 +1160,22 @@ Everything below is optional, and each item buys something specific.
    display; this is the contract. It is also what marks a directory as a course if you have no
    `tutorboard.json` yet.
 
-5. **`live/` in `.gitignore`** — the board's working directory. Cards, ink, uploads and compiled
-   figures all live there and none of it belongs in history. Exports and archives are underneath
-   it, so pull anything worth keeping out into the repository proper.
+5. **A `.gitignore` that keeps runtime state local and tracks the transcript** — the lesson
+   transcript (`live/cards/`, `live/turns.jsonl`, `live/state.json`, `live/slate/`,
+   `live/answers/`, `live/archive/`) is versioned, so a lecture is the same whichever machine picks
+   it up. What stays ignored is the per-machine runtime: `.board.json`, `agent.json`, `board.log`,
+   the compiled figure cache, the inbox and exports. The exact block is the one this repository's
+   courses carry:
+
+   ```
+   live/*
+   !live/cards/
+   !live/slate/
+   !live/answers/
+   !live/archive/
+   !live/state.json
+   !live/turns.jsonl
+   ```
 
 6. **`scripts/save-and-push.sh`** — the end-of-session push. Copy it from any repository here;
    it is self-contained and takes an optional commit message.
