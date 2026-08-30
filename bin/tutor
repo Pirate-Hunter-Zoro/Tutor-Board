@@ -67,6 +67,17 @@ DEFAULT_CONFIG = {
             "headless_first": ["opencode", "run", "{prompt}"],
             "headless": ["opencode", "run", "--continue", "{prompt}"],
         },
+        # The free tutor: a per-turn script over the free-model chain, not a
+        # terminal agent. `raw_prompt` passes the inbox text through as-is rather
+        # than the opencode-style instruction prompt -- the script builds its own
+        # context. It is headless-only; the interactive `cmd` is opencode, so a
+        # person asking for a terminal session still gets one.
+        "free": {
+            "cmd": ["opencode"], "prompt": "argv",
+            "raw_prompt": True,
+            "headless_first": [sys.executable, os.path.join(TOOL, "bin", "free"), "{prompt}"],
+            "headless": [sys.executable, os.path.join(TOOL, "bin", "free"), "{prompt}"],
+        },
         "codex": {
             "cmd": ["codex"], "prompt": "argv",
             "headless": ["codex", "exec", "{prompt}"],
@@ -793,7 +804,10 @@ def headless(cfg, course, agent_name, session):
         if fresh and carried:
             log.write("-- starting a fresh session after %d turn(s); the lesson "
                       "is read back with `board recap`\n" % carried)
-        prompt = template % out.strip()
+        # A script agent (the free tutor) builds its own context, so it gets the
+        # raw inbox rather than the instruction prompt the interactive agents
+        # expect -- its whole state is on disk and it re-reads what it needs.
+        prompt = out.strip() if spec.get("raw_prompt") else template % out.strip()
         cmd = [a.replace("{prompt}", prompt) for a in use]
         try:
             p = subprocess.run(cmd, cwd=root, stdout=log, stderr=subprocess.STDOUT,

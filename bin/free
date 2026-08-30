@@ -1,0 +1,247 @@
+#!/usr/bin/env python3
+"""
+free -- a lightweight headless tutor over the free-model chain.
+
+opencode is a general coding agent: every turn it loads a ~38k-token system
+prompt with tool definitions and re-sends the whole conversation, which is why it
+exhausts the free tiers. A tutoring turn is not that. It is three steps -- read
+the lesson, read the handwriting, write one card -- and this script does exactly
+those as plain completions over the same free-provider chain the media fleet
+uses. Stdlib only, no session, no tool loop: what is on disk is the whole state,
+which is precisely what makes a transcript survive the host.
+
+Run per turn by `tutor headless`, with the inbox text as the only argument. It
+reads the course's contract and method, runs `board recap`, OCRs anything the
+student sent, asks the free chain for ONE card, and writes it.
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import urllib.error
+import urllib.request
+
+TOOL = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+BOARD = os.path.join(TOOL, "bin", "board")
+KEYS = os.path.join(os.path.expanduser("~"), ".config", "api-keys")
+
+# Free providers, tried in order. A provider is enabled by having its key present.
+# OpenRouter's :free tier leads, Groq's free tier is the independent fallback, so
+# a daily cap on one shared pool does not starve the tutor.
+PROVIDERS = (
+    ("openrouter", "https://openrouter.ai/api/v1/chat/completions", "openrouter_key",
+     ("nvidia/nemotron-3-super-120b-a12b:free",
+      "minimax/minimax-m3:free",
+      "minimax/minimax-m2.7:free",
+      "dots-studio/dots-3-note-preview:free",
+      "cohere/north-mini-code:free")),
+    ("groq", "https://api.groq.com/openai/v1/chat/completions", "groq_key",
+     ("openai/gpt-oss-120b", "openai/gpt-oss-20b")),
+)
+
+VISION_MODEL = "qwen/qwen2.5-vl-72b-instruct"
+VISION_URL = "https://openrouter.ai/api/v1/chat/completions"
+VISION_KEY = "openrouter_key"
+
+UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+
+
+def read_key(name):
+    try:
+        with open(os.path.join(KEYS, name), encoding="utf-8") as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
+
+def post_json(url, key, payload, timeout=180):
+    req = urllib.request.Request(
+        url, data=json.dumps(payload).encode("utf-8"), method="POST",
+        headers={"Authorization": "Bearer " + key,
+                 "Content-Type": "application/json", "User-Agent": UA})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        return json.loads(resp.read().decode("utf-8", "replace"))
+
+
+def chat(messages, max_tokens=2048):
+    """One plain completion over the free chain; moves to the next provider on any
+    failure, exactly the fleet's pattern. Raises when every provider failed."""
+    last = "no free provider answered"
+    for name, url, keyfile, models in PROVIDERS:
+        key = read_key(keyfile)
+        if not key:
+            continue
+        for model in models:
+            try:
+                data = post_json(url, key, {"model": model, "messages": messages,
+                                            "max_tokens": max_tokens,
+                                            "temperature": 0.3})
+            except (urllib.error.HTTPError, urllib.error.URLError, OSError) as exc:
+                last = "%s/%s: %s" % (name, model, exc)
+                continue
+            text = ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "")
+            text = (text or "").strip()
+            if text:
+                return text
+            last = "%s/%s returned empty" % (name, model)
+    raise RuntimeError(last)
+
+
+def ocr_image(path):
+    import base64
+    mime = "image/png" if path.lower().endswith(".png") else "image/jpeg"
+    try:
+        with open(path, "rb") as fh:
+            b64 = base64.b64encode(fh.read()).decode()
+    except OSError as exc:
+        return "(could not read %s: %s)" % (path, exc)
+    key = read_key(VISION_KEY)
+    if not key:
+        return "(no vision key present)"
+    prompt = ("Transcribe ALL handwriting and text on this page verbatim, including "
+              "mathematical notation. Describe any diagrams precisely, so someone who "
+              "cannot see the page can follow the working exactly.")
+    try:
+        data = post_json(VISION_URL, key, {
+            "model": VISION_MODEL,
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url",
+                 "image_url": {"url": "data:%s;base64,%s" % (mime, b64)}},
+            ]}],
+            "max_tokens": 2000,
+        })
+    except (urllib.error.HTTPError, urllib.error.URLError, OSError) as exc:
+        return "(vision failed: %s)" % exc
+    text = ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "")
+    return (text or "").strip()
+
+
+def ocr(path):
+    if path.lower().endswith(".pdf"):
+        return ocr_pdf(path)
+    return ocr_image(path)
+
+
+def ocr_pdf(path):
+    import glob
+    tmp = tempfile.mkdtemp(prefix="free-ocr-")
+    try:
+        subprocess.run(["pdftoppm", "-png", "-r", "150", path, os.path.join(tmp, "p")],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
+        pages = sorted(glob.glob(os.path.join(tmp, "p-*.png")))
+        out = []
+        for i, page in enumerate(pages[:20], 1):
+            out.append("--- page %d ---\n%s" % (i, ocr_image(page)))
+        if len(pages) > 20:
+            out.append("[%d further page(s) omitted]" % (len(pages) - 20))
+        return "\n\n".join(out) if out else "(pdf produced no pages)"
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return "(pdf raster failed: %s)" % exc
+
+
+def read(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
+
+def find_paths(text):
+    """The inbox and recap name files as `file: <path>` / `slate: <path>` /
+    `handwriting: <path>`. Collect the ones that are images or PDFs."""
+    out = []
+    for m in re.finditer(r"(?:file|slate|handwriting):\s*(\S+)", text):
+        p = m.group(1)
+        if p.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".pdf")):
+            out.append(p)
+    return out
+
+
+def card_markdown(text):
+    """The model replies with one card. Recover kind, title and body from the
+    front-matter shape; fall back to a plain lesson card when it ignored it."""
+    kind, title, body = "lesson", "", (text or "").strip()
+    m = re.match(r"\s*---\s*\n(.*?)\n---\s*\n?(.*)", text or "", re.DOTALL)
+    if m:
+        meta, rest = m.group(1), m.group(2).strip()
+        for line in meta.splitlines():
+            if ":" in line:
+                k, v = line.split(":", 1)
+                k = k.strip().lower()
+                v = v.strip()
+                if k == "kind" and v in ("lesson", "question", "correct", "wrong",
+                                         "review", "note", "recap"):
+                    kind = v
+                elif k == "title":
+                    title = v
+        body = rest
+    return kind, title, body
+
+
+def main(argv):
+    inbox = (argv[0] if argv else "").strip()
+    root = os.getcwd()
+
+    rec = subprocess.run([sys.executable, BOARD, "recap"], cwd=root,
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         timeout=60)
+    rec = rec.stdout.decode("utf-8", "replace")
+
+    ocr_parts = []
+    for p in find_paths(inbox):
+        abs_p = p if os.path.isabs(p) else os.path.join(root, p.lstrip("/"))
+        if os.path.exists(abs_p):
+            ocr_parts.append("### %s\n%s" % (p, ocr(abs_p)))
+
+    contract = read(os.path.join(root, "AI_INSTRUCTIONS.md"))
+    method = read(os.path.join(root, "live", "TEACHING.md"))
+    handoff = read(os.path.join(root, "HANDOFF.md"))
+
+    user = (
+        "The lesson so far (from `board recap`):\n\n%s\n\n" % rec +
+        "The student just sent (from the inbox):\n\n%s\n\n" % (inbox or "(nothing)")
+    )
+    if ocr_parts:
+        user += "Their handwriting / upload, OCR'd:\n\n" + "\n\n".join(ocr_parts) + "\n\n"
+
+    system = (
+        "You are a mathematics tutor on a live board. The student writes on an iPad; "
+        "you never see them type and there is no chat. Your whole job each turn is to "
+        "write ONE card. Output ONLY the card, in this exact shape:\n\n"
+        "---\nkind: lesson|question|correct|wrong|review|note|recap\n"
+        "title: a short title\n---\n\n"
+        "the card body in markdown, with LaTeX $...$ and $$...$$. Teach only what this "
+        "step needs, then pose at most ONE question and stop. A wrong answer gets its "
+        "break located, not repaired; never re-explain what they already got right.\n\n"
+        "The teaching method:\n\n%s\n\n"
+        "The course contract (how to teach this subject):\n\n%s\n\n"
+        "Where the last session left off:\n\n%s"
+        % (method, contract, handoff or "(none)")
+    )
+
+    try:
+        reply = chat([{"role": "system", "content": system},
+                      {"role": "user", "content": user}])
+    except RuntimeError as exc:
+        sys.stderr.write("free tutor: %s\n" % exc)
+        return 1
+
+    kind, title, body = card_markdown(reply)
+    if not body:
+        sys.stderr.write("free tutor produced an empty card\n")
+        return 1
+    args = [sys.executable, BOARD, "write", kind] + ([title] if title else [])
+    p = subprocess.run(args, cwd=root, input=body.encode("utf-8"),
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60)
+    sys.stderr.write(p.stdout.decode("utf-8", "replace"))
+    return p.returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -635,7 +635,8 @@ board on the iPad from each address. Two apps, two icons, no ambiguity about whi
   "agents": {
     "claude":   { "cmd": ["claude"],   "prompt": "argv" },
     "opencode": { "cmd": ["opencode"], "prompt": "argv" },
-    "aider":    { "cmd": ["aider"],    "prompt": "none" }
+    "aider":    { "cmd": ["aider"],    "prompt": "none" },
+    "free":     { "cmd": ["opencode"], "prompt": "argv", "raw_prompt": true }
   }
 }
 ```
@@ -643,6 +644,15 @@ board on the iPad from each address. Two apps, two icons, no ambiguity about whi
 `cmd` is whatever launches it. `prompt: "argv"` appends the opening brief as a final argument;
 `prompt: "none"` launches it bare and prints the one line to paste. Add an entry for anything that
 runs in a terminal — nothing in the launcher knows which assistant it is starting.
+
+One entry is not a terminal agent at all: **`free`** is the built-in lightweight tutor. Its
+headless turn is `bin/free`, a stdlib script that runs the lesson through `board recap`, OCRs the
+student's handwriting with a free vision model, and writes one card as a plain completion over the
+free-model chain (OpenRouter `:free`, then Groq). It exists because a general coding agent carries a
+~38k-token tool prompt every turn, which exhausts the free tiers; a tutoring turn is three small
+steps and this does exactly those. `raw_prompt` hands the script the raw inbox instead of the
+instruction prompt, and its interactive `cmd` is opencode, so a person asking for a terminal
+session still gets one. Use it on a machine you want to run without paying for a model.
 
 The brief itself is written to `live/BRIEF.md` every time, so an assistant that takes no argument
 can still be told to read it. It names the course, the mode, the session kind, and the board's
