@@ -890,11 +890,14 @@ nothing has run.
 | Suits | proofs, derivations, anything worked by hand | being walked through code, reviewing what you wrote, "do it yourself" |
 
 The answer panel is the same in both modes: a writing surface and a typed half, one toggle,
-and whichever the student used last is the one that opens next time. What still differs is
-the signals — in a code course the work happens in the editor on the real machine, so the
-board carries *ready to check*, *I need help* and *I'm confused* as one-tap pace control, and
-none of those belongs in a mathematics course. The write/type choice is the student's, not the
-course's; a mode no longer decides how anyone is allowed to answer.
+and whichever the student used last is the one that opens next time. An old question remembers
+its own answer, though: a board you wrote on reopens with the ink still on it, and a typed
+answer reopens with the text in the box, both editable and re-sendable as a revision of that
+same response rather than a new one. What still differs is the signals — in a code course the
+work happens in the editor on the real machine, so the board carries *ready to check*, *I need
+help* and *I'm confused* as one-tap pace control, and none of those belongs in a mathematics
+course. The write/type choice is the student's, not the course's; a mode no longer decides how
+anyone is allowed to answer.
 
 `board init` writes the file:
 

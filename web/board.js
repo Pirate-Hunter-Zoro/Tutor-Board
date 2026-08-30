@@ -767,8 +767,17 @@ function render(data) {
   var mine = (data.turns || []).filter(function (t) {
     return t.kind === "ink" && t.answers === onQ;
   });
-  answering = { question: onQ, turn: mine.length ? mine[mine.length - 1] : null };
-  if (workingOn) owed = !codeMode && !data.archived;
+  var latestMine = (data.turns || []).filter(function (t) {
+    return t.answers === onQ;
+  });
+  answering = {
+    question: onQ,
+    turn: mine.length ? mine[mine.length - 1] : null,
+    /* The newest turn of any kind, so an old question can reopen on the surface
+       it was answered with and carry the answer back for correction. */
+    latest: latestMine.length ? latestMine[latestMine.length - 1] : null,
+  };
+  if (workingOn) owed = !data.archived;
 
   /* The writing surface goes at the END of the transcript, under whatever the
      last thing in it is. That is what makes a correction work the way a person
@@ -1830,7 +1839,7 @@ var writer = null;
 var pinnedTo = null;
 /* Which question is open and which of my turns answers it, so Send knows
    whether it is starting an answer or correcting one. */
-var answering = { question: null, turn: null };
+var answering = { question: null, turn: null, latest: null };
 var loadedTurn = null;
 /* Which question the student asked for the surface back on, or null for "not
    asked". Empty string means "asked, on a lesson with no open question". */
@@ -2265,22 +2274,52 @@ function restoreTextDraft() {
   if (lastTextQuestion === answering.question) return;
   if (lastTextQuestion !== null) flushTextDraft();
   lastTextQuestion = answering.question;
+  loadedTextTurn = null;    /* a different question is a different answer */
   els.saybox.value = textDrafts[answering.question] || "";
   autosize();
 }
 
-/* The write half or the type half, decided by the tab and the remembered kind. */
+/* Which surface an old question reopens on: the one it was answered with, else
+   the globally remembered choice. */
+function panelKind() {
+  var t = answering.latest;
+  if (t) {
+    if (t.kind === "ink" || t.kind === "annotation") return "write";
+    if (t.kind === "text" && !t.signal) return "type";
+  }
+  return answerKind();
+}
+
+/* The write half or the type half, decided by the question's own history and the
+   remembered kind. */
 function paintPanel() {
   var open = !els.writer.hidden;
-  var typing = open && answerKind() === "type";
+  var typing = open && panelKind() === "type";
   els.typebox.hidden = !typing;
   var slate = document.getElementById("slate");
   if (slate) slate.hidden = typing;
   document.getElementById("drawbar").hidden = !(open && !typing);
   els.tabWrite.classList.toggle("on", !typing);
   els.tabType.classList.toggle("on", typing);
-  if (typing) restoreTextDraft();
+  if (typing) { restoreTextDraft(); restoreTextAnswer(); }
   else if (writer) requestAnimationFrame(writer.relayout);
+}
+
+/* The typed answer already sent against this question, brought back for
+   correction -- the typed counterpart of the slate restoring its page of ink.
+   Guarded like the ink: the turn just sent is not loaded back over the empty
+   box, and newer local typing wins. */
+var loadedTextTurn = null;
+
+function restoreTextAnswer() {
+  var t = answering.latest;
+  if (!t || t.kind !== "text" || t.signal || !t.text) return;
+  var id = t.id + ":r" + (t.rev || 1);
+  if (id === loadedTextTurn) return;
+  if (els.saybox.value.trim()) return;
+  loadedTextTurn = id;
+  els.saybox.value = t.text;
+  autosize();
 }
 
 function autosize() {
@@ -2294,12 +2333,20 @@ function say(signal) {
   els.saybox.value = "";
   if (answering.question) { textDrafts[answering.question] = ""; }
   autosize();
+  /* Revising an existing typed answer keeps its place in the transcript; a fresh
+     one starts a turn. Signals always start fresh. */
+  var revise = null;
+  if (!signal && answering.latest && answering.latest.kind === "text"
+      && !answering.latest.signal) {
+    revise = answering.latest.id;
+  }
   return fetch("/say", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text: text, signal: signal || null,
-                           answers: answering.question })
-  }).then(function () {
+                           answers: answering.question, turn: revise })
+  }).then(function (r) { return r.json(); }).then(function (data) {
+    if (data && data.turn) loadedTextTurn = data.turn + ":r" + (data.rev || 1);
     els.sendType.classList.add("sent");
     setTimeout(function () { els.sendType.classList.remove("sent"); }, 900);
   });
