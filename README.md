@@ -43,7 +43,41 @@ which kind of subject it is and the board adapts.
 >   board that is answering) but it is worth confirming: the port the HTTPS name points at should
 >   be the course they are working in.
 >
-> ### Where this is right now, end of 28 August 2026
+> ### Where this is right now, 30 August 2026
+>
+> The Mac mini exists, and the always-on path described under
+> [Always-on](#always-on-with-the-compute-node-preferred) is running for the first time: the Mac
+> holds `board` on the tailnet and proxies to the compute node, which now keeps its own name.
+> Four defects came out of the first evening of two machines, and every one of them was invisible
+> from the compute node alone:
+>
+> - **A board holds old code, and so does the proxy.** The running board predated `/handover` and
+>   answered `not found`; the Mac's follower would have gone on running a stale `bin/follow` after
+>   a pull, because the pull agent restarted nothing. `scripts/tool-pull.sh` now restarts the
+>   follower when the pull moves HEAD, and `--always-on` installs it.
+> - **The proxy picked a course by alphabet.** Two boards up meant the address was pinned to
+>   whichever sorted first, for ever; tapping a course in the hub did every correct thing and
+>   changed nothing visible. The choice is now recorded and published — see
+>   [Which course the address opens](#which-course-the-address-opens).
+> - **Two courses hashed to one port.** `Mathematical-Modeling` and `Research-Journey` both wanted
+>   8786, and the second to start failed to come up with the reason four lines into a log nobody
+>   opens. A name now maps to a sequence of ports, and a board says who it is so a shared number
+>   can never become a shared lesson.
+> - **A chapter title ran off its card.** The hub's course rows were one nowrap flex line with the
+>   metadata pushed right; anything as long as a real chapter title went straight through the
+>   border. Rows are two stacked lines now, and only the word *live* is coloured.
+>
+> Assistants are no longer exclusive: every course keeps its own, because an idle one is blocked on
+> `board wait` and costs nothing, while a cold one costs a re-read of the contract, the method and
+> the lesson. New suites: `test/choice.py` (the address follows the choice, and ports do not
+> collide) and `test/hub.js` (the course list stays inside its card).
+>
+> **The one thing this pair of machines will keep teaching you:** a fix is not shipped until the
+> process holding the old code has been restarted — and on the always-on host that is three
+> processes, not one. Check what is actually being served before theorising about why a fix did not
+> land.
+>
+> ### Where this was, end of 28 August 2026
 >
 > A long evening of use, and roughly a dozen shipped changes. Shell version `board-shell-v54`.
 > Three new suites: `test/feedback.js` (reading order, the surface, the boards), `test/panic.js`
@@ -688,14 +722,20 @@ and "opencode with something else" are two names in this file and nothing in the
 
 ### The assistant belongs to the course, not to the terminal
 
-One assistant is alive at a time, in the repository whose board is in front of you. Switching
-course on the hub moves it: the board for the new course comes up, whatever was listening elsewhere
-is asked to finish, and a new one is started in the new repository — resolved by the table above,
-reading that repository's own `AI_INSTRUCTIONS.md`.
+Each course keeps its own assistant, in its own repository, reading that repository's own
+`AI_INSTRUCTIONS.md` and resolved by the table above. Switching course on the hub brings the new
+course's board up and starts an assistant there if one is not already listening; it leaves the
+others alone.
+
+They used to be exclusive — starting one asked whatever was listening elsewhere to write its handoff
+and go. That bought nothing. A listening daemon is blocked on `board wait` and spends nothing while
+nobody is asking it anything, and the cost was paid on the way back: returning to a course meant a
+cold assistant that had to re-read the contract, the method and the lesson before it could write a
+word. They still write their handoff when they are actually stopped, which is what a stop is for.
 
 ```
-tutor agent status           which course has one attached
-tutor agent start galois     attach one there, detaching whatever was elsewhere
+tutor agent status           which courses have one attached
+tutor agent start galois     attach one there, leaving the others listening
 tutor agent stop galois      ask it to write its handoff and go
 ```
 
@@ -764,9 +804,12 @@ The pieces:
   and uploads pass through unmodified) that probes the compute node's `/health` and flips its
   upstream between the node and the Mac's own board. `--node`/`--listen` override the config; an
   ad-hoc instance on another port never steals `tailscale serve`.
-- **`scripts/install-autostart.sh --always-on`** — the course-less form, registering two
-  LaunchAgents: `com.tutorboard.follow` (KeepAlive proxy) and `com.tutorboard.resume`
-  (StartInterval `tutor resume --quiet`, the warm board it falls back to).
+- **`scripts/install-autostart.sh --always-on`** — the course-less form, registering three
+  LaunchAgents: `com.tutorboard.follow` (KeepAlive proxy), `com.tutorboard.resume`
+  (StartInterval `tutor resume --quiet`, the warm board it falls back to), and
+  `com.tutorboard.pull` (`scripts/tool-pull.sh`, which keeps this repository current and restarts
+  the follower when the pull moves HEAD — the follower has to agree with the compute node about
+  where courses live, and a process holds the code it started with).
 - **`/handover`** in `serve.py` — a secret-gated way for one machine to ask the other to wrap up
   its tutor before the proxy moves.
 - **`boardlib.machine_shape()`** — "always-on host" (a `follow` config block), "compute node"
@@ -797,6 +840,35 @@ The tailnet names are decided once and never move:
 >
 > Then carry on with the ordinary session start. On the Mac mini the same two questions are the
 > first thing to check when a board is not reachable from the iPad.
+
+#### Which course the address opens
+
+The proxy has to pick a board, and it used to pick by knocking on every course's port in sorted
+order and taking the first that answered. That is not a decision, it is the alphabet — and with two
+boards up it was permanent. Tapping *Probability* in the hub did every correct thing and changed
+nothing anybody could see: the switch worked, the board started, the agent moved, and the address
+went on opening Galois Theory, because G sorts before P. The only way out was to stop the other
+board, which is the opposite of what the hub is for.
+
+So the boards are asked instead of raced:
+
+- **`chosen.json`** in `~/.config/tutor-board/` records the course a *person* named. `tutor <course>`
+  writes it and so does a tap in the hub. It is a decision, and a decision cannot be derived from
+  file times — resuming a course touches its files, so "most recently used" is self-reinforcing.
+- **`/health` publishes it**, along with the port that course is genuinely serving on, read from its
+  own board record. Only the serving machine can read either of those things; the Mac cannot see
+  that filesystem at all. One board answering is enough for the proxy to learn where to go.
+- **`/health` also says which course this board is**, and the proxy hands the address to nobody
+  whose name does not match the course it went looking for. Ports are derived from names, and
+  derivation is not proof: a hash can put two courses on one number, and a start whose port was busy
+  moves to the next in its sequence. Without the check, a wrong number becomes a wrong lesson
+  silently — somebody opens a Galois proof and is shown a problem set.
+
+Several boards may be up at once and each keeps its own assistant. A listening tutor is blocked on
+`board wait` and costs nothing while nobody is asking it anything, so exclusivity bought nothing and
+cost the thing that matters: coming back to a course used to mean a cold agent that had to re-read
+the contract, the method and the lesson before it could write a word. `test/choice.py` guards all of
+this, and it is worth reading before changing any of it.
 
 #### What only real hardware can settle
 

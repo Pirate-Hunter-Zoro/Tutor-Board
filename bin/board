@@ -150,10 +150,25 @@ def slurm_nodes():
 
 def default_port(root):
     """Stable per-repository port so two courses can hold boards at once."""
-    h = 0
-    for ch in os.path.basename(root):
-        h = (h * 131 + ord(ch)) % 60
-    return 8780 + h
+    return boardlib.default_port(os.path.basename(root))
+
+
+def free_port(root):
+    """The first port in this repository's sequence that nothing is holding.
+
+    Two courses used to be able to hash to the same number, and the second one to
+    start just failed to come up -- "board failed to come up; see board.log", with
+    the real reason four lines into a log nobody opens. The sequence is a pure
+    function of the name, so the always-on host can walk the same one looking for
+    this course without having to be told anything.
+    """
+    seq = boardlib.port_sequence(os.path.basename(root))
+    for port in seq:
+        if not port_answers(port):
+            return port, None
+    return seq[0], ("every port this course can use is busy (%s); "
+                    "stop another board or pass --port"
+                    % ", ".join(str(p) for p in seq))
 
 
 def slugify(s):
@@ -290,16 +305,25 @@ def cmd_start(live, args):
         print("wrote %s so a headless tutor can write cards here"
               % os.path.relpath(granted, live.root))
 
-    port = default_port(live.root)
+    port, port_error = free_port(live.root)
     lan = False
     i = 0
     while i < len(args):
         if args[i] in ("--port", "-p"):
             i += 1
             port = int(args[i])
+            port_error = None
         elif args[i] == "--lan":
             lan = True
         i += 1
+    if port_error:
+        print(port_error, file=sys.stderr)
+        return 1
+    if port != default_port(live.root):
+        # Say so rather than letting it be a surprise: the number is in the
+        # record and in /health, but a person reading the log deserves the reason.
+        print("port %d was busy; this board is on %d"
+              % (default_port(live.root), port))
 
     log = open(live.path("board.log"), "ab")
     cmd = [sys.executable, SERVE, "--root", live.root, "--port", str(port)]

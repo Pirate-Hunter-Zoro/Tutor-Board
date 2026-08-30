@@ -44,7 +44,6 @@ CONFIG_DIR = os.path.join(
     os.environ.get("XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config")),
     "tutor-board")
 CONFIG = os.path.join(CONFIG_DIR, "config.json")
-CHOSEN = os.path.join(CONFIG_DIR, "chosen.json")
 
 # What "you were working here" looks like on disk, newest of which wins. Mirrors
 # bin/tutor's LIVE_SIGNS; the board record is the live one, the rest survive a
@@ -83,10 +82,25 @@ def courses(cfg):
 
 def default_port(root):
     """Stable per-repository port, identical to bin/board's."""
-    h = 0
-    for ch in os.path.basename(root):
-        h = (h * 131 + ord(ch)) % 60
-    return 8780 + h
+    return boardlib.default_port(os.path.basename(root))
+
+
+def local_port(c):
+    """Where this course is serving on THIS machine.
+
+    Its own board record first: a board whose usual port was taken starts on the
+    next one in its sequence, and the record is the only place that number exists.
+    The derived port is the answer when no board has run here yet.
+    """
+    try:
+        with open(os.path.join(c["root"], "live", ".board.json"), "r",
+                  encoding="utf-8") as fh:
+            port = (json.load(fh) or {}).get("port")
+            if port:
+                return int(port)
+    except (OSError, ValueError, TypeError):
+        pass
+    return default_port(c["root"])
 
 
 def last_used(root):
@@ -103,11 +117,7 @@ def active_course(cands):
     """The course to serve locally when the node is down: last named, else last
     worked. Reuses the same two signals as `tutor resume`."""
     best = None
-    try:
-        with open(CHOSEN, "r", encoding="utf-8") as fh:
-            rec = json.load(fh) or {}
-    except (OSError, ValueError):
-        rec = {}
+    rec = boardlib.chosen_course()
     for c in cands:
         if c["root"] == rec.get("root") or c["dir"] == rec.get("dir"):
             best = (rec.get("at") or 0, c)
@@ -118,29 +128,94 @@ def active_course(cands):
     return best[1] if best else (cands[0] if cands else None)
 
 
-def probe(host, port, timeout=3.0):
-    """Is a board answering on this host:port? /health is the honest test."""
+def probe(host, port, timeout=2.0):
+    """What is answering on this host:port, or None. /health is the honest test.
+
+    Returns the parsed health document rather than a yes/no, because both of the
+    things this proxy has to decide are in it: which course this board is (`dir`),
+    and which course the person actually asked for (`chosen`).
+    """
     try:
         with urllib.request.urlopen("http://%s:%d/health" % (host, port),
                                     timeout=timeout) as resp:
-            body = resp.read(128).decode("utf-8", "replace")
-            return resp.status == 200 and '"ok"' in body
+            if resp.status != 200:
+                return None
+            doc = json.loads(resp.read(4096).decode("utf-8", "replace"))
+            return doc if isinstance(doc, dict) and doc.get("ok") else None
     except (OSError, urllib.error.URLError, ValueError):
+        return None
+
+
+def identifies_as(health, name):
+    """Is this board really the course we went looking for?
+
+    Ports are derived from names, and derivation is not proof: a hash can put two
+    courses on one number, and a start that found its port busy moves to the next
+    one in its sequence. Asking the board who it is costs nothing and turns a
+    silent wrong lesson into a miss.
+    """
+    if not health:
         return False
+    who = health.get("dir") or os.path.basename(health.get("root") or "")
+    return who == name
+
+
+def find_course(node, c, timeout=2.0):
+    """The port this one course is answering on, or None.
+
+    Walks the same port sequence `board start` walks, so a board that had to move
+    off its usual number is still found -- and confirms identity at each step, so
+    a course sitting on somebody else's number is not mistaken for them.
+    """
+    for port in boardlib.port_sequence(c["dir"]):
+        health = probe(node, port, timeout=timeout)
+        if identifies_as(health, c["dir"]):
+            return port
+        if health:
+            break        # somebody else's board; the rest of the sequence is theirs
+    return None
 
 
 def remote_target(node, cands):
-    """(host, port) for a board serving on the compute node, or None.
+    """(host, port) for the board the person asked for on the compute node.
 
-    The port is a function of the course, so probe every course this machine
-    knows rather than a fixed port. /health also names the repository root, which
-    lets the follower confirm it is talking to a course and not a stray process.
+    This used to return the first course whose port answered, walking the list in
+    sorted order -- so with two boards up the address went to whichever course
+    came first in the alphabet, for ever. Tapping a course in the hub appeared to
+    do nothing at all: the switch worked, the board started, and the proxy went on
+    serving the other one.
+
+    So the boards are asked instead of raced. Every board publishes the choice
+    (`chosen` in /health), because the choice is recorded on the machine that is
+    serving and this one cannot read that filesystem. The first board to answer is
+    enough to learn it; the scan only exists to find somebody to ask.
     """
     if not node:
         return None
+    by_name = dict((c["dir"], c) for c in cands)
     for c in cands:
-        port = default_port(c["root"])
-        if probe(node, port):
+        health = probe(node, default_port(c["root"]))
+        if not health:
+            continue
+        want = (health.get("chosen") or {}).get("dir")
+        if want and want != health.get("dir"):
+            # Somebody chose a different course. Believe the port it names -- the
+            # serving machine read it out of that board's own record -- but check
+            # who answers there before handing the address over.
+            port = (health.get("chosen") or {}).get("port")
+            if port and identifies_as(probe(node, int(port)), want):
+                return node, int(port)
+            if want in by_name:
+                port = find_course(node, by_name[want])
+                if port:
+                    return node, port
+            # The chosen course is not up. Fall through to whoever answered.
+        if identifies_as(health, c["dir"]):
+            return node, default_port(c["root"])
+        # A board answering on a port that is not its own: find its real home
+        # rather than trusting the number.
+        port = find_course(node, c)
+        if port:
             return node, port
     return None
 
@@ -230,7 +305,7 @@ def follower(target, node, cands, log):
         else:
             active = active_course(cands)
             if active:
-                port = default_port(active["root"])
+                port = local_port(active)
                 log("no compute node; serving %s locally on :%d"
                     % (active["dir"], port))
                 target.set("127.0.0.1", port)

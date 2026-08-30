@@ -117,7 +117,10 @@ if [ "${1:-}" = "--tool-pull" ]; then
   # so a diverged branch is logged and left, never force-resolved; a session that
   # starts a commit behind is still a session. This does NOT restart a running
   # board -- that is `tutor restart`, and a board holds the code it started with.
-  GIT="$(command -v git)"
+  #
+  # It does restart the follower, which is the one process here that MUST agree
+  # with the other machine about where courses live. See scripts/tool-pull.sh.
+  SH="$(command -v bash)"
   case "$(uname -s)" in
     Darwin)
       PLIST="$HOME/Library/LaunchAgents/$LABEL_PULL.plist"
@@ -128,7 +131,7 @@ if [ "${1:-}" = "--tool-pull" ]; then
         echo '<plist version="1.0"><dict>'
         echo "  <key>Label</key><string>$LABEL_PULL</string>"
         echo '  <key>ProgramArguments</key><array>'
-        printf '    <string>%s</string>\n    <string>-C</string>\n    <string>%s</string>\n    <string>pull</string>\n    <string>--ff-only</string>\n' "$GIT" "$HERE"
+        printf '    <string>%s</string>\n    <string>%s</string>\n' "$SH" "$HERE/scripts/tool-pull.sh"
         echo '  </array>'
         echo '  <key>StartInterval</key><integer>300</integer>'
         echo '  <key>RunAtLoad</key><true/>'
@@ -155,12 +158,19 @@ if [ "${1:-}" = "--tool-pull" ]; then
 fi
 
 if [ "${1:-}" = "--always-on" ]; then
-  # The always-on host runs two things: the follower proxy, which forwards the
-  # tailnet name to whichever machine is serving, and a periodic resume, which
-  # keeps this machine's own board warm so the proxy has somewhere local to fall
-  # back to the moment the compute node goes away. Neither names a course -- the
-  # follower probes, and `tutor resume` decides the course from what was last
+  # The always-on host runs three things: the follower proxy, which forwards the
+  # tailnet name to whichever machine is serving; a periodic resume, which keeps
+  # this machine's own board warm so the proxy has somewhere local to fall back to
+  # the moment the compute node goes away; and the tool pull, which keeps this
+  # repository -- and therefore the follower -- in step with the machine the
+  # fixes are written on. None of them names a course: the follower is told which
+  # one by the board serving it, and `tutor resume` decides from what was last
   # worked in, so a new chapter does not mean a new plist.
+  #
+  # The pull belongs here rather than being a separate thing to remember. The
+  # follower and the boards it looks for have to agree about which port a course
+  # serves on; a Mac left a few commits behind looks for them in the wrong place
+  # and quietly serves its own warm board instead of the lesson on the node.
   case "$(uname -s)" in
     Darwin)
       PY="$(command -v python3)"
@@ -209,7 +219,8 @@ if [ "${1:-}" = "--always-on" ]; then
       launchctl load "$FOL" && echo "loaded $FOL"
       launchctl unload "$RES" 2>/dev/null
       launchctl load "$RES" && echo "loaded $RES"
-      echo "logs: ~/Library/Logs/tutor-follow.log, tutor-resume.log"
+      bash "$0" --tool-pull
+      echo "logs: ~/Library/Logs/tutor-follow.log, tutor-resume.log, tutor-pull.log"
       echo "stop: bash $0 --uninstall"
       ;;
     *)

@@ -114,17 +114,28 @@ function paintCourses(list) {
     name.className = "name";
     name.textContent = c.course || c.repo;
 
+    /* The chapter is somebody's prose and can be a sentence long, so it gets a
+       line of its own rather than being squeezed in beside the name. Only the
+       "live" word is coloured -- colouring the whole line made a card count and
+       a chapter title read as though they were a status. */
     var meta = document.createElement("span");
     meta.className = "meta";
     var bits = [];
     if (c.chapter) bits.push(c.chapter);
     if (c.cards) bits.push(plural(c.cards, "card", "cards"));
-    if (c.running) bits.push(c.node ? "live on " + c.node : "live");
     meta.textContent = bits.join(" · ");
-    if (c.running) meta.classList.add("live");
+    if (c.running) {
+      var tag = document.createElement("span");
+      tag.className = "live";
+      tag.textContent = c.node ? "live on " + c.node : "live";
+      if (bits.length) meta.appendChild(document.createTextNode(" · "));
+      meta.appendChild(tag);
+    }
 
     b.appendChild(name);
-    b.appendChild(meta);
+    /* A course nobody has opened yet has nothing to say on the second line, and
+       an empty one only spends the gap above it. */
+    if (meta.childNodes.length) b.appendChild(meta);
     b.onclick = function () { switchTo(c.repo); };
     li.appendChild(b);
     into.appendChild(li);

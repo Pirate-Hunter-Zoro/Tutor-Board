@@ -56,7 +56,12 @@ calls = {"start": [], "link": [], "agent": [], "sync": []}
 # course names into a real ~/.config/tutor-board/chosen.json.
 conf = tempfile.mkdtemp(prefix="tutor-resume-conf-")
 tutor.CONFIG_DIR = conf
-tutor.CHOSEN = os.path.join(conf, "chosen.json")
+# The record of what a person chose is one file with one reader, in boardlib --
+# the launcher writes it, the board writes it when the hub is tapped, and the
+# always-on host's proxy follows it. Point that one place at the sandbox.
+boardlib.CONFIG_DIR = conf
+boardlib.CHOSEN = os.path.join(conf, "chosen.json")
+tutor.CHOSEN = boardlib.CHOSEN
 
 
 def make_course(name, node=None, pid=1, when=None):

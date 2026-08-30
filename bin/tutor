@@ -646,8 +646,9 @@ def agent_stop(course, wait=False):
 def cmd_agent(cfg, args):
     """tutor agent status|start|stop [course]
 
-    The board drives this when a course is opened or left. One assistant is
-    alive at a time, always the one whose board is in front of you.
+    The board drives this when a course is opened or left. Each course keeps its
+    own assistant: they are cheap while idle, and one that survives being left
+    still has the lesson in its head when you come back.
     """
     sub = args[0] if args else "status"
     rest = [a for a in args[1:] if not a.startswith("--")]
@@ -673,12 +674,13 @@ def cmd_agent(cfg, args):
         return code
 
     if sub == "start":
-        # One at a time: whatever was listening elsewhere is asked to wrap up
-        # first, so its handoff is written before attention moves.
-        for other in found:
-            if other["root"] != course["root"] and agent_live(other["root"]):
-                _, msg = agent_stop(other)
-                print(msg)
+        # An assistant per course, not one per machine. Switching used to stop
+        # whatever was listening elsewhere, so coming back to a course meant a
+        # cold agent that had to re-read the contract, the method and the lesson
+        # before it could write a word. A listening daemon is blocked on `board
+        # wait` and costs nothing while nobody is asking it anything, so there is
+        # no reason to make attention exclusive. They still write their handoff
+        # when they are actually stopped.
         name = resolve_agent(cfg, course, _flag(args, "--agent"))
         code, msg = agent_start(cfg, course, name)
         print(msg, file=sys.stderr if code else sys.stdout)
@@ -994,7 +996,6 @@ def last_used(root):
     return best
 
 
-CHOSEN = os.path.join(CONFIG_DIR, "chosen.json")
 
 
 def remember_course(course):
@@ -1007,23 +1008,15 @@ def remember_course(course):
     course once would go on resuming it for ever, quietly, taking the tailnet
     name with it every time. Naming one is how you say otherwise.
     """
-    try:
-        os.makedirs(CONFIG_DIR, exist_ok=True)
-        tmp = CHOSEN + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump({"dir": course["dir"], "root": course["root"],
-                       "at": time.time()}, fh)
-        os.replace(tmp, CHOSEN)
-    except OSError:
-        pass                      # a note, not a requirement
+    import boardlib
+    boardlib.remember_chosen(course["dir"], course["root"])
 
 
 def chosen_course(cfg):
     """(when, course) for the last course a person named, if it still exists."""
-    try:
-        with open(CHOSEN, "r", encoding="utf-8") as fh:
-            rec = json.load(fh)
-    except (OSError, ValueError):
+    import boardlib
+    rec = boardlib.chosen_course()
+    if not rec:
         return None
     for c in courses(cfg):
         if c["root"] == rec.get("root") or c["dir"] == rec.get("dir"):

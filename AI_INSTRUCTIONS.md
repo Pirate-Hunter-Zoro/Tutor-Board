@@ -48,7 +48,18 @@ in the admin console still has the old name in its local state, and a missing
 ## Invariants
 
 - **One process per course repository.** Ports derive from the directory name so two courses can
-  hold boards at once.
+  hold boards at once, and derive it identically on every machine — the always-on host cannot read
+  the compute node's filesystem, so a shared rule is the only way it knows where to knock. A name
+  maps to a short *sequence* of ports (`boardlib.port_sequence`) rather than to one, because a hash
+  cannot promise distinct numbers and did not: two courses collided and the second to start simply
+  failed to come up. A start walks the sequence for a free port and records which one it took.
+- **Which course the address serves is a decision, not a race.** `chosen.json` records the course a
+  person named — `tutor <course>` writes it, and so does a tap in the hub — and every board
+  publishes it through `/health` so the always-on host can follow it without reading this
+  filesystem. Nothing may go back to serving whichever board answers first: with two boards up that
+  is alphabetical order wearing a disguise, and it made tapping a course in the hub do nothing
+  visible at all. A board also says who it is in `/health`, and no port is served without that name
+  matching the course being looked for — a port is derived from a name and derivation is not proof.
 - **Cards are append-only files.** The assistant writes `live/cards/NNNN-slug.md` and never edits
   a card the student has already read, except to fix a genuine error — the board is a transcript.
 - **The macro vocabulary is shared.** `web/macros.js` mirrors each course's

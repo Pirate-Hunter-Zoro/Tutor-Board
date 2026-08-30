@@ -35,7 +35,7 @@ if ! node -e "require('jsdom')" >/dev/null 2>&1; then
   echo
 fi
 
-SUITES="markdown macros hidden chrome theme pages modes typeface export interactive plane answer feedback panic sizing link"
+SUITES="markdown macros hidden chrome theme pages modes typeface export interactive plane answer feedback panic sizing link hub"
 fails=0
 skipped=0
 
@@ -58,6 +58,15 @@ done
 
 printf '%-12s ' "offline"
 if out="$(node test/offline.js 2>&1)"; then
+  printf '%s\n' "$out" | tail -1
+else
+  fails=$((fails + 1))
+  echo "FAILED"
+  printf '%s\n' "$out" | grep '^FAIL' | sed 's/^/             /'
+fi
+
+printf '%-12s ' "choice"
+if out="$(python3 test/choice.py 2>&1)"; then
   printf '%s\n' "$out" | tail -1
 else
   fails=$((fails + 1))

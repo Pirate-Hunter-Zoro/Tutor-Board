@@ -1087,6 +1087,30 @@ def tutor_cli(args, timeout=30):
         return 1, str(exc)
 
 
+def chosen_target():
+    """The course a person last asked for, and the port it is actually serving on.
+
+    The always-on host cannot read this machine's filesystem, so it cannot know
+    either of these things -- it can only knock on ports and take whichever
+    answers first, which is alphabetical order pretending to be a decision. So
+    every board publishes the answer: the choice comes from `chosen.json`, and
+    the port comes from that course's own board record, which is the only place
+    the truth lives once a port collision has moved a board off its usual number.
+    """
+    rec = boardlib.chosen_course()
+    name = rec.get("dir")
+    if not name:
+        return None
+    root = rec.get("root") or os.path.join(os.path.dirname(HERE), name)
+    port = None
+    try:
+        with open(os.path.join(root, "live", ".board.json"), "r", encoding="utf-8") as fh:
+            port = (json.load(fh) or {}).get("port")
+    except (OSError, ValueError):
+        port = None
+    return {"dir": name, "port": port or boardlib.default_port(name)}
+
+
 def handover_secret():
     """The shared secret one machine presents to another to ask it to hand over.
 
@@ -1541,7 +1565,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/archive":
             return self.send_json({"sessions": list_archive(repo)})
         if path == "/health":
-            return self.send_json({"ok": True, "root": repo.root})
+            # `dir` so a caller can confirm it reached the course it meant --
+            # ports are derived from names and derivation is not proof. `chosen`
+            # so the always-on host can follow a decision instead of a race.
+            return self.send_json({"ok": True, "root": repo.root,
+                                   "dir": os.path.basename(repo.root),
+                                   "chosen": chosen_target()})
         return self.send_bytes(b"not found", "text/plain", status=404)
 
     def do_HEAD(self):
@@ -1600,10 +1629,18 @@ class Handler(BaseHTTPRequestHandler):
             code, out = board_cli(target, ["start"])
             if code != 0:
                 return self.send_json({"ok": False, "error": out.strip()[-300:]}, status=500)
-            # The assistant follows the course. `agent start` asks whatever was
-            # listening elsewhere to write its handoff first, so nothing is lost
-            # by walking away from a lesson -- which is how sessions actually
-            # end. It detaches, so this request does not wait on a model.
+            # A tap in the hub is a person saying which course they mean, which is
+            # the one thing that moves the address. Recording it first, because
+            # the always-on host follows the record and not the port scan; then
+            # `vpn serve`, which is the forced re-point -- an ordinary start
+            # deliberately will not take the name off a board that is answering,
+            # and every other course on this machine still is.
+            boardlib.remember_chosen(match["repo"], target)
+            board_cli(target, ["vpn", "serve"])
+            # The assistant follows the course: start one here if none is
+            # listening, and leave the other courses' alone -- they cost nothing
+            # while idle and keep the lesson in their head for the way back. It
+            # detaches, so this request does not wait on a model.
             acode, aout = tutor_cli(["agent", "start", match["repo"]])
             return self.send_json({"ok": True, "repo": match["repo"],
                                    "detail": out.strip(),
