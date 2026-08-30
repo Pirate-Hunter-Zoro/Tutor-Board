@@ -24,6 +24,14 @@ carry on. But start from what is on disk, not from what was there when you last
 opened it. The same rule applies to a course repository the moment you touch its
 files rather than its `live/` cards.
 
+**Then check the machine you are standing on.** This repository runs on an
+always-on Mac mini (`board` on the tailnet) and on a compute node, and each has
+two things that have to be true for the one iPad address to work. Prompt the
+person for them rather than assuming they are done — a node whose name was changed
+in the admin console still has the old name in its local state, and a missing
+`handover_secret` fails silently. The exact two checks are in `README.md`, under
+"Always-on, with the compute node preferred".
+
 ## What this must never become
 
 - A chat client. The conversation lives in the assistant's own session. The board displays

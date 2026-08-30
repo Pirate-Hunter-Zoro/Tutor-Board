@@ -727,129 +727,75 @@ It is deliberately never fatal. No remote, no network, or a branch that has dive
 one line and the session starts anyway on what is on disk. Somebody holding an iPad cannot resolve
 a merge, and a session that refuses to start is worse than a session that starts a commit behind.
 
-### Not yet built: always-on, with the compute node preferred
+### Always-on, with the compute node preferred
 
 **The goal.** Open the app on the iPad, pick a course, get a session. No command anywhere, ever.
 The board runs on the compute node when there is one, because that is where the data and the
 hardware are, and on the Mac mini the rest of the time, because it is the machine that is always
-awake. Nothing about this should ever be visible to the person holding the iPad.
+awake. Nothing about this is visible to the person holding the iPad.
 
-Nothing here can be written blind — it needs the Mac mini to exist — so this is the work list.
-
-#### The design decision, and why the obvious one is wrong
+#### The design, and the one discovery that shaped it
 
 The obvious approach is that the tailnet identity `board` *moves*: whichever machine is serving
-claims it, the way it moves between compute nodes today. **That does not extend to the Mac mini,
-for two reasons that are worth writing down before someone rediscovers them:**
+claims it, the way it moves between compute nodes today. That cannot extend to the Mac mini — the
+ownership record lives in a shared home the Mac does not see, and macOS runs its own system
+Tailscale that cannot also be `board` in userspace mode. So it is inverted: **the Mac mini owns
+`board` permanently and proxies.** A compute node keeps its own ordinary name, and the Mac forwards
+the iPad's traffic to whichever machine is actually serving: to the node while it is up, and to the
+Mac's own warm board when it is not. The iPad's single baked-in origin never changes.
 
-1. **The ownership record is not visible from home.** `owner.json` lives under
-   `~/.local/state/tailscale/`, and cluster nodes only agree about who holds the identity because
-   they share one home directory. The Mac mini shares nothing with them. The entire arbitration
-   mechanism is invisible across that boundary.
-2. **macOS runs its own Tailscale.** `boardlib.tailscale_cli()` returns `"system"` there: an app,
-   already signed in, already a node under its own name, with no daemon for the board to start and
-   no socket to point at the shared state. It cannot also be `board` in userspace mode, and it must
-   not be made to fight the system one.
+The first draft of this assumed the proxy was a re-point of `tailscale serve` at the node. **It is
+not: `tailscale serve` accepts a remote tailnet backend in its config and then answers every
+request with a 502** — it only proxies to a local backend. So the Mac runs a small local reverse
+proxy instead, and points `tailscale serve` at that.
 
-So invert it. **The Mac mini holds `board` permanently and proxies.**
+The pieces:
 
-- The Mac mini is the tailnet node called `board`, always, and serves HTTPS on it. The identity
-  never moves, so there is no key to claw at, no race, and nothing to reclaim.
-- A compute node keeps its *own* ordinary tailnet name — not `board`.
-- When a compute node is serving, the Mac mini re-points its proxy target at that node over the
-  tailnet instead of at its own localhost. `tailscale serve --bg --https=443
-  http://<node>:<port>` is the same call `ts_repoint` already makes; only the target changes from
-  loopback to a tailnet address.
-- When the node's allocation ends, the Mac mini points the proxy back at itself.
+- **`bin/follow`** — the reverse proxy and the follower in one. A raw byte pipe (so the SSE stream
+  and uploads pass through unmodified) that probes the compute node's `/health` and flips its
+  upstream between the node and the Mac's own board. `--node`/`--listen` override the config; an
+  ad-hoc instance on another port never steals `tailscale serve`.
+- **`scripts/install-autostart.sh --always-on`** — the course-less form, registering two
+  LaunchAgents: `com.tutorboard.follow` (KeepAlive proxy) and `com.tutorboard.resume`
+  (StartInterval `tutor resume --quiet`, the warm board it falls back to).
+- **`/handover`** in `serve.py` — a secret-gated way for one machine to ask the other to wrap up
+  its tutor before the proxy moves.
+- **`boardlib.machine_shape()`** — "always-on host" (a `follow` config block), "compute node"
+  (Slurm answers), or "standalone". `board doctor` prints it, and `bin/board` uses it so that on
+  the always-on host the HTTPS name points at the proxy, never at a board port directly.
 
-The iPad's single baked-in origin never changes and never needs to. The invariant holds by
-construction rather than by arbitration.
+#### Setting a machine up for this
 
-#### On the Mac mini, once
+The tailnet names are decided once and never move:
 
-1. Install Tailscale from the App Store or tailscale.com, sign in, and rename that node to
-   **`board`** in the admin console. Enable HTTPS certificates for the tailnet if that was never
-   done (admin console → DNS → HTTPS Certificates).
-2. Clone this tool and the course repositories side by side, so `courses_dir` finds them.
-3. `bash install.sh`, then `board doctor` until it is quiet. Expect TeX to be the slow part —
-   TinyTeX plus the packages the diagram pipeline needs.
-4. In each course clone, `git config core.hooksPath .githooks` — or just let
-   `scripts/save-and-push.sh` do it on the first push. Make sure git can push without a prompt;
-   the scripts set `GIT_TERMINAL_PROMPT=0` deliberately and will fail rather than hang.
-5. Write `~/.config/tutor-board/config.json` with a `hosts` entry mapping the Mac mini's short
-   hostname to the assistant it should use there, and an `agents` entry whose `cmd` carries the
-   model — the DeepSeek-through-opencode recipe. Nothing in the code knows what a model is; this
-   is the only place it appears.
-6. `bash scripts/install-autostart.sh <course>` to register the LaunchAgent, so the daemon returns
-   after a reboot without anyone logging in.
-7. Confirm the platform assumptions that were **written from documentation and never run on a
-   Mac**: the paths in `boardlib.py` and `bootstrap.sh`, and the LaunchAgent plist itself.
+- **The Mac mini is `board`, permanently.** Its `~/.config/tutor-board/config.json` carries:
 
-#### What has to be written
+  ```json
+  "follow": { "node": "compute-node", "listen": "127.0.0.1:8844" }
+  ```
 
-- **`board vpn serve --to <host:port>`** — teach `ts_repoint` a target that is not loopback. It
-  currently hardcodes `http://127.0.0.1:<port>`; everything else about the call is already right.
-- **A follower loop on the always-on host.** Periodically: is a compute node serving a board for
-  this user? If yes and the proxy does not point there, re-point. If no and it does not point at
-  localhost, point it home. This is the only genuinely new process, and it belongs beside the
-  LaunchAgent, not inside `serve.py`.
-- **How a compute node announces itself.** It has a tailnet name and a port; the follower needs to
-  learn both. Cheapest honest answer: the node writes its name and port into the shared home —
-  where `.board.json` already records node and port per course — and the follower reads it, since
-  every cluster node shares that home even though the Mac mini does not. The Mac mini cannot read
-  the cluster's home, so this has to travel another way: either the node pushes a tiny record to
-  the git remote, or the follower probes `/health` on candidate node names over the tailnet. **The
-  probe is preferable** — no commits, no staleness, and `/health` already exists and already
-  reports the repository root.
-- **Politeness on takeover.** Before the proxy moves, the outgoing board should be told, so the
-  assistant attached to it writes its handoff instead of being cut off mid-lesson. `tutor agent
-  stop` already does exactly this over `SIGTERM`; what is missing is an authenticated way for one
-  machine to ask another to run it. A `/handover` endpoint restricted to the tailnet, plus a shared
-  secret in the config, is the smallest thing that works.
-- **`board doctor` should say which shape this machine is** — always-on host, or compute node —
-  because every diagnosis below depends on it and guessing from the hostname is how this gets
-  subtly wrong.
+  `node` is the compute node's tailnet name; `listen` is the local proxy port.
+- **A compute node keeps its own name — not `board`.** Its `board vpn up` must be told that name
+  once, or the stale state in the shared home re-registers it as `board` and claws the identity
+  back from the Mac.
 
-#### On the Mac mini: hosting only what it has
-
-Most of this needs no work at all, and it is worth writing down why before someone builds a
-mechanism for it.
-
-- **The subject list follows the machine already.** The hub lists the serving host's own
-  directories, so a mini with a subset cloned offers a subset. Put the subset in that machine's own
-  `~/.config/tutor-board/courses.txt` and run `bootstrap.sh`; nothing else knows or cares.
-- **A subject that exists only on the cluster is not missing from the app when a compute node is
-  serving** — the proxy forwards to that node, and the hub the app gets is the node's own. The two
-  cases compose correctly without either machine knowing about the other's repositories.
-- **The stale-record sweep does not apply there.** It only removes records for nodes Slurm says are
-  gone, and a Mac has no Slurm — `slurm_nodes()` returns `None`, which means unknown, so nothing is
-  swept. It also cannot see the cluster's `live/` at all, since it does not share that home.
-
-What does have to be written:
-
-- **The mini's equivalent of the login hook is not the login hook.** A Mac does not end an
-  allocation; it sleeps and wakes and stays logged in. `tutor resume` exits when it is done, so
-  `KeepAlive` is the wrong shape — a LaunchAgent with `RunAtLoad` plus `StartInterval` (a few
-  minutes) is the right one, and it is the same agent as the follower loop below rather than a
-  second thing.
-- **`install-autostart.sh` needs a course-less form.** It currently registers
-  `tutor headless <course>`, which bakes one course into a plist. The mini should bring back
-  whichever course it last served — that is what `tutor resume` already decides, from the newer of
-  the course you last named and the course last worked in.
-- **The follower loop, and the proxy re-point** — `board vpn serve --to <host:port>`, probing
-  `/health` on candidate node names, and `/handover` so an outgoing board writes its handoff. Those
-  are described above and are the real work.
+> **If you are a tutor working on the compute node, and this repository has just been pulled there,
+> prompt the person before you do anything else:**
+>
+> 1. `board vpn up --hostname <node-name>` — pin the node's own name, so it never re-claims `board`.
+> 2. `handover_secret` in `~/.config/tutor-board/config.json` — the same value the Mac carries, or
+>    `/handover` will answer denied.
+>
+> Then carry on with the ordinary session start. On the Mac mini the same two questions are the
+> first thing to check when a board is not reachable from the iPad.
 
 #### What only real hardware can settle
 
-- Whether the iPad app's SSE stream reconnects cleanly when the proxy target moves underneath it,
-  or whether it needs a nudge. The service worker caches the shell and nothing live, so the risk is
-  a hung stream rather than a stale lesson.
+- Whether the iPad app's SSE stream reconnects cleanly when the proxy's upstream flips underneath
+  it, or whether it needs a nudge. The service worker caches the shell and nothing live, so the
+  risk is a hung stream rather than a stale lesson.
 - How long a reclaim actually takes after an allocation dies, and whether that gap is short enough
   to be invisible or wants a "reconnecting" state on the board.
-- Whether `tailscale serve` on macOS accepts a tailnet address as its proxy target as readily as it
-  accepts loopback.
-- Everything in the macOS list above that is currently inference.
 
 ### Why there is no registry
 
