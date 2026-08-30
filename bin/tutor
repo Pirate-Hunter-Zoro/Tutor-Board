@@ -538,7 +538,9 @@ def sync_transcript(root, log=None):
             return
         if git("commit", "-m", "lesson transcript").returncode != 0:
             return
-        q = git("push")
+        # `origin HEAD` rather than a bare push, so it works whether or not the
+        # clone has an upstream set for its branch.
+        q = git("push", "origin", "HEAD")
         note("transcript: pushed" if q.returncode == 0 else "transcript: push failed")
     except (OSError, subprocess.TimeoutExpired):
         note("transcript: could not reach the remote")
