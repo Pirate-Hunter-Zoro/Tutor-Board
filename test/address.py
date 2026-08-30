@@ -14,6 +14,7 @@ pointing at nothing, or an explicit `board vpn serve` -- a person saying which
 course they mean.
 """
 
+import importlib.machinery
 import importlib.util
 import os
 import socket
@@ -58,6 +59,21 @@ if board.served_port("nothing here") is None:
     ok("and a status with no proxy in it reads as nobody holding the name")
 else:
     fail("served_port invented a port out of an empty status")
+
+# `ts` folds stderr into stdout, and a client/daemon version skew prints a
+# warning there -- so a real `status --json` can open with prose, not the JSON
+# object. ts_info must still find the object rather than bail on the warning.
+def _ts_warned(*a, **k):
+    return 0, ("Warning: client version mismatch\n"
+               '{"Self":{"DNSName":"board.tail0c6c62.ts.net.",'
+               '"TailscaleIPs":["100.0.0.1","fd7a::1"]}}')
+
+board.ts = _ts_warned
+v4, name = board.ts_info()
+if name == "board.tail0c6c62.ts.net" and v4 == "100.0.0.1":
+    ok("ts_info reads the JSON behind a folded warning line")
+else:
+    fail("ts_info got %r / %r out of a status carrying a warning" % (v4, name))
 
 # A real listener, so port_answers is tested against a socket and not a mock.
 srv = socket.socket()

@@ -7,6 +7,23 @@ the board itself.
 
 Read `README.md` first.
 
+## Catch up before you change anything
+
+This repository is cloned on more than one machine — this Mac mini and the compute
+node — and work moves between them by git, never by hand. The first act of any
+session here is:
+
+```
+git pull --ff-only
+```
+
+A fix shipped from the other machine has to be in front of you before you build on
+it, or you will be fixing a board that is not the one running. It is deliberately
+never fatal: no remote, no network, or a diverged branch say so in one line and you
+carry on. But start from what is on disk, not from what was there when you last
+opened it. The same rule applies to a course repository the moment you touch its
+files rather than its `live/` cards.
+
 ## What this must never become
 
 - A chat client. The conversation lives in the assistant's own session. The board displays

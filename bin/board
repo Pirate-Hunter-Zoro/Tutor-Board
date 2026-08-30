@@ -1351,8 +1351,14 @@ def ts_info():
     code, out = ts("status", "--json")
     if code != 0:
         return None, None
+    # `ts` folds stderr into stdout, and the CLI puts advisory warnings there --
+    # a client/daemon version skew is the common one -- so the output may open
+    # with prose before the JSON object. Start at the first brace.
+    start = out.find("{")
+    if start == -1:
+        return None, None
     try:
-        data = json.loads(out)
+        data = json.loads(out[start:])
     except ValueError:
         return None, None
     me = data.get("Self") or {}
@@ -1446,6 +1452,23 @@ def cmd_vpn(live, args):
         if sub == "down":
             print("tailscale is managed by this system; leave it alone")
             return 0
+        if sub == "serve":
+            # The system CLI is already connected; there is nothing to start.
+            # This must not fall through to the userspace-daemon path below -- on
+            # a Mac that would spawn a second tailscaled and a second identity,
+            # fighting the one that is already running.
+            info = live.info()
+            if not info:
+                print("start the board first", file=sys.stderr)
+                return 1
+            code, out = ts("serve", "--bg", "--https=443",
+                           "http://127.0.0.1:%d" % info["port"], timeout=40)
+            print(out.strip() or "serving")
+            if code != 0:
+                print("\nHTTPS needs certificates enabled once for the tailnet:\n"
+                      "  admin console -> DNS -> HTTPS Certificates -> Enable",
+                      file=sys.stderr)
+            return code
 
     if kind == "missing":
         print("tailscale is not installed. To reach the board from another\n"

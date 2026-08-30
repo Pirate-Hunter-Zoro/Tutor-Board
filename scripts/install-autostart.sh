@@ -4,6 +4,7 @@
 #
 #   bash scripts/install-autostart.sh <course-directory> [agent]
 #   bash scripts/install-autostart.sh --login-hook      (cluster nodes)
+#   bash scripts/install-autostart.sh --tool-pull       (always-on host)
 #   bash scripts/install-autostart.sh --uninstall
 #
 # An always-on machine is only always-on until it isn't: a power cut, a software
@@ -30,6 +31,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TUTOR="$HERE/bin/tutor"
 LABEL="com.tutorboard.headless"
+LABEL_PULL="com.tutorboard.pull"
 
 BEGIN_MARK="# >>> tutor-board resume >>>"
 END_MARK="# <<< tutor-board resume <<<"
@@ -89,7 +91,9 @@ if [ "${1:-}" = "--uninstall" ]; then
     Darwin)
       launchctl unload "$HOME/Library/LaunchAgents/$LABEL.plist" 2>/dev/null
       rm -f "$HOME/Library/LaunchAgents/$LABEL.plist"
-      echo "removed the LaunchAgent" ;;
+      launchctl unload "$HOME/Library/LaunchAgents/$LABEL_PULL.plist" 2>/dev/null
+      rm -f "$HOME/Library/LaunchAgents/$LABEL_PULL.plist"
+      echo "removed the LaunchAgents" ;;
     Linux)
       systemctl --user disable --now tutor-headless.service 2>/dev/null
       rm -f "$HOME/.config/systemd/user/tutor-headless.service"
@@ -99,11 +103,56 @@ if [ "${1:-}" = "--uninstall" ]; then
   exit 0
 fi
 
+if [ "${1:-}" = "--tool-pull" ]; then
+  # Keep this repository fresh on a machine that is always on. A person ships a
+  # board fix from a compute node and comes back to the Mac: the next session
+  # here should read the new code without anybody remembering to pull. `--ff-only`
+  # so a diverged branch is logged and left, never force-resolved; a session that
+  # starts a commit behind is still a session. This does NOT restart a running
+  # board -- that is `tutor restart`, and a board holds the code it started with.
+  GIT="$(command -v git)"
+  case "$(uname -s)" in
+    Darwin)
+      PLIST="$HOME/Library/LaunchAgents/$LABEL_PULL.plist"
+      mkdir -p "$(dirname "$PLIST")"
+      {
+        echo '<?xml version="1.0" encoding="UTF-8"?>'
+        echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+        echo '<plist version="1.0"><dict>'
+        echo "  <key>Label</key><string>$LABEL_PULL</string>"
+        echo '  <key>ProgramArguments</key><array>'
+        printf '    <string>%s</string>\n    <string>-C</string>\n    <string>%s</string>\n    <string>pull</string>\n    <string>--ff-only</string>\n' "$GIT" "$HERE"
+        echo '  </array>'
+        echo '  <key>StartInterval</key><integer>300</integer>'
+        echo '  <key>RunAtLoad</key><true/>'
+        echo "  <key>StandardOutPath</key><string>$HOME/Library/Logs/tutor-pull.log</string>"
+        echo "  <key>StandardErrorPath</key><string>$HOME/Library/Logs/tutor-pull.log</string>"
+        echo '  <key>EnvironmentVariables</key><dict>'
+        echo '    <key>GIT_TERMINAL_PROMPT</key><string>0</string>'
+        echo '    <key>GIT_ASKPASS</key><string>/bin/false</string>'
+        echo '  </dict>'
+        echo '</dict></plist>'
+      } > "$PLIST"
+      launchctl unload "$PLIST" 2>/dev/null
+      launchctl load "$PLIST" && echo "loaded $PLIST"
+      echo "logs: ~/Library/Logs/tutor-pull.log"
+      echo "stop: bash $0 --uninstall"
+      ;;
+    *)
+      echo "a periodic tool pull only makes sense on an always-on host;"
+      echo "on a compute node nothing survives, and the AI contract already"
+      echo "pulls at the start of every session."
+      exit 1 ;;
+  esac
+  exit 0
+fi
+
 COURSE="${1:-}"
 AGENT="${2:-}"
 [ -n "$COURSE" ] || {
   echo "usage: $0 <course-directory> [agent]"
   echo "       $0 --login-hook      on a cluster node, where nothing survives"
+  echo "       $0 --tool-pull       on an always-on host, keep this repo fresh"
   echo "       $0 --uninstall"
   exit 1
 }
