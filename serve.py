@@ -36,6 +36,12 @@ import homework
 import syllabus
 WEB = os.path.join(HERE, "web")
 
+# The one place a machine-local secret lives, so the always-on host can ask a
+# board to hand over politely. Both machines must carry the same value.
+CONFIG = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config")),
+    "tutor-board", "config.json")
+
 # Python's table predates these; without them fonts go out as octet-stream and
 # a strict browser can refuse to load them.
 mimetypes.add_type("font/woff2", ".woff2")
@@ -1052,6 +1058,21 @@ def tutor_cli(args, timeout=30):
         return 1, str(exc)
 
 
+def handover_secret():
+    """The shared secret one machine presents to another to ask it to hand over.
+
+    Unset means the endpoint is closed -- a board that has not been told the
+    secret answers denied rather than inventing a trust boundary. Both machines
+    carry the same value, top-level, in config.json.
+    """
+    try:
+        with open(CONFIG, "r", encoding="utf-8") as fh:
+            cfg = json.load(fh) or {}
+    except (OSError, ValueError):
+        return None
+    return cfg.get("handover_secret") or None
+
+
 # ---------------------------------------------------------------------------
 # TikZ -> SVG worker
 # ---------------------------------------------------------------------------
@@ -1558,6 +1579,21 @@ class Handler(BaseHTTPRequestHandler):
                                    "detail": out.strip(),
                                    "agent": aout.strip() if acode == 0 else None,
                                    "agent_error": None if acode == 0 else aout.strip()[-300:]})
+
+        if path == "/handover":
+            # The always-on host asks an outgoing board to wrap up before it
+            # moves the proxy: the assistant gets its one turn to write the
+            # handoff, rather than being cut off mid-lesson. Gated on a shared
+            # secret, because a board on the tailnet otherwise has no identity
+            # to trust and the iPad must never be able to stop a lesson.
+            secret = handover_secret()
+            given = self.headers.get("X-Handover") or ""
+            if not secret or given != secret:
+                return self.send_json({"ok": False, "error": "denied"}, status=403)
+            name = os.path.basename(repo.root)
+            code, out = tutor_cli(["agent", "stop", name])
+            return self.send_json({"ok": code == 0,
+                                   "detail": out.strip()[-200:]})
 
         if path == "/session":
             # Which kind of sitting this is, chosen from the board. It was a

@@ -107,6 +107,10 @@ def install(status, held_alive):
     board.ts_daemon_running = lambda *a, **k: True
     board.ts_info = lambda *a, **k: ("100.0.0.1", "board.tail0c6c62.ts.net")
     board.port_answers = lambda p: held_alive
+    # serve_target branches on machine shape, which reads the real config. A test
+    # must not depend on whatever that file happens to say, so pin it: these
+    # cases are about a machine that points the name at its own board.
+    board.boardlib.machine_shape = lambda: "standalone"
 
     def ts(*args, **kwargs):
         if args[:2] == ("serve", "status"):
@@ -114,6 +118,22 @@ def install(status, held_alive):
         calls.append(args)
         return 0, "serving"
     board.ts = ts
+
+
+# serve_target is the one place the always-on host differs: it points the name
+# at the follower proxy, never at a board port directly.
+board.boardlib.follow_config = lambda: {"listen": "127.0.0.1:8844"}
+board.boardlib.machine_shape = lambda: "always-on host"
+if board.serve_target(8787) == "http://127.0.0.1:8844":
+    ok("on an always-on host the name points at the follower proxy")
+else:
+    fail("serve_target on an always-on host did not point at the proxy")
+
+board.boardlib.machine_shape = lambda: "standalone"
+if board.serve_target(8787) == "http://127.0.0.1:8787":
+    ok("and anywhere else it points at the board's own port")
+else:
+    fail("serve_target off the always-on host did not point at the board")
 
 
 held = ("https://board.tail0c6c62.ts.net/\n|-- proxy http://127.0.0.1:8787\n")

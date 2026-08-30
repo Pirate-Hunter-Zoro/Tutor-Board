@@ -5,3 +5,6 @@ node_modules/
 
 # the board scratch dir, when the tool is itself opened as a course
 live/
+
+# machine-local diagnosis notes
+diagnosis.txt

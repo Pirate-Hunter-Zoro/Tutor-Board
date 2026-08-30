@@ -1392,6 +1392,20 @@ def port_answers(port):
             pass
 
 
+def serve_target(port):
+    """Where the tailnet HTTPS name should point.
+
+    On an always-on host the name points at the follower proxy, which forwards to
+    whichever machine is actually serving; pointing it at a board directly would
+    bypass the fallback the whole design exists to provide. Anywhere else the name
+    points at the board's own port.
+    """
+    if boardlib.machine_shape() == "always-on host":
+        follow = boardlib.follow_config()
+        return "http://" + (follow.get("listen") or "127.0.0.1:8844")
+    return "http://127.0.0.1:%d" % port
+
+
 def ts_repoint(port, force=False):
     """Keep the HTTPS name pointed at a board that is actually answering.
 
@@ -1413,15 +1427,16 @@ def ts_repoint(port, force=False):
     """
     if not ts_daemon_running():
         return
+    target = serve_target(port)
     code, out = ts("serve", "status", timeout=15)
     if code != 0 or "https://" not in out:
         return
-    if ("127.0.0.1:%d" % port) in out:
+    if target in out:
         return
     held = served_port(out)
     if not force and held and held != port and port_answers(held):
         return
-    code, _ = ts("serve", "--bg", "--https=443", "http://127.0.0.1:%d" % port, timeout=40)
+    code, _ = ts("serve", "--bg", "--https=443", target, timeout=40)
     if code == 0:
         _, name = ts_info()
         print("  https://%s/ now points here" % (name or "the tailnet name"))
@@ -1462,7 +1477,7 @@ def cmd_vpn(live, args):
                 print("start the board first", file=sys.stderr)
                 return 1
             code, out = ts("serve", "--bg", "--https=443",
-                           "http://127.0.0.1:%d" % info["port"], timeout=40)
+                           serve_target(info["port"]), timeout=40)
             print(out.strip() or "serving")
             if code != 0:
                 print("\nHTTPS needs certificates enabled once for the tailnet:\n"
@@ -1510,7 +1525,7 @@ def cmd_vpn(live, args):
         # "point the address at THIS course", so it takes the name from whoever
         # is holding it. Everything else asks first -- see ts_repoint.
         code, out = ts("serve", "--bg", "--https=443",
-                       "http://127.0.0.1:%d" % info["port"], timeout=40)
+                       serve_target(info["port"]), timeout=40)
         print(out.strip() or "serving")
         if code != 0:
             print("\nHTTPS needs certificates enabled once for the tailnet:\n"
@@ -1719,12 +1734,18 @@ def cmd_eyes(live, args):
     return 0
 
 
+def machine_shape():
+    """What this machine is for. Platform knowledge, so it lives in boardlib."""
+    return boardlib.machine_shape()
+
+
 def cmd_doctor(live, args):
     import platform as _pl
     import shutil as _sh
     env_path = boardlib.tex_env().get("PATH", "")
     ok = True
     print("system:   %s %s" % (_pl.system(), _pl.machine()))
+    print("shape:    %s" % machine_shape())
     print("python:   %s" % sys.version.split()[0])
     for exe in ("latex", "pdflatex", "dvisvgm"):
         found = _sh.which(exe, path=env_path)

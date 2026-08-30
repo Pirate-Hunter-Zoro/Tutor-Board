@@ -5,6 +5,7 @@
 #   bash scripts/install-autostart.sh <course-directory> [agent]
 #   bash scripts/install-autostart.sh --login-hook      (cluster nodes)
 #   bash scripts/install-autostart.sh --tool-pull       (always-on host)
+#   bash scripts/install-autostart.sh --always-on       (always-on host)
 #   bash scripts/install-autostart.sh --uninstall
 #
 # An always-on machine is only always-on until it isn't: a power cut, a software
@@ -32,6 +33,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TUTOR="$HERE/bin/tutor"
 LABEL="com.tutorboard.headless"
 LABEL_PULL="com.tutorboard.pull"
+LABEL_FOLLOW="com.tutorboard.follow"
+LABEL_RESUME="com.tutorboard.resume"
 
 BEGIN_MARK="# >>> tutor-board resume >>>"
 END_MARK="# <<< tutor-board resume <<<"
@@ -93,6 +96,10 @@ if [ "${1:-}" = "--uninstall" ]; then
       rm -f "$HOME/Library/LaunchAgents/$LABEL.plist"
       launchctl unload "$HOME/Library/LaunchAgents/$LABEL_PULL.plist" 2>/dev/null
       rm -f "$HOME/Library/LaunchAgents/$LABEL_PULL.plist"
+      launchctl unload "$HOME/Library/LaunchAgents/$LABEL_FOLLOW.plist" 2>/dev/null
+      rm -f "$HOME/Library/LaunchAgents/$LABEL_FOLLOW.plist"
+      launchctl unload "$HOME/Library/LaunchAgents/$LABEL_RESUME.plist" 2>/dev/null
+      rm -f "$HOME/Library/LaunchAgents/$LABEL_RESUME.plist"
       echo "removed the LaunchAgents" ;;
     Linux)
       systemctl --user disable --now tutor-headless.service 2>/dev/null
@@ -147,12 +154,79 @@ if [ "${1:-}" = "--tool-pull" ]; then
   exit 0
 fi
 
+if [ "${1:-}" = "--always-on" ]; then
+  # The always-on host runs two things: the follower proxy, which forwards the
+  # tailnet name to whichever machine is serving, and a periodic resume, which
+  # keeps this machine's own board warm so the proxy has somewhere local to fall
+  # back to the moment the compute node goes away. Neither names a course -- the
+  # follower probes, and `tutor resume` decides the course from what was last
+  # worked in, so a new chapter does not mean a new plist.
+  case "$(uname -s)" in
+    Darwin)
+      PY="$(command -v python3)"
+      FOL="$HOME/Library/LaunchAgents/$LABEL_FOLLOW.plist"
+      mkdir -p "$(dirname "$FOL")"
+      {
+        echo '<?xml version="1.0" encoding="UTF-8"?>'
+        echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+        echo '<plist version="1.0"><dict>'
+        echo "  <key>Label</key><string>$LABEL_FOLLOW</string>"
+        echo '  <key>ProgramArguments</key><array>'
+        printf '    <string>%s</string>\n    <string>%s</string>\n' "$PY" "$HERE/bin/follow"
+        echo '  </array>'
+        echo '  <key>RunAtLoad</key><true/>'
+        echo '  <key>KeepAlive</key><true/>'
+        echo "  <key>WorkingDirectory</key><string>$HERE</string>"
+        echo "  <key>StandardOutPath</key><string>$HOME/Library/Logs/tutor-follow.log</string>"
+        echo "  <key>StandardErrorPath</key><string>$HOME/Library/Logs/tutor-follow.log</string>"
+        echo '  <key>EnvironmentVariables</key><dict>'
+        echo "    <key>PATH</key><string>$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>"
+        echo '  </dict>'
+        echo '</dict></plist>'
+      } > "$FOL"
+
+      RES="$HOME/Library/LaunchAgents/$LABEL_RESUME.plist"
+      {
+        echo '<?xml version="1.0" encoding="UTF-8"?>'
+        echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+        echo '<plist version="1.0"><dict>'
+        echo "  <key>Label</key><string>$LABEL_RESUME</string>"
+        echo '  <key>ProgramArguments</key><array>'
+        printf '    <string>%s</string>\n    <string>%s</string>\n    <string>resume</string>\n    <string>--quiet</string>\n' "$PY" "$HERE/bin/tutor"
+        echo '  </array>'
+        echo '  <key>RunAtLoad</key><true/>'
+        echo '  <key>StartInterval</key><integer>180</integer>'
+        echo "  <key>WorkingDirectory</key><string>$HERE</string>"
+        echo "  <key>StandardOutPath</key><string>$HOME/Library/Logs/tutor-resume.log</string>"
+        echo "  <key>StandardErrorPath</key><string>$HOME/Library/Logs/tutor-resume.log</string>"
+        echo '  <key>EnvironmentVariables</key><dict>'
+        echo "    <key>PATH</key><string>$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>"
+        echo '  </dict>'
+        echo '</dict></plist>'
+      } > "$RES"
+
+      launchctl unload "$FOL" 2>/dev/null
+      launchctl load "$FOL" && echo "loaded $FOL"
+      launchctl unload "$RES" 2>/dev/null
+      launchctl load "$RES" && echo "loaded $RES"
+      echo "logs: ~/Library/Logs/tutor-follow.log, tutor-resume.log"
+      echo "stop: bash $0 --uninstall"
+      ;;
+    *)
+      echo "always-on hosting is what the Mac mini is for;"
+      echo "on a compute node nothing survives, so use --login-hook there instead."
+      exit 1 ;;
+  esac
+  exit 0
+fi
+
 COURSE="${1:-}"
 AGENT="${2:-}"
 [ -n "$COURSE" ] || {
   echo "usage: $0 <course-directory> [agent]"
   echo "       $0 --login-hook      on a cluster node, where nothing survives"
   echo "       $0 --tool-pull       on an always-on host, keep this repo fresh"
+  echo "       $0 --always-on       the always-on host: follower proxy + warm board"
   echo "       $0 --uninstall"
   exit 1
 }

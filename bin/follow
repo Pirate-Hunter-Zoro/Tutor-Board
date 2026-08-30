@@ -1,0 +1,300 @@
+#!/usr/bin/env python3
+"""
+follow -- the always-on host's proxy, so the one address the iPad holds serves
+whichever machine has the board.
+
+`tailscale serve` cannot proxy to a remote node: it accepts the command and then
+answers every request with a 502. So the always-on Mac runs this small proxy
+locally and points `tailscale serve` at it. The proxy forwards each connection to
+the compute node's board while that is serving, and to the Mac's own board when
+it is not. A follower thread probes the compute node and flips the target;
+nothing else moves.
+
+Which machine serves is decided by a probe, not by a record: `http://<node>:<port>/health`
+answers with the repository root for a board that is genuinely up, and the port
+is a fixed function of the course directory name, so the same course has the same
+port on every machine. The Mac does not share the compute node's filesystem and
+cannot read its records, which is exactly why the probe exists.
+
+Config, in ~/.config/tutor-board/config.json:
+
+    "follow": {
+        "node": "board",          the compute node's tailnet name to probe
+        "listen": "127.0.0.1:8844"
+    }
+"""
+
+import json
+import os
+import re
+import socket
+import socketserver
+import subprocess
+import sys
+import threading
+import time
+import urllib.error
+import urllib.request
+
+TOOL = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, TOOL)
+import boardlib  # noqa: E402
+
+CONFIG_DIR = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config")),
+    "tutor-board")
+CONFIG = os.path.join(CONFIG_DIR, "config.json")
+CHOSEN = os.path.join(CONFIG_DIR, "chosen.json")
+
+# What "you were working here" looks like on disk, newest of which wins. Mirrors
+# bin/tutor's LIVE_SIGNS; the board record is the live one, the rest survive a
+# clean stop.
+LIVE_SIGNS = (".board.json", "state.json", "turns.jsonl", "cards")
+
+
+def load_config():
+    cfg = {"courses_dir": os.path.dirname(TOOL)}
+    try:
+        with open(CONFIG, "r", encoding="utf-8") as fh:
+            cfg.update(json.load(fh) or {})
+    except (OSError, ValueError):
+        pass
+    return cfg
+
+
+def courses(cfg):
+    base = os.path.expanduser(cfg.get("courses_dir") or os.path.dirname(TOOL))
+    out = []
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        return out
+    for name in names:
+        root = os.path.join(base, name)
+        if not os.path.isdir(root) or os.path.abspath(root) == TOOL:
+            continue
+        if not (os.path.isfile(os.path.join(root, "tutorboard.json")) or
+                os.path.isfile(os.path.join(root, "AI_INSTRUCTIONS.md")) or
+                os.path.isdir(os.path.join(root, "live"))):
+            continue
+        out.append({"dir": name, "root": root})
+    return out
+
+
+def default_port(root):
+    """Stable per-repository port, identical to bin/board's."""
+    h = 0
+    for ch in os.path.basename(root):
+        h = (h * 131 + ord(ch)) % 60
+    return 8780 + h
+
+
+def last_used(root):
+    best = 0
+    for rel in LIVE_SIGNS:
+        try:
+            best = max(best, os.path.getmtime(os.path.join(root, "live", rel)))
+        except OSError:
+            continue
+    return best
+
+
+def active_course(cands):
+    """The course to serve locally when the node is down: last named, else last
+    worked. Reuses the same two signals as `tutor resume`."""
+    best = None
+    try:
+        with open(CHOSEN, "r", encoding="utf-8") as fh:
+            rec = json.load(fh) or {}
+    except (OSError, ValueError):
+        rec = {}
+    for c in cands:
+        if c["root"] == rec.get("root") or c["dir"] == rec.get("dir"):
+            best = (rec.get("at") or 0, c)
+    for c in cands:
+        when = last_used(c["root"])
+        if when and (not best or when > best[0]):
+            best = (when, c)
+    return best[1] if best else (cands[0] if cands else None)
+
+
+def probe(host, port, timeout=3.0):
+    """Is a board answering on this host:port? /health is the honest test."""
+    try:
+        with urllib.request.urlopen("http://%s:%d/health" % (host, port),
+                                    timeout=timeout) as resp:
+            body = resp.read(128).decode("utf-8", "replace")
+            return resp.status == 200 and '"ok"' in body
+    except (OSError, urllib.error.URLError, ValueError):
+        return False
+
+
+def remote_target(node, cands):
+    """(host, port) for a board serving on the compute node, or None.
+
+    The port is a function of the course, so probe every course this machine
+    knows rather than a fixed port. /health also names the repository root, which
+    lets the follower confirm it is talking to a course and not a stray process.
+    """
+    if not node:
+        return None
+    for c in cands:
+        port = default_port(c["root"])
+        if probe(node, port):
+            return node, port
+    return None
+
+
+class Target:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._host = "127.0.0.1"
+        self._port = 0
+
+    def set(self, host, port):
+        with self._lock:
+            self._host, self._port = host, port
+
+    def get(self):
+        with self._lock:
+            return self._host, self._port
+
+
+class Proxy(socketserver.BaseRequestHandler):
+    def handle(self):
+        host, port = self.server.target.get()
+        if not port:
+            self.request.close()
+            return
+        try:
+            upstream = socket.create_connection((host, port), timeout=10)
+        except OSError:
+            # Nothing answering where we pointed. Close rather than answer, and
+            # the client's own "cannot reach the board" path takes over.
+            self.request.close()
+            return
+        upstream.settimeout(None)
+        self.request.settimeout(None)
+        try:
+            forward(self.request, upstream)
+        finally:
+            upstream.close()
+
+
+def forward(a, b):
+    """Pipe bytes both ways until one side hangs up, as a proxy must for SSE."""
+    def pipe(src, dst):
+        try:
+            while True:
+                data = src.recv(65536)
+                if not data:
+                    break
+                dst.sendall(data)
+        except OSError:
+            pass
+        finally:
+            for s in (src, dst):
+                try:
+                    s.shutdown(socket.SHUT_WR)
+                except OSError:
+                    pass
+
+    t = threading.Thread(target=pipe, args=(a, b), daemon=True)
+    t.start()
+    pipe(b, a)
+
+
+def ensure_serve(listen):
+    """Point the tailnet HTTPS name at this proxy. `tailscale serve` proxies to a
+    local backend fine; it only refuses a remote one, which is why this exists."""
+    prefix, kind = boardlib.tailscale_cli()
+    if not prefix:
+        return
+    host, port = listen.rsplit(":", 1)
+    cmd = prefix + ["serve", "--bg", "--https=443", "http://%s:%s" % (host, port)]
+    try:
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       timeout=40)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def follower(target, node, cands, log):
+    interval = float(os.environ.get("FOLLOW_INTERVAL", "30"))
+    while True:
+        remote = remote_target(node, cands)
+        if remote:
+            host, port = remote
+            log("compute node serving at %s:%d" % (host, port))
+            target.set(host, port)
+        else:
+            active = active_course(cands)
+            if active:
+                port = default_port(active["root"])
+                log("no compute node; serving %s locally on :%d"
+                    % (active["dir"], port))
+                target.set("127.0.0.1", port)
+        time.sleep(interval)
+
+
+def log(line):
+    try:
+        sys.stderr.write("[%s] %s\n" % (time.strftime("%H:%M:%S"), line))
+        sys.stderr.flush()
+    except (OSError, ValueError):
+        pass
+
+
+def _flag(argv, name):
+    for i, a in enumerate(argv):
+        if a == name and i + 1 < len(argv):
+            return argv[i + 1]
+    return None
+
+
+def main(argv):
+    cfg = load_config()
+    follow = cfg.get("follow") or {}
+    # A command-line flag beats the config, which beats an environment variable.
+    # The config is the declared source of truth; the flags exist so a person (or
+    # a test) can point the follower elsewhere without editing the file.
+    node = _flag(argv, "--node") or follow.get("node") or os.environ.get("FOLLOW_NODE")
+    listen = _flag(argv, "--listen") or follow.get("listen") \
+        or os.environ.get("FOLLOW_LISTEN") or "127.0.0.1:8844"
+
+    if "--serve" in argv:
+        ensure_serve(listen)
+        return 0
+
+    cands = courses(cfg)
+    host, port = listen.rsplit(":", 1)
+    port = int(port)
+
+    target = Target()
+    active = active_course(cands)
+    if active:
+        target.set("127.0.0.1", default_port(active["root"]))
+    else:
+        target.set("127.0.0.1", 0)
+
+    threading.Thread(target=follower, args=(target, node, cands, log),
+                     daemon=True).start()
+    # Only the configured follower owns the tailnet name. An ad-hoc instance run
+    # on some other port (a probe, a test) must not steal `tailscale serve` from
+    # the one that is actually answering.
+    if not _flag(argv, "--listen"):
+        ensure_serve(listen)
+
+    server = socketserver.ThreadingTCPServer((host, port), Proxy)
+    server.target = target
+    server.daemon_threads = True
+    log("following %s, listening on %s" % (node or "(no node configured)", listen))
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

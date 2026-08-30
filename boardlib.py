@@ -10,11 +10,17 @@ Standard library only, like everything else.
 """
 
 import glob
+import json
 import os
 import shutil
 import time
 
 HOME = os.path.expanduser("~")
+
+CONFIG_DIR = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME", os.path.join(HOME, ".config")),
+    "tutor-board")
+CONFIG = os.path.join(CONFIG_DIR, "config.json")
 
 
 def tex_bin_dirs():
@@ -240,6 +246,35 @@ def tailscale_cli():
         if os.path.exists(p):
             return ([p], "system")
     return (None, "missing")
+
+
+def follow_config():
+    """The `follow` block of the config, or {} when there is none.
+
+    The block is what marks a machine as the always-on host, so both the server
+    and the launcher read it through this one place.
+    """
+    try:
+        with open(CONFIG, "r", encoding="utf-8") as fh:
+            cfg = json.load(fh) or {}
+    except (OSError, ValueError):
+        return {}
+    return cfg.get("follow") or {}
+
+
+def machine_shape():
+    """What this machine is for: always-on host, compute node, or standalone.
+
+    Guessing this from the hostname is how it gets subtly wrong, so it is
+    decided from what is actually true: an always-on host is configured to
+    follow, a compute node is where Slurm answers, and everything else is a
+    standalone machine.
+    """
+    if follow_config():
+        return "always-on host"
+    if slurm_nodes() is not None:
+        return "compute node"
+    return "standalone"
 
 
 def tailscale_download_hint():
