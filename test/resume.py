@@ -201,8 +201,8 @@ try:
     check("a board already running here is not restarted", not calls["start"])
     check("but the tailnet name is still checked, since another board moves it",
           calls["link"] == ["Here"])
-    check("and nothing is pulled, because nothing is starting",
-          not calls["sync"])
+    check("and it is still caught up first, so a warm board never goes stale",
+          calls["sync"] == ["Here"])
 
     # --- no squeue at all is not the same as no allocations -----------------
     # The cases above swept these records, which is what they are supposed to do

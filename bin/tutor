@@ -1042,6 +1042,13 @@ def cmd_resume(cfg, args):
     info = board_record(root) or {}
     on = info.get("node")
 
+    # Catch up before anything else, on every resume and not only the one that
+    # starts a fresh board: a handoff or a pushed chapter written on the machine
+    # you just left is the whole point of writing it down, and the always-on
+    # host's periodic resume is what keeps its warm board from going stale.
+    # Fast-forward only and never fatal, so it is cheap to run on a timer.
+    sync(root, quiet=True)
+
     import boardlib
     if on == host and boardlib.board_is_running(info.get("pid"), root):
         # Already serving here. The one thing worth checking is that the tailnet
@@ -1071,10 +1078,6 @@ def cmd_resume(cfg, args):
     if mine is not None and host not in mine and not force:
         say("%s is not one of your allocations; not starting a board here" % host)
         return 0
-
-    # Catch up first: a handoff written on the machine you have just left is the
-    # whole point of writing it down.
-    sync(root, quiet=True)
 
     code, out = board(root, "start")
     if code != 0:
