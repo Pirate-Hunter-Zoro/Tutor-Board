@@ -184,14 +184,108 @@ def card_markdown(text):
     return kind, title, body
 
 
+BRIEF_LIMIT = 800   # tokens for the distilled brief
+
+
+def newest_mtime(paths):
+    best = 0
+    for p in paths:
+        try:
+            best = max(best, os.path.getmtime(p))
+        except OSError:
+            pass
+    return best
+
+
+def brief_sources(root):
+    return (os.path.join(root, "AI_INSTRUCTIONS.md"),
+            os.path.join(root, "live", "TEACHING.md"),
+            os.path.join(root, "latex", "coursemacros.sty"),
+            os.path.join(root, "HANDOFF.md"))
+
+
+def build_brief(root):
+    method = read(os.path.join(root, "live", "TEACHING.md"))
+    contract = read(os.path.join(root, "AI_INSTRUCTIONS.md"))
+    macros = read(os.path.join(root, "latex", "coursemacros.sty"))
+    handoff = read(os.path.join(root, "HANDOFF.md"))
+    if not any((method, contract, handoff)):
+        return ""
+    prompt = (
+        "Distill the following into ONE compact teaching brief of at most 500 words. "
+        "Keep only what a tutor needs on every turn: the subject and its scope, the "
+        "non-negotiable teaching rules, the notation and macro commands verbatim, and "
+        "where the student is plus the single next thing to cover. Drop prose, examples "
+        "and anything redundant.\n\n"
+        "The teaching method:\n\n%s\n\n"
+        "The course contract:\n\n%s\n\n"
+        "The course's own macro commands:\n\n%s\n\n"
+        "The handoff (where the last session left off):\n\n%s"
+        % (method, contract, macros or "(none)", handoff or "(none)"))
+    try:
+        return chat([{"role": "user", "content": prompt}], max_tokens=BRIEF_LIMIT)
+    except RuntimeError as exc:
+        sys.stderr.write("free tutor: brief build failed: %s\n" % exc)
+        return ""
+
+
+def load_brief(root):
+    """The compact session brief, distilled once and cached until its sources change.
+
+    The contract, method and macros are stable within a session, but a stateless tutor
+    would otherwise re-send ~20k tokens of them every turn. Distill them once into a
+    few hundred words under live/, and re-send only that. Rebuilt when any source file
+    is newer than the cache.
+    """
+    path = os.path.join(root, "live", ".brief")
+    try:
+        if os.path.getmtime(path) >= newest_mtime(brief_sources(root)):
+            return read(path)
+    except OSError:
+        pass
+    brief = build_brief(root)
+    if brief:
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(brief)
+        except OSError:
+            pass
+    return brief
+
+
+def recap(root):
+    p = subprocess.run([sys.executable, BOARD, "recap"], cwd=root,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60)
+    return p.stdout.decode("utf-8", "replace")
+
+
+def handoff(root):
+    try:
+        text = chat([{"role": "user", "content": (
+            "Write HANDOFF.md for a tutoring session that just ended. Under 350 words. "
+            "Cover, concretely: where the student got to by topic, what they got wrong "
+            "and what the misunderstanding actually was, what they got right so it is not "
+            "re-taught, and the single next thing to teach. No questions, no new "
+            "teaching.\n\n"
+            "The lesson (from `board recap`):\n\n%s" % recap(root))}], max_tokens=700)
+    except RuntimeError as exc:
+        sys.stderr.write("free tutor: handoff failed: %s\n" % exc)
+        return 1
+    if not (text or "").strip():
+        return 1
+    with open(os.path.join(root, "HANDOFF.md"), "w", encoding="utf-8") as fh:
+        fh.write(text.strip() + "\n")
+    return 0
+
+
 def main(argv):
+    if argv and argv[0] == "--handoff":
+        return handoff(os.getcwd())
     inbox = (argv[0] if argv else "").strip()
     root = os.getcwd()
 
-    rec = subprocess.run([sys.executable, BOARD, "recap"], cwd=root,
-                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                         timeout=60)
-    rec = rec.stdout.decode("utf-8", "replace")
+    rec = recap(root)
 
     ocr_parts = []
     for p in find_paths(inbox):
@@ -199,9 +293,7 @@ def main(argv):
         if os.path.exists(abs_p):
             ocr_parts.append("### %s\n%s" % (p, ocr(abs_p)))
 
-    contract = read(os.path.join(root, "AI_INSTRUCTIONS.md"))
-    method = read(os.path.join(root, "live", "TEACHING.md"))
-    handoff = read(os.path.join(root, "HANDOFF.md"))
+    brief = load_brief(root)
 
     user = (
         "The lesson so far (from `board recap`):\n\n%s\n\n" % rec +
@@ -216,13 +308,11 @@ def main(argv):
         "write ONE card. Output ONLY the card, in this exact shape:\n\n"
         "---\nkind: lesson|question|correct|wrong|review|note|recap\n"
         "title: a short title\n---\n\n"
-        "the card body in markdown, with LaTeX $...$ and $$...$$. Teach only what this "
-        "step needs, then pose at most ONE question and stop. A wrong answer gets its "
+        "the card body written directly as teaching prose in markdown, with LaTeX $...$ "
+        "and $$...$$ — the actual content, never a plan of what to write. Teach only what "
+        "this step needs, then pose at most ONE question and stop. A wrong answer gets its "
         "break located, not repaired; never re-explain what they already got right.\n\n"
-        "The teaching method:\n\n%s\n\n"
-        "The course contract (how to teach this subject):\n\n%s\n\n"
-        "Where the last session left off:\n\n%s"
-        % (method, contract, handoff or "(none)")
+        + (("The session brief (your compact guide):\n\n%s" % brief) if brief else "")
     )
 
     try:

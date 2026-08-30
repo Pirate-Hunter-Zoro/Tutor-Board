@@ -77,6 +77,8 @@ DEFAULT_CONFIG = {
             "raw_prompt": True,
             "headless_first": [sys.executable, os.path.join(TOOL, "bin", "free"), "{prompt}"],
             "headless": [sys.executable, os.path.join(TOOL, "bin", "free"), "{prompt}"],
+            # The wrap-up turn writes HANDOFF.md rather than a card.
+            "handoff": [sys.executable, os.path.join(TOOL, "bin", "free"), "--handoff", "{prompt}"],
         },
         "codex": {
             "cmd": ["codex"], "prompt": "argv",
@@ -845,7 +847,10 @@ def headless(cfg, course, agent_name, session):
     if turns:
         agent_state(live, state="wrapping up")
         log.write("\n=== %s handoff ===\n" % time.strftime("%H:%M:%S"))
-        cmd = [a.replace("{prompt}", HANDOFF_PROMPT) for a in recipe]
+        # A script agent may have its own way to write the handoff; default to the
+        # ordinary turn recipe otherwise.
+        wrap = spec.get("handoff") or recipe
+        cmd = [a.replace("{prompt}", HANDOFF_PROMPT) for a in wrap]
         try:
             subprocess.run(cmd, cwd=root, stdout=log, stderr=subprocess.STDOUT,
                            timeout=cfg.get("handoff_timeout", 600))
