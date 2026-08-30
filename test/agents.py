@@ -70,6 +70,48 @@ check("an unknown name resolves to nothing rather than to a wrong agent",
 check("a course with no opinion and no machine entry still resolves",
       tutor.resolve_agent(no_host, None) == "claude")
 
+# --- the default, and what it is allowed to do -------------------------------
+# Claude Code is the default tutor. Headless there is nobody to approve anything,
+# and a refused tool is not an error: the shipped recipe ran `board recap` fine
+# and was then refused the write that is the whole point of the turn, exiting 0
+# while the board showed a tutor who had answered with silence. The grant lives
+# in the recipe, so this is where it is held.
+D = tutor.DEFAULT_CONFIG
+claude = D["agents"]["claude"]
+
+check("Claude is the tutor unless something more specific says otherwise",
+      D["default_agent"] == "claude")
+
+for kind in ("headless_first", "headless"):
+    recipe = claude[kind]
+    check("a %s turn may write the card it was woken to write" % kind,
+          "acceptEdits" in recipe)
+    check("and may run the board's own command to do it (%s)" % kind,
+          any("Bash(board " in a for a in recipe))
+
+check("a resumed turn is still a resumed turn",
+      "--continue" in claude["headless"] and "--continue" not in claude["headless_first"])
+
+# The free tutor is not the default any more and is not gone: it is what a
+# machine that pays for no model runs, and removing it would leave that machine
+# with nothing.
+free = D["agents"]["free"]
+check("the free tutor is still configured", bool(free.get("headless")))
+check("and still runs the free-model script",
+      any(a.endswith(os.path.join("bin", "free")) for a in free["headless"]))
+check("and still builds its own context from the raw inbox",
+      free.get("raw_prompt") is True)
+check("and still has its own way to write the handoff", bool(free.get("handoff")))
+
+# An agent is a command, and two machines do not have the same commands. A
+# missing one used to start a daemon that showed as listening and then failed
+# every turn into a log nobody opens.
+check("a command that is not on the path is reported",
+      tutor.missing_command(["a-command-no-machine-has"]) == "a-command-no-machine-has")
+check("one that is, is not", tutor.missing_command(["sh"]) is None)
+check("and a script agent runs under this interpreter, which is always here",
+      tutor.missing_command(free["headless"]) is None)
+
 # --- the shared filesystem ---------------------------------------------------
 tmp = tempfile.mkdtemp(prefix="tutor-agents-")
 live = os.path.join(tmp, "live")
@@ -168,6 +210,14 @@ check("an agent with no headless recipe refuses rather than half-starting",
 
 code, msg = tutor.agent_start(CFG, course, None)
 check("an unresolved agent refuses", code == 1 and "no agent resolved" in msg)
+
+ghost = dict(CFG, agents=dict(CFG["agents"],
+                              ghost={"cmd": ["a-command-no-machine-has"],
+                                     "headless": ["a-command-no-machine-has", "{prompt}"]}))
+code, msg = tutor.agent_start(ghost, course, "ghost")
+check("an agent whose command this machine lacks refuses rather than "
+      "listening and failing every turn",
+      code == 1 and "not on the path" in msg)
 
 code, msg = tutor.agent_stop(course)
 check("stopping something that is not there is not an error",

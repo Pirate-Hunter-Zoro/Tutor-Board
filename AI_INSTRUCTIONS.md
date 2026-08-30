@@ -32,7 +32,7 @@ two things that have to be true for the one iPad address to work. Prompt the
 person for them rather than assuming they are done — a node whose name was changed
 in the admin console still has the old name in its local state, and a missing
 `handover_secret` fails silently. The exact two checks are in `README.md`, under
-"Always-on, with the compute node preferred".
+"Always-on, with the machine that holds the repository preferred".
 
 ## What this must never become
 
@@ -267,6 +267,15 @@ in the admin console still has the old name in its local state, and a missing
   A model is never a concept in the code: an agent entry is a command recipe, so a different model
   is a different entry whose `cmd` carries the flag. If you find yourself adding a `model` field,
   stop.
+- **A headless recipe carries its own permission grant, and that is not a model leaking into the
+  code.** Nobody is at a terminal, so nothing can be approved while a turn runs — and a refused
+  tool is not an error: the agent apologises into a log nobody opens and exits 0, which reaches the
+  iPad as a tutor who answered with silence. The default recipe shipped without one and could run
+  `board recap` and then be refused the card write that was the entire point of the turn. Whatever
+  flags an agent needs to write unattended belong in its recipe, alongside its `--continue`, for
+  exactly the reason a model does: the recipe is the extension point and the code stays ignorant.
+  Keep the grant narrow — the files a tutor writes and the board's own command — and never widen it
+  by default. `test/agents.py` holds it.
 - **The assistant belongs to the course, not to the terminal.** One is alive at a time, in the
   repository whose board is showing, resolved most-specific-first: `--agent`, then the course's
   `tutorboard.json`, then the machine by hostname, then `default_agent`. Switching course on the

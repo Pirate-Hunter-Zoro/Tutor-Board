@@ -6,9 +6,20 @@ whichever machine has the board.
 `tailscale serve` cannot proxy to a remote node: it accepts the command and then
 answers every request with a 502. So the always-on Mac runs this small proxy
 locally and points `tailscale serve` at it. The proxy forwards each connection to
-the compute node's board while that is serving, and to the Mac's own board when
-it is not. A follower thread probes the compute node and flips the target;
+whichever machine is serving. A follower thread probes both and flips the target;
 nothing else moves.
+
+Which one is preferred is `follow.prefer`, and it is "local": **a course cloned
+on this machine is taught on this machine.** The compute node is where the data
+and the hardware are, which is why it used to win, but once the tutor is a
+model reached over the network rather than something that needs the node's GPUs,
+the machine that is always awake and holds the repository is the better host --
+and the node is then only needed for a course this machine has not got. Set it
+to "node" for the original arrangement.
+
+Preference only settles a tie. A live board always beats a dead one, in either
+direction: handing the iPad an address with nothing listening on it is worse
+than serving from the machine that was not preferred.
 
 Which machine serves is decided by a probe, not by a record: `http://<node>:<port>/health`
 answers with the repository root for a board that is genuinely up, and the port
@@ -20,7 +31,8 @@ Config, in ~/.config/tutor-board/config.json:
 
     "follow": {
         "node": "board",          the compute node's tailnet name to probe
-        "listen": "127.0.0.1:8844"
+        "listen": "127.0.0.1:8844",
+        "prefer": "local"         "local" (this machine) or "node"
     }
 """
 
@@ -220,6 +232,86 @@ def remote_target(node, cands):
     return None
 
 
+def local_target(cands):
+    """(host, port) for the board answering on THIS machine, or None.
+
+    The same two questions the remote side asks -- which course was chosen, and
+    is the board that answers really that course -- put to 127.0.0.1. The record
+    is consulted first because here, unlike over there, we can actually read it;
+    the sequence is walked when it is wrong or missing.
+    """
+    active = active_course(cands)
+    if not active:
+        return None
+    recorded = local_port(active)
+    if identifies_as(probe("127.0.0.1", recorded, timeout=1.0), active["dir"]):
+        return "127.0.0.1", recorded
+    for port in boardlib.port_sequence(active["dir"]):
+        if port == recorded:
+            continue
+        health = probe("127.0.0.1", port, timeout=1.0)
+        if identifies_as(health, active["dir"]):
+            return "127.0.0.1", port
+        if health:
+            break        # somebody else's board; the rest of the sequence is theirs
+    return None
+
+
+def choose_target(node, cands, prefer="local"):
+    """Which machine gets the address this tick, and a phrase for the log.
+
+    `prefer` settles it only when both could serve. "local" is the rule that a
+    course cloned on this machine is taught on this machine; "node" is the
+    original arrangement, where the compute node won because that is where the
+    data and the hardware are.
+
+    A live board beats a dead one whichever way the preference points -- an
+    address with nothing behind it is the one outcome worse than the wrong
+    machine. When nothing is up anywhere the local port is still named, so the
+    resume that is about to start a board there lands on a live address rather
+    than waiting for the next tick to be noticed.
+    """
+    local = local_target(cands) if cands else None
+    if prefer != "node" and local:
+        return local, "here"
+    remote = remote_target(node, cands)
+    if remote:
+        return remote, "the compute node"
+    if local:
+        return local, "here"
+    active = active_course(cands) if cands else None
+    if active:
+        return ("127.0.0.1", local_port(active)), "here (nothing up yet)"
+    return None, None
+
+
+def handover(host, port, secret, log):
+    """Ask the machine we are leaving to wrap its tutor up before the address moves.
+
+    Without it the outgoing tutor is simply orphaned: it goes on waiting on a
+    board nobody can reach any more, and the one turn it is owed -- the handoff
+    that is the only continuity there is between machines -- never happens.
+    `/handover` was built for this exact moment and had no caller at all until the
+    address started preferring this machine; now that the proxy moves on a policy
+    rather than only on the node dying, the moment actually arrives.
+
+    Best effort, and deliberately so. The address has to move whether or not the
+    other machine is still there to be asked.
+    """
+    if not secret:
+        log("no handover_secret configured; %s keeps its tutor" % host)
+        return
+    req = urllib.request.Request("http://%s:%d/handover" % (host, port),
+                                 data=b"", method="POST",
+                                 headers={"X-Handover": secret})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            doc = json.loads(resp.read(4096).decode("utf-8", "replace"))
+        log("asked %s to hand over: %s" % (host, doc.get("detail") or doc))
+    except (OSError, urllib.error.URLError, ValueError) as exc:
+        log("could not ask %s to hand over: %s" % (host, exc))
+
+
 class Target:
     def __init__(self):
         self._lock = threading.Lock()
@@ -294,21 +386,27 @@ def ensure_serve(listen):
         pass
 
 
-def follower(target, node, cands, log):
+def follower(target, node, cands, log, prefer="local", secret=None):
+    """Re-decide where the address points, and act only when it changes.
+
+    Acting only on a change is what makes the handover possible: the outgoing
+    machine must be asked once, at the moment the address leaves it, and not
+    every thirty seconds for as long as it stays gone. It also stops the log
+    being a wall of the same line.
+    """
     interval = float(os.environ.get("FOLLOW_INTERVAL", "30"))
+    was = None
     while True:
-        remote = remote_target(node, cands)
-        if remote:
-            host, port = remote
-            log("compute node serving at %s:%d" % (host, port))
-            target.set(host, port)
-        else:
-            active = active_course(cands)
-            if active:
-                port = local_port(active)
-                log("no compute node; serving %s locally on :%d"
-                    % (active["dir"], port))
-                target.set("127.0.0.1", port)
+        now, where = choose_target(node, cands, prefer)
+        if now and now != was:
+            # Coming off the compute node and onto this machine is the one move
+            # that strands a tutor, because the node goes on running perfectly
+            # well with nobody able to reach it.
+            if was and was[0] != "127.0.0.1" and now[0] == "127.0.0.1":
+                handover(was[0], was[1], secret, log)
+            log("serving %s at %s:%d" % (where, now[0], now[1]))
+            target.set(now[0], now[1])
+            was = now
         time.sleep(interval)
 
 
@@ -336,6 +434,8 @@ def main(argv):
     node = _flag(argv, "--node") or follow.get("node") or os.environ.get("FOLLOW_NODE")
     listen = _flag(argv, "--listen") or follow.get("listen") \
         or os.environ.get("FOLLOW_LISTEN") or "127.0.0.1:8844"
+    # A course cloned here is taught here, unless the config says otherwise.
+    prefer = _flag(argv, "--prefer") or follow.get("prefer") or "local"
 
     if "--serve" in argv:
         ensure_serve(listen)
@@ -352,7 +452,9 @@ def main(argv):
     else:
         target.set("127.0.0.1", 0)
 
-    threading.Thread(target=follower, args=(target, node, cands, log),
+    threading.Thread(target=follower,
+                     args=(target, node, cands, log, prefer,
+                           cfg.get("handover_secret")),
                      daemon=True).start()
     # Only the configured follower owns the tailnet name. An ad-hoc instance run
     # on some other port (a probe, a test) must not steal `tailscale serve` from
@@ -363,7 +465,9 @@ def main(argv):
     server = socketserver.ThreadingTCPServer((host, port), Proxy)
     server.target = target
     server.daemon_threads = True
-    log("following %s, listening on %s" % (node or "(no node configured)", listen))
+    log("preferring %s; following %s, listening on %s"
+        % ("this machine" if prefer != "node" else "the compute node",
+           node or "(no node configured)", listen))
     try:
         server.serve_forever()
     except KeyboardInterrupt:

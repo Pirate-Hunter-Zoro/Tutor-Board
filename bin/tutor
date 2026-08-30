@@ -32,6 +32,7 @@ which one it is; see `tutor --agents`.
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -44,6 +45,19 @@ CONFIG_DIR = os.path.join(
     "tutor-board")
 CONFIG = os.path.join(CONFIG_DIR, "config.json")
 
+# Headless there is nobody at a terminal, so nothing can be approved while a turn
+# is running -- and a refused tool is not an error. The agent says so into a log
+# nobody opens and exits 0, which reaches the board as a tutor that answered with
+# silence: the shipped recipe could run `board recap` and then be refused the one
+# thing the turn exists to do, and nothing anywhere said so. The grant therefore
+# belongs in the recipe, and it is deliberately the narrow one -- the files a
+# tutor writes (its card, HANDOFF.md, the course's own .tex) and the board's own
+# command, which is the only thing it is ever asked to run. A course that needs
+# more adds it here rather than in the code, for the same reason a model is a
+# recipe and never a field.
+CLAUDE_HEADLESS = ["--permission-mode", "acceptEdits",
+                   "--allowedTools", "Bash(board *)"]
+
 DEFAULT_CONFIG = {
     "courses_dir": os.path.dirname(TOOL),
     "default_agent": "claude",
@@ -55,12 +69,18 @@ DEFAULT_CONFIG = {
         # takes a prompt, does the work, and exits. {prompt} is substituted.
         # Continuity across turns is the agent's own business -- most keep a
         # session and offer a flag to resume it, which is what belongs here.
+        # The default. Claude Code is a general coding agent with the course
+        # repository already in front of it, which is most of a tutor: it reads
+        # the slate PNG itself rather than through a transcription model, writes
+        # the card, and edits the course's own .tex when a homework sitting needs
+        # it. What it costs is the ~38k-token tool prompt on every turn, which is
+        # why `free` exists below and why it is still a name in this file.
         "claude": {
             "cmd": ["claude"], "prompt": "argv",
             # `headless_first` opens the session; `headless` continues it, so the
             # agent is not re-reading the whole contract on every single turn.
-            "headless_first": ["claude", "-p", "{prompt}"],
-            "headless": ["claude", "-p", "{prompt}", "--continue"],
+            "headless_first": ["claude", "-p", "{prompt}"] + CLAUDE_HEADLESS,
+            "headless": ["claude", "-p", "{prompt}", "--continue"] + CLAUDE_HEADLESS,
         },
         "opencode": {
             "cmd": ["opencode"], "prompt": "argv",
@@ -72,6 +92,11 @@ DEFAULT_CONFIG = {
         # than the opencode-style instruction prompt -- the script builds its own
         # context. It is headless-only; the interactive `cmd` is opencode, so a
         # person asking for a terminal session still gets one.
+        #
+        # It is no longer the default and is not going anywhere: it is the tutor
+        # for a machine you want to run without paying for a model, and it is
+        # still selected the same way as any other -- `--agent free`, a course's
+        # `tutorboard.json`, or this file's `hosts` and `default_agent`.
         "free": {
             "cmd": ["opencode"], "prompt": "argv",
             "raw_prompt": True,
@@ -145,6 +170,23 @@ def read_course(root):
 
 def this_host():
     return os.uname().nodename.split(".")[0]
+
+
+def missing_command(recipe):
+    """The recipe's own executable, when this machine has not got it.
+
+    Worth asking because the default is now a particular program rather than a
+    self-contained script, and two machines do not have the same tools installed.
+    An agent whose command is missing does not fail loudly: the daemon starts,
+    the board shows an assistant listening, and every turn dies in a log file. Say
+    it where somebody can still do something about it.
+
+    A script agent runs under this interpreter, which is by definition present.
+    """
+    exe = (recipe or [None])[0]
+    if not exe or os.path.basename(exe) == os.path.basename(sys.executable):
+        return None
+    return None if shutil.which(exe) else exe
 
 
 def resolve_agent(cfg, course, override=None):
@@ -597,8 +639,13 @@ def agent_start(cfg, course, agent_name, session=None):
         return 0, "%s already listening in %s" % (st.get("agent"), course["dir"])
     if not agent_name:
         return 1, "no agent resolved for %s" % course["dir"]
-    if not (cfg["agents"].get(agent_name) or {}).get("headless"):
+    spec = cfg["agents"].get(agent_name) or {}
+    if not spec.get("headless"):
         return 1, "'%s' has no headless recipe; add one in %s" % (agent_name, CONFIG)
+    gone = missing_command(spec.get("headless"))
+    if gone:
+        return 1, ("'%s' needs `%s`, which is not on the path here; "
+                   "try: tutor --agents" % (agent_name, gone))
 
     # Catch up before the assistant reads anything -- including the HANDOFF.md
     # another machine may have written at the end of the last session.
@@ -704,6 +751,14 @@ def headless(cfg, course, agent_name, session):
         print("'%s' has no headless recipe in %s.\n"
               "Add one: a command that takes a prompt, does the work, and exits."
               % (agent_name, CONFIG), file=sys.stderr)
+        return 1
+    gone = missing_command(recipe)
+    if gone:
+        print("'%s' needs `%s`, which is not on the path on %s.\n"
+              "Install it, or name another in %s -- `tutor --agents` lists what "
+              "this machine can actually run."
+              % (agent_name, gone, os.uname().nodename.split(".")[0], CONFIG),
+              file=sys.stderr)
         return 1
 
     root = course["root"]
@@ -1141,14 +1196,25 @@ def cmd_resume(cfg, args):
         return 0
 
     if on and on != host and not force:
-        # A record from another node proves nothing on a shared filesystem, so
-        # ask Slurm whether that machine is still a machine you hold. Unknown --
-        # no squeue at all -- is not the same as gone, and is left alone.
-        nodes = boardlib.slurm_nodes()
-        if nodes is None or on in nodes:
-            say("%s is on %s, which is still yours; leaving it there "
-                "(--force to move it here)" % (course["dir"], on))
-            return 0
+        # The always-on host is the exception, and deliberately: a course cloned
+        # here is taught here. It does not share a filesystem with the compute
+        # node, so a record naming that node is not something this machine can
+        # check at all -- and deferring to one would leave the machine that holds
+        # the repository and never sleeps permanently unable to host it. Bringing
+        # a board up here does not stop the other one; the proxy asks it to hand
+        # its tutor over as the address moves, which is the other half of this.
+        if boardlib.machine_shape() == "always-on host":
+            say("%s is recorded on %s; this machine holds the repository, so it "
+                "comes up here" % (course["dir"], on))
+        else:
+            # A record from another node proves nothing on a shared filesystem, so
+            # ask Slurm whether that machine is still a machine you hold. Unknown --
+            # no squeue at all -- is not the same as gone, and is left alone.
+            nodes = boardlib.slurm_nodes()
+            if nodes is None or on in nodes:
+                say("%s is on %s, which is still yours; leaving it there "
+                    "(--force to move it here)" % (course["dir"], on))
+                return 0
 
     # Not every machine you log in to is a machine you should start a board on.
     # A login node is shared, is not yours, and is where long-running processes
@@ -1249,7 +1315,10 @@ def main(argv):
             print("config: %s\n" % CONFIG)
             for n, spec in sorted(cfg["agents"].items()):
                 mark = "*" if n == cfg["default_agent"] else " "
-                print(" %s %-10s %s" % (mark, n, " ".join(spec.get("cmd", []))))
+                gone = missing_command(spec.get("cmd"))
+                print(" %s %-10s %-28s %s"
+                      % (mark, n, " ".join(spec.get("cmd", [])),
+                         "not installed here" if gone else ""))
             print("\n* is the default. Edit the config to add your own.")
             return 0
         elif a == "--homework":

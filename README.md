@@ -46,7 +46,7 @@ which kind of subject it is and the board adapts.
 > ### Where this is right now, 30 August 2026
 >
 > The Mac mini exists, and the always-on path described under
-> [Always-on](#always-on-with-the-compute-node-preferred) is running for the first time: the Mac
+> [Always-on](#always-on-with-the-machine-that-holds-the-repository-preferred) is running for the first time: the Mac
 > holds `board` on the tailnet and proxies to the compute node, which now keeps its own name.
 > Four defects came out of the first evening of two machines, and every one of them was invisible
 > from the compute node alone:
@@ -180,7 +180,7 @@ push with no assistant attribution; Tailscale in userspace mode with HTTPS; the 
 - *Always-on hosting.* There is no machine that is awake when the cluster allocation is not, so
   the iPad can only reach a board while a session is already running somewhere. The plan for
   fixing that is written up under
-  [Not yet built](#not-yet-built-always-on-with-the-compute-node-preferred) and is waiting on a
+  [Not yet built](#always-on-with-the-machine-that-holds-the-repository-preferred) and is waiting on a
   Mac mini to exist.
 
 ### Things that broke, and must not break again
@@ -198,6 +198,9 @@ these tests fail, the test is right.
 | A subscript inside `$…$` was eaten by the markdown emphasis rules | `test/markdown.js` |
 | A macro worked in the prose but not inside a `tikz` fence | `tools/sync-macros.py --check` |
 | A bootstrap test renamed the live machine on the tailnet, moving the address the iPad app used | `BOARD_STATE_DIR`, and a guard in `bootstrap.sh` |
+| A headless tutor was refused the card write it was woken to make, and exited 0 — the board showed silence | `test/agents.py` |
+| The proxy moved the address off a live compute node without asking it to wrap up, stranding a tutor that went on teaching into a copy nobody could reach | `test/choice.py` |
+| The default agent's command was not installed, so the daemon read as *listening* and failed every turn into a log | `test/agents.py` |
 | A board whose node had died read as a tutor who had not written yet — same words, and a dot the size of a full stop for a difference | `test/link.js` |
 | `board net` re-pointed the HTTPS name at a dead port, trusting a stale record from another node | `alive()` in `cmd_net` |
 | An empty maths board could not be answered, asked, or prodded from the iPad at all: the first turn needed a terminal | `test/begin.py` |
@@ -509,7 +512,7 @@ said; `export TUTOR_BOARD_NO_RESUME=1` turns it off for one shell.
 
 This is a workaround for not having an always-on machine, not a substitute for one. It still means
 the board is up only when you are logged in somewhere. The Mac mini design under
-[Not yet built](#not-yet-built-always-on-with-the-compute-node-preferred) is the real answer.
+[Not yet built](#always-on-with-the-machine-that-holds-the-repository-preferred) is the real answer.
 
 ### Surviving a reboot
 
@@ -666,7 +669,13 @@ board on the iPad from each address. Two apps, two icons, no ambiguity about whi
   "courses_dir": "~",
   "default_agent": "claude",
   "agents": {
-    "claude":   { "cmd": ["claude"],   "prompt": "argv" },
+    "claude":   { "cmd": ["claude"],   "prompt": "argv",
+                  "headless_first": ["claude", "-p", "{prompt}",
+                                     "--permission-mode", "acceptEdits",
+                                     "--allowedTools", "Bash(board *)"],
+                  "headless":       ["claude", "-p", "{prompt}", "--continue",
+                                     "--permission-mode", "acceptEdits",
+                                     "--allowedTools", "Bash(board *)"] },
     "opencode": { "cmd": ["opencode"], "prompt": "argv" },
     "aider":    { "cmd": ["aider"],    "prompt": "none" },
     "free":     { "cmd": ["opencode"], "prompt": "argv", "raw_prompt": true }
@@ -678,6 +687,26 @@ board on the iPad from each address. Two apps, two icons, no ambiguity about whi
 `prompt: "none"` launches it bare and prints the one line to paste. Add an entry for anything that
 runs in a terminal — nothing in the launcher knows which assistant it is starting.
 
+**`claude` is the default.** Claude Code arrives with the course repository already in front of it,
+which is most of a tutor: it reads the slate PNG itself rather than through a transcription model,
+writes the card, and edits the course's own `.tex` when a homework sitting needs it. What it costs
+is the ~38k-token tool prompt on every turn, which is the whole reason the next entry exists.
+
+#### What a headless tutor is allowed to do, and why that is in the recipe
+
+Headless there is nobody at a terminal, so nothing can be approved while a turn runs — and **a
+refused tool is not an error.** The agent apologises into a log nobody opens and exits 0. The
+recipe shipped without a grant did exactly that: `board recap` ran, the card write was refused, the
+process succeeded, and the board showed a tutor who had answered with silence. Nothing anywhere
+said so.
+
+So the grant is part of the command, and it is deliberately the narrow one — `acceptEdits` for the
+files a tutor writes (its card, `HANDOFF.md`, the course's own `.tex`) and `Bash(board *)` for the
+board's own command, which is the only thing it is ever asked to run. A course that needs more adds
+it to the recipe rather than to the code, which is the same reason a model is a recipe and never a
+field. `--permission-mode bypassPermissions` in place of both is the blunt version, and is nobody's
+default but yours to choose.
+
 One entry is not a terminal agent at all: **`free`** is the built-in lightweight tutor. Its
 headless turn is `bin/free`, a stdlib script that runs the lesson through `board recap`, OCRs the
 student's handwriting with a free vision model, and writes one card as a plain completion over the
@@ -685,7 +714,16 @@ free-model chain (OpenRouter `:free`, then Groq). It exists because a general co
 ~38k-token tool prompt every turn, which exhausts the free tiers; a tutoring turn is three small
 steps and this does exactly those. `raw_prompt` hands the script the raw inbox instead of the
 instruction prompt, and its interactive `cmd` is opencode, so a person asking for a terminal
-session still gets one. Use it on a machine you want to run without paying for a model.
+session still gets one.
+
+It is no longer the default and it is not going anywhere: it is what a machine you want to run
+without paying for a model runs, and it is selected like anything else — `--agent free`, a course's
+`tutorboard.json`, or `hosts` and `default_agent` in this file.
+
+An agent is a command, and two machines do not have the same commands installed. Naming a
+particular program as the default made that worth checking, so a start whose command is missing now
+refuses and says which one, instead of leaving a daemon that reads as *listening* and fails every
+turn into a log. `tutor --agents` marks what this machine cannot actually run.
 
 The brief itself is written to `live/BRIEF.md` every time, so an assistant that takes no argument
 can still be told to read it. It names the course, the mode, the session kind, and the board's
@@ -776,12 +814,32 @@ It is deliberately never fatal. No remote, no network, or a branch that has dive
 one line and the session starts anyway on what is on disk. Somebody holding an iPad cannot resolve
 a merge, and a session that refuses to start is worse than a session that starts a commit behind.
 
-### Always-on, with the compute node preferred
+### Always-on, with the machine that holds the repository preferred
 
 **The goal.** Open the app on the iPad, pick a course, get a session. No command anywhere, ever.
-The board runs on the compute node when there is one, because that is where the data and the
-hardware are, and on the Mac mini the rest of the time, because it is the machine that is always
-awake. Nothing about this is visible to the person holding the iPad.
+Nothing about how that is arranged is visible to the person holding the iPad.
+
+**Which machine serves is now decided by who has the clone.** A course cloned on the Mac mini is
+taught on the Mac mini; the compute node is for a course the Mac has not got. That is the reverse of
+how this started, and the reason it reversed is that the tutor moved: the node used to win because
+that is where the data and the hardware are, which mattered when the thing doing the teaching needed
+them. It does not any more — the tutor is Claude, reached over the network — so the better host is
+the machine that is always awake and already holds the repository, and does not take an allocation
+with it when it dies.
+
+It is one word of configuration, `follow.prefer`, and `"node"` puts the original arrangement back.
+
+**Preference settles a tie and nothing else.** A live board beats a dead one in either direction:
+an address with nothing listening behind it is the one outcome worse than the wrong machine. So the
+proxy still serves the node when only the node has a board up, whatever the preference says.
+
+**Moving the address off a live machine is not free, and is why `/handover` finally has a caller.**
+The proxy used to leave the compute node only when the node had died, and a dead machine needs no
+telling. A *preference* moves the address off a node that is alive and mid-lesson — which strands
+the tutor there: still waiting on `board wait`, still writing cards into a copy nobody can reach,
+and never given the one turn that writes `HANDOFF.md`. So the follower now asks the machine it is
+leaving to wrap up, on the transition and only on the transition. The endpoint was built for this
+moment and had no caller until there was a policy that could create it.
 
 #### The design, and the one discovery that shaped it
 
@@ -790,8 +848,8 @@ claims it, the way it moves between compute nodes today. That cannot extend to t
 ownership record lives in a shared home the Mac does not see, and macOS runs its own system
 Tailscale that cannot also be `board` in userspace mode. So it is inverted: **the Mac mini owns
 `board` permanently and proxies.** A compute node keeps its own ordinary name, and the Mac forwards
-the iPad's traffic to whichever machine is actually serving: to the node while it is up, and to the
-Mac's own warm board when it is not. The iPad's single baked-in origin never changes.
+the iPad's traffic to whichever machine is actually serving — its own board for a course it holds,
+the node for one it does not. The iPad's single baked-in origin never changes.
 
 The first draft of this assumed the proxy was a re-point of `tailscale serve` at the node. **It is
 not: `tailscale serve` accepts a remote tailnet backend in its config and then answers every
@@ -801,9 +859,11 @@ proxy instead, and points `tailscale serve` at that.
 The pieces:
 
 - **`bin/follow`** — the reverse proxy and the follower in one. A raw byte pipe (so the SSE stream
-  and uploads pass through unmodified) that probes the compute node's `/health` and flips its
-  upstream between the node and the Mac's own board. `--node`/`--listen` override the config; an
-  ad-hoc instance on another port never steals `tailscale serve`.
+  and uploads pass through unmodified) that probes both machines' `/health` and flips its upstream
+  between them, preferring its own board (`follow.prefer`, default `"local"`). It acts only when the
+  target actually changes, which is what makes asking the outgoing machine to hand over a single
+  request rather than one every thirty seconds. `--node`/`--listen`/`--prefer` override the config;
+  an ad-hoc instance on another port never steals `tailscale serve`.
 - **`scripts/install-autostart.sh --always-on`** — the course-less form, registering three
   LaunchAgents: `com.tutorboard.follow` (KeepAlive proxy), `com.tutorboard.resume`
   (StartInterval `tutor resume --quiet`, the warm board it falls back to), and
@@ -811,7 +871,8 @@ The pieces:
   the follower when the pull moves HEAD — the follower has to agree with the compute node about
   where courses live, and a process holds the code it started with).
 - **`/handover`** in `serve.py` — a secret-gated way for one machine to ask the other to wrap up
-  its tutor before the proxy moves.
+  its tutor before the proxy moves. `bin/follow` is its caller, on the transition off a remote
+  machine and only there.
 - **`boardlib.machine_shape()`** — "always-on host" (a `follow` config block), "compute node"
   (Slurm answers), or "standalone". `board doctor` prints it, and `bin/board` uses it so that on
   the always-on host the HTTPS name points at the proxy, never at a board port directly.

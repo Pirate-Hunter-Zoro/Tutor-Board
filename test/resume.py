@@ -160,6 +160,11 @@ try:
     tutor.agent_start = lambda cfg, course, name: (
         calls["agent"].append(course["dir"]) or (0, "started"))
     tutor.this_host = lambda: "compute301"
+    # What kind of machine this is decides which rule applies, and the real
+    # answer depends on whether the machine running the tests happens to have a
+    # `follow` block of its own. Pin it: everything below is the cluster rule,
+    # and the always-on rule gets its own case at the end.
+    boardlib.machine_shape = lambda: "compute node"
 
     def reset():
         for k in calls:
@@ -223,6 +228,23 @@ try:
     reset()
     tutor.cmd_resume(cfg, ["Newer", "--quiet", "--force"])
     check("and --force is how you move it anyway", calls["start"] == ["Newer"])
+
+    # --- the always-on host hosts what it holds -----------------------------
+    # A course cloned on the Mac is taught on the Mac. That machine does not
+    # share a filesystem with the compute node, so a record naming the node is
+    # not something it can check -- and the rule above, written for two cluster
+    # nodes on one home directory, left the machine that never sleeps and holds
+    # the repository permanently unable to host it. It does not stop the other
+    # board: the proxy asks that one to hand its tutor over as the address moves.
+    boardlib.machine_shape = lambda: "always-on host"
+    reset()
+    tutor.cmd_resume(cfg, ["Newer", "--quiet"])
+    check("the always-on host brings up a course it holds, whatever a record "
+          "from the compute node says", calls["start"] == ["Newer"])
+    check("and points the one address the iPad has at it", calls["link"] == ["Newer"])
+    check("and attaches a tutor, or there is a board with nobody on it",
+          calls["agent"] == ["Newer"])
+    boardlib.machine_shape = lambda: "compute node"
 
     # --- a login node is not a machine to start a board on ------------------
     # This runs from a login hook, so it gets invited to try on every machine

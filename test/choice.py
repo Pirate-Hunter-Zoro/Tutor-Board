@@ -199,6 +199,93 @@ check("and a port with a stranger on it is never handed the address",
 check("a health document with no identity in it identifies as nobody",
       not follow.identifies_as(None, "Probability"))
 
+# ---- a course cloned here is taught here -----------------------------------
+#
+# The compute node used to win whenever it was serving, because that is where the
+# data and the hardware are. It is not where the tutor is any more, so the rule is
+# inverted: the machine that never sleeps and holds the repository hosts it, and
+# the node is for a course this machine has not got. What must NOT follow from
+# that is an address pointing at nothing -- preference settles a tie between two
+# live boards and decides nothing else.
+#
+# Both sides are probed now, so the fixture has to tell them apart.
+
+anywhere = {}
+
+
+def two_sided_probe(host, port, timeout=2.0):
+    return anywhere.get((host, int(port)))
+
+
+follow.probe = two_sided_probe
+follow.active_course = lambda cands: (cands[0] if cands else None)
+follow.local_port = lambda c: boardlib.default_port(c["dir"])
+
+HERE_ = "127.0.0.1"
+NODE_ = "node"
+LOCAL = [{"dir": "Galois-Theory", "root": GAL}]
+
+# Both machines have a board for it. This is the whole feature.
+anywhere = {(HERE_, GAL_PORT): health("Galois-Theory", GAL),
+            (NODE_, GAL_PORT): health("Galois-Theory", GAL)}
+check("with a board on both machines, the one holding the repository serves it",
+      follow.choose_target(NODE_, LOCAL, "local")[0] == (HERE_, GAL_PORT))
+check("and the old arrangement is still one word in the config",
+      follow.choose_target(NODE_, LOCAL, "node")[0] == (NODE_, GAL_PORT))
+
+# Preference is not a promise to serve nothing.
+anywhere = {(NODE_, GAL_PORT): health("Galois-Theory", GAL)}
+check("a preference for this machine never beats a board that is actually up",
+      follow.choose_target(NODE_, LOCAL, "local")[0] == (NODE_, GAL_PORT))
+
+anywhere = {(HERE_, GAL_PORT): health("Galois-Theory", GAL)}
+check("and with only a local board, it is served whatever the preference says",
+      follow.choose_target(NODE_, LOCAL, "node")[0] == (HERE_, GAL_PORT))
+
+# Nothing anywhere: name the local port so the resume about to start a board
+# there lands on a live address instead of waiting to be noticed.
+anywhere = {}
+check("with nothing up anywhere the address still points where one will come up",
+      follow.choose_target(NODE_, LOCAL, "local")[0] == (HERE_, GAL_PORT))
+check("and with no courses at all it points nowhere rather than somewhere wrong",
+      follow.choose_target(NODE_, [], "local")[0] is None)
+
+# A stranger on the local port is not this course, here any more than there.
+anywhere = {(HERE_, GAL_PORT): health("Probability", PRB),
+            (NODE_, GAL_PORT): health("Galois-Theory", GAL)}
+check("a local board that is not this course does not win on being local",
+      follow.choose_target(NODE_, LOCAL, "local")[0] == (NODE_, GAL_PORT))
+
+# ---- the machine being left is asked to wrap up ----------------------------
+#
+# Moving the address off the node used to happen only when the node had died,
+# and a dead machine needs no telling. A policy that moves it off a node that is
+# alive and teaching strands the tutor there: still waiting, still writing into a
+# copy nobody can reach, and never given the one turn that writes HANDOFF.md.
+# `/handover` existed for this and had no caller until now.
+
+asked = []
+follow.handover = lambda host, port, secret, log: asked.append((host, port, secret))
+
+src = open(os.path.join(ROOT, "bin", "follow"), encoding="utf-8").read()
+check("the follower only acts when the target actually changes",
+      "if now and now != was" in src)
+check("and asks the machine it is leaving to hand over",
+      "handover(was[0], was[1], secret, log)" in src)
+check("only when leaving another machine for this one",
+      'was[0] != "127.0.0.1" and now[0] == "127.0.0.1"' in src)
+check("the handover is a POST that carries the shared secret",
+      '"X-Handover": secret' in src and 'method="POST"' in src)
+check("and a machine that cannot be asked does not block the address moving",
+      "could not ask %s to hand over" in src)
+check("an unconfigured secret is said out loud rather than silently skipped",
+      "no handover_secret configured" in src)
+
+# The preference is configuration, like everything else that differs by machine.
+check("which machine is preferred is configuration, not code",
+      '"prefer"' in src and 'follow.get("prefer")' in src)
+check("and it defaults to this one", 'or "local"' in src)
+
 # ---- the record itself -----------------------------------------------------
 
 import tempfile                                              # noqa: E402
