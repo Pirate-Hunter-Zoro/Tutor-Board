@@ -1162,10 +1162,11 @@ Everything below is optional, and each item buys something specific.
 
 5. **A `.gitignore` that keeps runtime state local and tracks the transcript** — the lesson
    transcript (`live/cards/`, `live/turns.jsonl`, `live/state.json`, `live/slate/`,
-   `live/answers/`, `live/archive/`) is versioned, so a lecture is the same whichever machine picks
-   it up. What stays ignored is the per-machine runtime: `.board.json`, `agent.json`, `board.log`,
-   the compiled figure cache, the inbox and exports. The exact block is the one this repository's
-   courses carry:
+   `live/answers/`, `live/archive/`, `live/inbox/`) is versioned, so a lecture — the cards, the
+   student's turns, their handwriting, the files they uploaded and the archive — is the same
+   whichever machine picks it up. What stays ignored is the per-machine runtime: `.board.json`,
+   `agent.json`, `board.log`, the compiled figure cache and exports. The exact block is the one
+   this repository's courses carry:
 
    ```
    live/*
@@ -1173,6 +1174,7 @@ Everything below is optional, and each item buys something specific.
    !live/slate/
    !live/answers/
    !live/archive/
+   !live/inbox/
    !live/state.json
    !live/turns.jsonl
    ```

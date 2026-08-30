@@ -267,6 +267,10 @@ teaching turn as a card in `live/cards/` and keep the terminal to a line or two.
 Check `board inbox` at the start of every turn. When the session ends, run
 `board finish` so the board can offer to save and push.
 
+**Reading handwriting.** Handwriting is a PNG, a problem sheet is a PDF. If your
+model can see images, open the file directly; if it cannot, call the
+`describe_image` tool on the file path and read the OCR it returns.
+
 **Read `live/TEACHING.md` before your first card.** It is the method every course
 on this board is taught by, and it is not optional: pick the section's exercises
 first, choose a manageable few, teach only what each one needs, pose one question,
@@ -363,7 +367,9 @@ HEADLESS_FIRST_PROMPT = (
     "They just sent this:\n\n%s\n\n"
     "That text is the inbox -- it already carries every file path, so do not run "
     "`board inbox` as well; it has been marked read and will tell you nothing. "
-    "Open anything the text names (handwriting is a PNG and has to be looked at), "
+    "Open anything the text names -- handwriting and PDFs: read them however your "
+    "model sees images, opening the file directly or calling `describe_image` on "
+    "the path and reading its OCR -- "
     "then reply by writing ONE new card into live/cards/. Do not write more than "
     "one card. Do not ask them to type in a terminal.\n\n"
     "Write that card FIRST, before any verifying, filing or handoff. It appears on "
@@ -382,8 +388,10 @@ HEADLESS_RESUME_PROMPT = (
     "nothing.\n\n"
     "They just sent this:\n\n%s\n\n"
     "That text is the inbox and carries every file path, so do not run `board "
-    "inbox` as well. Open what it names -- handwriting is a PNG and has to be "
-    "looked at -- and reply by writing ONE new card into live/cards/. Write the "
+    "inbox` as well. Open what it names -- handwriting and PDFs, read however your "
+    "model sees images (open directly, or `describe_image` on the path and read "
+    "its OCR) -- and reply by writing ONE new "
+    "card into live/cards/. Write the "
     "card FIRST; nothing else needs reading before it.\n\n"
     "Teach the way you already read: locate the break in a wrong answer rather "
     "than repairing it, one question, then stop. If you have genuinely lost the "
