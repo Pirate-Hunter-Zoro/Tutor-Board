@@ -177,6 +177,11 @@ push with no assistant attribution; Tailscale in userspace mode with HTTPS; the 
 - *Headless mode.* `tutor headless` has never been run against a real agent end to end. The
   `headless` recipes in the config are best guesses at each tool's non-interactive flags. The
   wrap-up turn that writes `HANDOFF.md` rides on that path and is equally unexercised.
+- *What a usage limit actually prints.* The phrases in `usage_limit_says` are what the default
+  agent is documented to say, not text anyone here has watched it emit. Everything downstream of
+  the match is under test; the match itself is only confirmed the first time an allowance really
+  runs out. If it turns out to say something else, that is one list in the config and no code —
+  and the failure mode of a miss is the old behaviour, a turn that failed, rather than anything new.
 - *Always-on hosting.* There is no machine that is awake when the cluster allocation is not, so
   the iPad can only reach a board while a session is already running somewhere. The plan for
   fixing that is written up under
@@ -722,7 +727,10 @@ session still gets one.
 
 It is no longer the default and it is not going anywhere: it is what a machine you want to run
 without paying for a model runs, and it is selected like anything else — `--agent free`, a course's
-`tutorboard.json`, or `hosts` and `default_agent` in this file.
+`tutorboard.json`, or `hosts` and `default_agent` in this file. It is also the floor the whole
+arrangement stands on. When the paid tutor's allowance runs out and no compute node can pick the
+lesson up, this is what answers — see [when the allowance runs
+out](#when-the-allowance-runs-out).
 
 An agent is a command, and two machines do not have the same commands installed. Naming a
 particular program as the default made that worth checking, so a start whose command is missing now
@@ -761,6 +769,12 @@ particular assistant regardless of where it runs. Four layers settle it, most sp
 **A model is not a layer, and must never become one.** An agent entry is a command recipe, so a
 second model is a second entry whose `cmd` carries the flag — which is why "opencode with DeepSeek"
 and "opencode with something else" are two names in this file and nothing in the code changes.
+
+**`fallback_agent` is not a fifth layer either.** The four above answer *which assistant this course
+wants*; the fallback answers *what to do when the one it wants has nothing left to spend*. It is one
+name — `free` by default, `null` to turn the whole thing off — and it is used only after a turn has
+failed on a usage limit and no other machine has taken the lesson over. Nothing falls back from it,
+which is the point of it being the free one.
 
 ### The assistant belongs to the course, not to the terminal
 
@@ -836,6 +850,19 @@ It is one word of configuration, `follow.prefer`, and `"node"` puts the original
 **Preference settles a tie and nothing else.** A live board beats a dead one in either direction:
 an address with nothing listening behind it is the one outcome worse than the wrong machine. So the
 proxy still serves the node when only the node has a board up, whatever the preference says.
+
+**Nor is it a tie when a machine has nothing left to spend.** A tutor whose usage limit has been
+reached is the strangest kind of broken: the board answers, the machine is healthy, the network is
+fine, the agent is installed, and no lesson can be taught. Preference is about which machine is the
+better host, and a machine that cannot teach is not a host at all — so it stands aside, and gets the
+address straight back when the allowance returns. That gives one order, best to worst:
+
+```
+the Mac mini on Claude   →   a compute node on Claude   →   the Mac mini on whatever is free
+```
+
+Each step is taken only when the one above it cannot be. The first two are the proxy's doing and the
+last is the tutor's own; the section below is how the three fit together.
 
 **Moving the address off a live machine is not free, and is why `/handover` finally has a caller.**
 The proxy used to leave the compute node only when the node had died, and a dead machine needs no
@@ -927,6 +954,69 @@ became unrestartable while still answering perfectly.
 > allocations, because it is a different machine each time and every ownership check depends on
 > that being true — `board start` will not pin on a host where Slurm answers, and `board node
 > --unpin` undoes one that was set by mistake.
+
+#### When the allowance runs out
+
+The failure this handles is not a fault. Everything works and there is simply nothing left to spend:
+the agent says so, exits non-zero, and every turn after it does the same until a clock somewhere
+rolls over. Treated as an ordinary broken turn it is invisible in the worst way — the board shows a
+tutor listening, the student sends again, and nothing comes back for four hours.
+
+It is also the one failure with a genuinely better machine to run to, which is why it is worth
+detecting at all. There are three moves, and they are taken in order.
+
+**1. Notice, and say so where the other machine can hear it.** A turn that has already failed has
+its output read back for the phrases a provider uses. Only a *failed* turn — reading every
+successful one for the words "rate limit" finds them in the lesson, because a course on queueing
+theory says them in earnest. What a limit looks like is `usage_limit_says` in the config, a list of
+patterns, for the same reason `egress_probe` is a list of URLs: the board is not allowed to know
+which assistant is driving it, so the provider is named in one default value and nowhere else.
+
+The record is per **machine**, not per course — an allowance belongs to an account and every board
+here is equally unable to spend one — and it carries an expiry rather than a flag. Claude Code names
+the epoch second the limit lifts and that is believed over any window we could guess; without one it
+is an hour. A limit that has to be cleared by hand is a limit that outlives itself and quietly
+demotes a machine for days.
+
+`/health` publishes it, for exactly the reason `/health` publishes the chosen course: only the
+machine that hit the limit can know about it, and the Mac cannot read the compute node's filesystem.
+A board too old to publish the field is not assumed to be exhausted — silence is an allowance.
+
+**2. Let a compute node take the lesson, if one is up with an allowance of its own.** The follower
+passes over a preferred machine that has none, and the move ends the way every move between machines
+now does: with `/handover`, so the outgoing tutor gets the turn that writes `HANDOFF.md` instead of
+being orphaned. That call used to fire in one direction only, because the address only ever left the
+node when the node had died and a dead machine needs no telling. An allowance moves it off a machine
+that is alive and mid-lesson, so both directions now carry a live tutor — and `handover` declines to
+bother a host that is not answering, which is what stops a dead node costing a request timeout on
+every move away from it.
+
+**3. Only then, teach with what is free.** The tutor whose allowance ran out does not answer straight
+away. It pushes the transcript — the message it has just failed to answer is in there, and the beat
+that would have carried it is the beat there is no time for — and then waits one proxy tick
+(`takeover_grace`, 45s; the follower re-decides every 30) to see whether it gets stopped. If it does,
+a compute node has the address and that is the better outcome; the wait is the only thing that lets
+it win the race. If nothing takes the lesson, it falls back to `fallback_agent` — `free` by default —
+and answers the message it was holding. A free-model answer beats a board where nobody is home.
+
+What is *not* claimed here: that the message crosses the wire with the address. It goes into the
+repository, and the node pulls on its own 90-second beat, so whether the node's `board wait` wakes on
+it or the student sends again is the same open question an allocation dying mid-lesson has always
+had. The address moving is the part that is certain.
+
+Coming back up is the same three steps in reverse and nobody types anything. The limit expires, or a
+turn goes through and proves the allowance is back before the clock said it would; the tutor climbs
+out of the fallback at the top of its next turn, `/health` stops saying it is exhausted, and the
+address comes home on the following tick.
+
+```
+board limit              has the allowance here run out, and until when
+board limit --clear      it came back early; stop waiting out the guess
+```
+
+`board doctor` names it too. The one thing worth knowing: if both machines run the same account,
+they run out together, and step 2 is skipped every time — the node publishes a limit of its own and
+the proxy keeps the address here. That is correct and it is also the whole reason step 3 exists.
 
 #### Exit nodes, which are invisible until they are not
 
@@ -1463,6 +1553,7 @@ board hw build                   # compile it; the result lands on the board
 board hw file 7.2                # file a sent page into the set's handwritten/
 board vpn up|status|serve|down   # the Tailscale link
 board doctor                     # is this machine equipped
+board limit                      # has the tutor's allowance here run out
 board stop
 ```
 
@@ -2031,6 +2122,8 @@ python3 test/annotate.py that marks on a card are anchored to it and can be sent
 python3 test/begin.py    that the first turn of a session can come from the device
 python3 test/homework.py that a sitting finds its problem set, in either layout
 python3 test/teaching.py that the teaching method reaches every course
+python3 test/choice.py   that the address follows the course a person chose
+python3 test/limit.py    that a lesson moves to a machine with an allowance to teach it
 
 bash test/all.sh         all of the above, in order. The two real-DOM suites need
                          jsdom; this fetches it on first run and carries on

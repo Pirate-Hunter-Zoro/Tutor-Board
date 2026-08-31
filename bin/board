@@ -32,6 +32,7 @@ The assistant runs these. The student never does.
     board doctor                       check the machine has what this needs
     board node [name|--unpin]          what this machine calls itself, pinned
     board egress [--repair]            can a turn get out, and through which exit node
+    board limit [--clear|--set S]      has the tutor's allowance here run out
     board eyes [--answer]              can the assistant driving this actually see?
 
 Card kinds: lesson, question, correct, wrong, review, note, recap.
@@ -1779,6 +1780,45 @@ def machine_shape():
     return boardlib.machine_shape()
 
 
+def cmd_limit(live, args):
+    """Whether this machine's tutor has any allowance left, and until when.
+
+        board limit              report
+        board limit --clear      say the allowance is back, now
+        board limit --set 3600   say it is gone for this many seconds
+
+    The record is per machine rather than per course, because an allowance
+    belongs to an account and every board here is equally unable to spend one.
+    It is written by a tutor whose turn failed saying so, it expires by itself,
+    and it is published in `/health` -- which is how the always-on host knows to
+    hand the address to a compute node that still has one.
+
+    `--clear` exists because a provider's reset time is a promise: an allowance
+    that came back early should not have to wait out a guess. A turn going
+    through clears it too, without anyone typing anything.
+    """
+    rec = boardlib.limit_record()
+    if "--set" in args:
+        n = args[args.index("--set") + 1] if args.index("--set") + 1 < len(args) else "3600"
+        boardlib.mark_limited(time.time() + float(n))
+        print("marked out of allowance for %ss" % n)
+        return 0
+    if "--clear" in args:
+        print("cleared" if boardlib.clear_limited() else "nothing was recorded")
+        return 0
+    if not rec:
+        print("allowance: fine  (nothing recorded on %s)" % this_node())
+        return 0
+    left = float(rec["until"]) - time.time()
+    print("allowance: GONE until %s  (%d min)"
+          % (time.strftime("%H:%M", time.localtime(rec["until"])), left / 60))
+    print("agent:     %s" % (rec.get("agent") or "unknown"))
+    print("\nthe address moves to a compute node that has one, if one is up;")
+    print("otherwise this machine teaches with `fallback_agent`.")
+    print("clear it early with:  board limit --clear")
+    return 0
+
+
 def cmd_egress(live, args):
     """Can a turn actually leave this machine, and through where.
 
@@ -1895,6 +1935,11 @@ def cmd_doctor(live, args):
         print("          the system currently says '%s'; the pinned name is what "
               "every record uses" % sysname)
     print("port:     %d (default for this repo)" % default_port(live.root))
+    lim = boardlib.limit_record()
+    if lim:
+        print("allowance: GONE until %s — '%s' has nothing left to spend here"
+              % (time.strftime("%H:%M", time.localtime(lim["until"])),
+                 lim.get("agent") or "the tutor"))
     xn = boardlib.exit_node()
     if xn:
         print("exit node: %s  (every request a tutor makes leaves from there)"
@@ -1920,7 +1965,7 @@ COMMANDS = {
     "net": cmd_net, "vpn": cmd_vpn, "init": cmd_init, "eyes": cmd_eyes,
     "finish": cmd_finish, "push": cmd_push, "history": cmd_history,
     "hw": cmd_hw, "recap": cmd_recap, "node": cmd_node,
-    "egress": cmd_egress,
+    "egress": cmd_egress, "limit": cmd_limit,
 }
 
 

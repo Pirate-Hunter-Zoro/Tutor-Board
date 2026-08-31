@@ -21,6 +21,19 @@ Preference only settles a tie. A live board always beats a dead one, in either
 direction: handing the iPad an address with nothing listening on it is worse
 than serving from the machine that was not preferred.
 
+Nor is it a tie when a machine has run out of allowance. A board whose tutor has
+been told it has no quota left is still answering, still healthy, and still
+unable to teach, so it loses the preference to a machine that can -- and gets it
+straight back the moment the allowance returns, or when nothing else is up. That
+gives one order, best first, each step taken only when the one above it cannot be:
+
+    this machine on the paid tutor  ->  the compute node  ->  this machine on
+    whatever it can run for free
+
+The last step is the tutor's own doing rather than the proxy's: when both
+machines are exhausted the address stays here, and the tutor here has by then
+fallen back to the free agent. See `fallback_agent` in bin/tutor.
+
 Which machine serves is decided by a probe, not by a record: `http://<node>:<port>/health`
 answers with the repository root for a board that is genuinely up, and the port
 is a fixed function of the course directory name, so the same course has the same
@@ -172,6 +185,23 @@ def identifies_as(health, name):
     return who == name
 
 
+def limited(host, port, timeout=2.0):
+    """Has this machine's tutor been told its allowance has run out?
+
+    Asked of the board rather than of the filesystem, because for the compute
+    node there is no filesystem to ask -- the limit is written on the machine
+    that hit it, and /health is the only way across. A board that does not
+    publish the field at all is an older one, and an older one is not limited.
+    """
+    health = probe(host, port, timeout=timeout)
+    if not health:
+        return False
+    try:
+        return float(health.get("limited") or 0) > time.time()
+    except (TypeError, ValueError):
+        return False
+
+
 def find_course(node, c, timeout=2.0):
     """The port this one course is answering on, or None.
 
@@ -270,15 +300,36 @@ def choose_target(node, cands, prefer="local"):
     machine. When nothing is up anywhere the local port is still named, so the
     resume that is about to start a board there lands on a live address rather
     than waiting for the next tick to be noticed.
+
+    And a board with an allowance beats one without, also whichever way the
+    preference points. That is the only reason the preferred machine is ever
+    passed over while it is up and well: it is up, it is well, and its tutor has
+    been told it has nothing left to spend. Being out of allowance still beats
+    being down -- the last two lines of the loop are what put the address back
+    here when the node is exhausted too, and by then the tutor here has fallen
+    back to what it can run for free.
+
+    The node is probed only when the preferred machine cannot serve. On an
+    ordinary day that never happens, and probing a machine that is not there
+    costs a timeout for every course.
     """
     local = local_target(cands) if cands else None
-    if prefer != "node" and local:
+    if prefer != "node" and local and not limited(*local):
         return local, "here"
     remote = remote_target(node, cands)
-    if remote:
-        return remote, "the compute node"
-    if local:
-        return local, "here"
+
+    # Preference first, allowance ahead of it. Evaluated once each: every one of
+    # these questions is a request over the network.
+    order = [(remote, "the compute node"), (local, "here")] if prefer == "node" \
+        else [(local, "here"), (remote, "the compute node")]
+    order = [(t, w, limited(*t)) for t, w in order if t]
+    for t, w, out in order:
+        if not out:
+            return t, w
+    if order:
+        t, w, _ = order[0]
+        return t, w + " (out of allowance, and so is everywhere else)"
+
     active = active_course(cands) if cands else None
     if active:
         return ("127.0.0.1", local_port(active)), "here (nothing up yet)"
@@ -300,6 +351,11 @@ def handover(host, port, secret, log):
     """
     if not secret:
         log("no handover_secret configured; %s keeps its tutor" % host)
+        return
+    # A machine that is not answering has no tutor to wrap up, and asking it
+    # anyway spends the request timeout on every move away from a host that has
+    # died -- which is most of them.
+    if not probe(host, port, timeout=2.0):
         return
     req = urllib.request.Request("http://%s:%d/handover" % (host, port),
                                  data=b"", method="POST",
@@ -399,10 +455,17 @@ def follower(target, node, cands, log, prefer="local", secret=None):
     while True:
         now, where = choose_target(node, cands, prefer)
         if now and now != was:
-            # Coming off the compute node and onto this machine is the one move
-            # that strands a tutor, because the node goes on running perfectly
-            # well with nobody able to reach it.
-            if was and was[0] != "127.0.0.1" and now[0] == "127.0.0.1":
+            # Any move between machines strands a tutor, because the machine
+            # being left goes on running perfectly well with nobody able to
+            # reach it -- still waiting, still writing cards into a copy the
+            # iPad cannot see, and never given the turn that writes HANDOFF.md.
+            # It used to be worth saying only in one direction, because the
+            # address only ever left the node when the node had died and a dead
+            # machine needs no telling. Now that an allowance can move the
+            # address off a machine that is alive and mid-lesson, both
+            # directions carry a live tutor, and `handover` itself is what
+            # declines to bother a host that is not answering.
+            if was and was[0] != now[0]:
                 handover(was[0], was[1], secret, log)
             log("serving %s at %s:%d" % (where, now[0], now[1]))
             target.set(now[0], now[1])

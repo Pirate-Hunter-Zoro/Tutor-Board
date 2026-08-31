@@ -272,8 +272,10 @@ check("the follower only acts when the target actually changes",
       "if now and now != was" in src)
 check("and asks the machine it is leaving to hand over",
       "handover(was[0], was[1], secret, log)" in src)
-check("only when leaving another machine for this one",
-      'was[0] != "127.0.0.1" and now[0] == "127.0.0.1"' in src)
+check("whenever the address leaves one machine for another, in either direction",
+      "was[0] != now[0]" in src)
+check("and a machine that is not answering is not asked at all",
+      "if not probe(host, port, timeout=2.0):" in src)
 check("the handover is a POST that carries the shared secret",
       '"X-Handover": secret' in src and 'method="POST"' in src)
 check("and a machine that cannot be asked does not block the address moving",

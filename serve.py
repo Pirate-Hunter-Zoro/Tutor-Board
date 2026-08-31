@@ -1568,9 +1568,16 @@ class Handler(BaseHTTPRequestHandler):
             # `dir` so a caller can confirm it reached the course it meant --
             # ports are derived from names and derivation is not proof. `chosen`
             # so the always-on host can follow a decision instead of a race.
+            # `limited` so it can follow an allowance too: a board answering
+            # perfectly well whose tutor has been told it is out of quota is
+            # still up, and is still the wrong machine to hand a lesson to.
+            # Only the machine serving can know that -- the limit is written by
+            # its own tutor into its own state directory -- so it is published
+            # here for the same reason the choice is.
             return self.send_json({"ok": True, "root": repo.root,
                                    "dir": os.path.basename(repo.root),
-                                   "chosen": chosen_target()})
+                                   "chosen": chosen_target(),
+                                   "limited": boardlib.limited_until()})
         return self.send_bytes(b"not found", "text/plain", status=404)
 
     def do_HEAD(self):

@@ -112,6 +112,19 @@ DEFAULT_CONFIG = {
     # not need different configuration files to say so. Empty means every
     # machine falls through to default_agent.
     "hosts": {},
+    # What this machine teaches with when the tutor above it has no allowance
+    # left. It is the bottom of the order and nothing falls back from it, which
+    # is the point: `free` costs nothing, so there is always something able to
+    # answer. Set it to null on a machine where a free-model answer would be
+    # worse than a board that says nobody is home.
+    "fallback_agent": "free",
+    # How long a tutor that has just run out of allowance holds the student's
+    # message before answering it on the fallback. Long enough for the always-on
+    # host's proxy to notice (it re-decides every 30s) and hand the lesson to a
+    # compute node that still has an allowance, which is a better answer than
+    # this machine can now give. Nobody is kept waiting who was not already
+    # waiting: the turn they are owed has already failed.
+    "takeover_grace": 45,
     "headless_timeout": 900,
     # How long the wrap-up turn gets. It is one turn, but it writes files.
     "handoff_timeout": 600,
@@ -184,6 +197,61 @@ def missing_command(recipe):
     if not exe or os.path.basename(exe) == os.path.basename(sys.executable):
         return None
     return None if shutil.which(exe) else exe
+
+
+def fallback_agent(cfg, current):
+    """What this machine teaches with when the tutor it wants has nothing left.
+
+    A name in the config, chosen the same way every other assistant is, and it
+    has to be one this machine can actually run: an agent whose command is
+    missing does not fail loudly, it shows a tutor listening while every turn
+    dies in a log file -- which is the whole reason `missing_command` exists.
+
+    None when there is nothing below where we already are. Falling back to
+    yourself is not a fallback.
+    """
+    name = cfg.get("fallback_agent")
+    if not name or name == current:
+        return None
+    spec = cfg["agents"].get(name) or {}
+    if not spec.get("headless") or missing_command(spec.get("headless")):
+        return None
+    return name
+
+
+def turn_output(path, offset, cap=20000):
+    """What this turn wrote to the log, which is everything it managed to say.
+
+    An agent's stdout and stderr both go straight into the log file, so the only
+    record of WHY a turn failed is the stretch of that file it has just written.
+    The tail of it is enough, and the cap is there because a turn that dumped a
+    repository into its output must not be read back into memory whole.
+    """
+    try:
+        size = os.path.getsize(path)
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            fh.seek(max(0, offset, size - cap))
+            return fh.read()
+    except OSError:
+        return ""
+
+
+def wait_for_takeover(running, seconds):
+    """Hold still long enough for another machine to be handed the lesson.
+
+    The proxy on the always-on host re-decides where the address points on a
+    fixed tick, and a move ends by asking the machine it is leaving to hand
+    over -- which stops this daemon. So "did anybody take this lesson?" is a
+    question we can simply wait for the answer to, and this wait is the only
+    thing standing between a student and a free-model answer to a question a
+    paid tutor on another machine was a few seconds from picking up.
+
+    True if we were stopped while waiting, which means somebody did.
+    """
+    end = time.time() + max(0.0, float(seconds or 0))
+    while running["go"] and time.time() < end:
+        time.sleep(1)
+    return not running["go"]
 
 
 def resolve_agent(cfg, course, override=None):
@@ -761,8 +829,13 @@ def headless(cfg, course, agent_name, session):
     root = course["root"]
     live = os.path.join(root, "live")
     os.makedirs(live, exist_ok=True)
-    log = open(os.path.join(live, "agent.log"), "a", buffering=1)
+    logpath = os.path.join(live, "agent.log")
+    log = open(logpath, "a", buffering=1)
     host = this_host()
+    # The assistant this machine is configured to use, kept apart from the one
+    # it is using: an allowance that runs out swaps the second for something
+    # cheaper, and when it comes back the first is what we climb home to.
+    wanted = agent_name
 
     board(root, "start")
     link(root)
@@ -837,6 +910,16 @@ def headless(cfg, course, agent_name, session):
                 agent_state(live, state="listening")     # timed out; still alive
                 continue
 
+        # The allowance came back: climb out of the fallback before spending a
+        # turn on it. Asked here rather than on a timer because a turn is the
+        # only moment the answer changes anything, and it is a file on this
+        # machine either way.
+        if agent_name != wanted and not boardlib.limited_until():
+            log.write("-- the allowance is back; '%s' takes the lesson again\n" % wanted)
+            agent_name, spec = wanted, cfg["agents"][wanted]
+            recipe, carried = spec.get("headless"), 0
+            agent_state(live, agent=agent_name, fallback=False)
+
         turns += 1
         agent_state(live, state="working", turns=turns)
         log.write("\n=== %s turn %d ===\n%s\n" % (time.strftime("%H:%M:%S"), turns, out))
@@ -874,6 +957,9 @@ def headless(cfg, course, agent_name, session):
         # expect -- its whole state is on disk and it re-reads what it needs.
         prompt = out.strip() if spec.get("raw_prompt") else template % out.strip()
         cmd = [a.replace("{prompt}", prompt) for a in use]
+        # Where this turn's own words begin, so that if it fails we can read
+        # back what it said rather than guess at why.
+        mark = os.path.getsize(logpath) if os.path.exists(logpath) else 0
         try:
             p = subprocess.run(cmd, cwd=root, stdout=log, stderr=subprocess.STDOUT,
                                timeout=cfg.get("headless_timeout", 900))
@@ -901,13 +987,66 @@ def headless(cfg, course, agent_name, session):
 
         if err:
             log.write("!! %s\n" % err)
-            # A failed turn has two very different causes and they need telling
-            # apart. The model refusing, or the agent falling over, is nothing
-            # this can fix. The machine being unable to reach the provider at all
-            # is -- and on a host routing everything through an exit node it is
-            # the likelier one, because commercial VPN egress is exactly what a
-            # provider geo-blocks or challenges. The symptom is identical from
-            # here: a turn that failed. So ask the network, rather than guess.
+            # A failed turn has three very different causes wearing one symptom,
+            # and they need telling apart. The model refusing, or the agent
+            # falling over, is nothing this can fix. The machine being unable to
+            # reach the provider at all is. And the allowance having run out is
+            # neither: nothing is broken, and the same turn will succeed later
+            # with not one thing changed.
+            #
+            # The allowance is asked about first because it is the one the turn
+            # itself answers -- the agent said so in its output, and a provider
+            # that could say so is a provider we plainly reached, which settles
+            # the egress question at the same time and for free.
+            until = boardlib.reads_as_usage_limit(turn_output(logpath, mark))
+            if until:
+                boardlib.mark_limited(until, agent=agent_name)
+                log.write("!! '%s' is out of allowance here until %s\n"
+                          % (agent_name,
+                             time.strftime("%H:%M", time.localtime(until))))
+                agent_state(live, state="listening", last_error="out of allowance",
+                            limited=until)
+                # The student sent something and got nothing. Whoever ends up
+                # answering it, it is the same message.
+                pending = out
+
+                # Push the lesson before standing aside, rather than waiting
+                # for the next beat. Whoever picks this up reads it out of the
+                # repository, and that includes the message we have just failed
+                # to answer -- so the beat that would have carried it is exactly
+                # the beat we have no time for.
+                sync_transcript(root, log)
+
+                # Now the order, which is the whole point of this branch. This
+                # machine's /health has just started saying it is out, so the
+                # always-on host's proxy will hand the address to a compute node
+                # that still has one -- and that move ends in `/handover`, which
+                # stops this daemon. So: wait one tick before answering. A
+                # compute node on the paid tutor is a better answer than this
+                # machine on a free model, and the wait is the only thing that
+                # lets it win the race.
+                if wait_for_takeover(running, cfg.get("takeover_grace", 45)):
+                    log.write("-- another machine has taken the lesson over\n")
+                    break
+
+                # Nobody took it -- no node is up, or the node has run out too.
+                # A free tutor is now the best this address can do, and it is a
+                # great deal better than a board where nobody answers.
+                alt = fallback_agent(cfg, agent_name)
+                if alt:
+                    log.write("-- no machine took it over; falling back to '%s'\n" % alt)
+                    agent_name, spec = alt, cfg["agents"][alt]
+                    recipe, carried = spec.get("headless"), 0
+                    agent_state(live, agent=agent_name, fallback=True)
+                else:
+                    log.write("!! nothing else on this machine can teach; turns "
+                              "will fail until the allowance returns\n")
+                continue
+
+            # Not a limit. On a host routing everything through an exit node the
+            # likeliest remaining cause is that nothing can get out at all,
+            # because commercial VPN egress is exactly what a provider
+            # geo-blocks or challenges. So ask the network, rather than guess.
             #
             # Only when a turn has actually failed. Probing on every turn would
             # add a round trip to the internet to every card the student waits
@@ -930,12 +1069,32 @@ def headless(cfg, course, agent_name, session):
             agent_state(live, state="listening", last_error=err)
         else:
             carried = 1 if fresh else carried + 1
+            # A turn that worked on the agent we actually want is proof the
+            # allowance is back, whatever the record still says. The reset time
+            # a provider hands out is a promise, and this is a measurement.
+            if agent_name == wanted and boardlib.limited_until():
+                log.write("-- a turn went through; the allowance is back\n")
+                boardlib.clear_limited()
             agent_state(live, state="listening", last_error=None)
 
     # The last turn, and the only one the student never sees.
     if turns:
         agent_state(live, state="wrapping up")
         log.write("\n=== %s handoff ===\n" % time.strftime("%H:%M:%S"))
+        # The handoff is the one turn that must not be skipped -- it is the only
+        # continuity the machine taking over has -- and a tutor stopped because
+        # its allowance ran out cannot write it. So whatever this machine can
+        # run for free writes it instead. A handoff in the free tutor's words is
+        # worth incomparably more than no handoff at all, and this is the exact
+        # moment `/handover` produces: the address has moved, and the last thing
+        # asked of the machine being left is the one thing it can no longer do.
+        if boardlib.limited_until():
+            alt = fallback_agent(cfg, agent_name)
+            if alt:
+                log.write("-- '%s' has no allowance left for the handoff; "
+                          "'%s' writes it\n" % (agent_name, alt))
+                spec = cfg["agents"][alt]
+                recipe = spec.get("headless")
         # A script agent may have its own way to write the handoff; default to the
         # ordinary turn recipe otherwise.
         wrap = spec.get("handoff") or recipe
