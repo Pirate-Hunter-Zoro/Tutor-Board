@@ -754,6 +754,7 @@ function render(data) {
   });
   var owed = !!newestQ && !settled;
 
+  lastNewestQ = newestQ || "";
   if (reopenedFor !== null && reopenedFor !== (newestQ || "")) reopenedFor = null;
   if (reopenedFor !== null && !data.archived) owed = true;
 
@@ -831,8 +832,22 @@ function render(data) {
   }
   /* A past lesson is read only: no pen, no box, nothing to send into a session
      that has already been filed. */
-  placeWriter(owed && !data.archived, qNode);
-  paintBoards(qids, runEndOf, onQ, !!data.archived || !!reading || els.writer.hidden);
+  var live = !data.archived && !reading;
+  placeWriter(owed && !data.archived, qNode, live);
+  /* The boards do not come and go with the answer panel.
+
+     They used to: the whole set was torn down the moment nothing was owed, which
+     is the moment the tutor writes a `correct` card. So getting an exercise
+     RIGHT deleted every board on the page, and scrolling back up through the
+     lesson found nothing but the frozen pictures of what had been sent -- which
+     is a record of the answer, not a place to carry on working. Reported from
+     the device, in exactly those words: "I want the actual writing board
+     containing my response".
+
+     The one board that is not drawn is the question the LIVE surface is sitting
+     under, because that one is really there. With the panel shut there is no
+     such question, and every one of them gets its picture. */
+  paintBoards(qids, runEndOf, els.writer.hidden ? null : onQ, !live);
   /* Offered exactly when there is no surface to write on: the tutor has written
      something, and nothing is owed. */
   if (els.reopen) {
@@ -1991,6 +2006,11 @@ var loadedTurn = null;
 /* Which question the student asked for the surface back on, or null for "not
    asked". Empty string means "asked, on a lesson with no open question". */
 var reopenedFor = null;
+/* The newest question as of the last render. The button below used to walk the
+   card list itself and take the last question in payload order, while `render`
+   takes the newest by mtime -- two answers to one question, and the request
+   expiring the instant it was made if they ever disagreed. */
+var lastNewestQ = "";
 /* Which question they are answering, if they went back to an earlier one. */
 var workingOn = null;
 /* Which slate page belongs to which question.
@@ -2051,7 +2071,11 @@ function boardSlot(qid) {
     + ' decoding="async" loading="lazy">';
 
   var goLive = function (ev, andSend) {
-    if (workingOn === qid) return;
+    if (workingOn === qid && !els.writer.hidden) return;
+    /* Touching a board is asking to write on that question, and `workingOn` is
+       already the whole of that ask: an answer is owed wherever it points, so
+       this opens the panel on a lesson the tutor has marked right without
+       needing a second flag to say so. */
     workingOn = qid;
     reopenedFor = null;
     if (lastLive) render(lastLive);
@@ -2233,13 +2257,23 @@ function tickBusy() {
    backwards. What is left in the layout is `--gap` on `#writer`: the strip of
    page down each side that is there to put a thumb on. */
 
-function placeWriter(owed, questionNode) {
+function placeWriter(owed, questionNode, live) {
   els.writer.hidden = !owed;
   /* The tool bar is fixed to the bottom of the window, so the page has to give
      up the height it occupies or the last card sits underneath it. */
   document.body.classList.toggle("tools-out", !!owed);
   paintPanel();
-  if (!owed) return;
+  if (!owed) {
+    /* The panel is shut and the pages behind it are still the lesson's: every
+       dormant board is a picture drawn from them, so with no surface built there
+       is nothing to draw and the transcript comes back as photographs of sent
+       answers alone. Build it anyway on a live lesson -- hidden, unlaid-out and
+       costing what one surface has always cost -- and re-render once, now that
+       there is something to take pictures with. A filed lesson and a past one
+       build nothing: there is no writing to be done in either. */
+    if (live) makeWriter(function () { if (lastLive) render(lastLive); });
+    return;
+  }
 
   /* The anchor is looked up by card id now, so it can be any node in the lesson
      rather than only the last child -- which means checking it is actually IN
@@ -2251,7 +2285,17 @@ function placeWriter(owed, questionNode) {
     els.cards.appendChild(els.writer);
   }
 
-  if (!writer && window.Slate) {
+  if (!makeWriter(restoreAnswer) && writer) {
+    requestAnimationFrame(writer.relayout);
+    restoreAnswer();
+  }
+}
+
+/* The one place the surface is built. Returns whether it started building one --
+   `false` means there is already one, or this browser has no Slate at all. */
+function makeWriter(then) {
+  if (writer || !window.Slate) return false;
+  {
     requestAnimationFrame(function () {
       writer = window.Slate.create({
         root: document.getElementById("slate"),
@@ -2277,12 +2321,10 @@ function placeWriter(owed, questionNode) {
         beforeSend: askWhatToSend,
       });
       window.__writerDebug = writer.debug;
-      restoreAnswer();
+      if (then) then();
     });
-  } else if (writer) {
-    requestAnimationFrame(writer.relayout);
-    restoreAnswer();
   }
+  return true;
 }
 
 /* Put the right page under the pen for whichever question is being answered, and
@@ -2426,15 +2468,38 @@ function restoreTextDraft() {
   autosize();
 }
 
-/* Which surface an old question reopens on: the one it was answered with, else
-   the globally remembered choice. */
+/* Which surface a question opens on: what the person actually asked for on THIS
+   question, else the one it was answered with, else the remembered choice.
+
+   The order matters and it was wrong. A question already answered in ink
+   returned "write" from its history whatever the tabs were told, so pressing
+   *type* on a question you had written an answer to did nothing at all -- it set
+   the remembered kind, repainted, and the history overruled it again on the way
+   back. Which is every question worth typing about: you write the proof, the
+   tutor asks what you meant by a line of it, and the answer to that is a
+   sentence.
+
+   Same shape as `chosen.json` on the other side of the wire: a decision
+   outranks an inference drawn from what happens to be on disk, and the decision
+   is the one thing the files cannot tell you. */
+var pickedKind = {};
+
 function panelKind() {
+  var q = answering.question;
+  if (q && pickedKind[q]) return pickedKind[q];
   var t = answering.latest;
   if (t) {
     if (t.kind === "ink" || t.kind === "annotation") return "write";
     if (t.kind === "text" && !t.signal) return "type";
   }
   return answerKind();
+}
+
+/* A tab press, recorded against the question it was pressed on. */
+function pickKind(kind) {
+  if (answering.question) pickedKind[answering.question] = kind;
+  setAnswerKind(kind);
+  paintPanel();
 }
 
 /* The write half or the type half, decided by the question's own history and the
@@ -2499,8 +2564,8 @@ function say(signal) {
   });
 }
 
-els.tabWrite.onclick = function () { setAnswerKind("write"); paintPanel(); };
-els.tabType.onclick = function () { setAnswerKind("type"); paintPanel(); };
+els.tabWrite.onclick = function () { pickKind("write"); };
+els.tabType.onclick = function () { pickKind("type"); };
 
 function sendTyped() {
   var sig = pendingSignal;
@@ -2709,11 +2774,7 @@ els.begin.onclick = function () {
 };
 if (els.reopen) {
   els.reopen.onclick = function () {
-    var q = null;
-    (lastLive && lastLive.cards || []).forEach(function (c) {
-      if (c.kind === "question") q = c.id;
-    });
-    reopenedFor = q || "";
+    reopenedFor = lastNewestQ;
     workingOn = null;
     els.reopen.hidden = true;
     if (lastLive) render(lastLive);

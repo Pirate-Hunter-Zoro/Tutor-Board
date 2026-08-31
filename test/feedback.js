@@ -446,6 +446,139 @@ const withNew = Object.assign({}, lesson, {
   }
 }
 
+// 6c3. Getting an exercise RIGHT deleted every board on the page.
+//
+// Reported from the device, mid-homework: "when I go back above to see my
+// previous responses, it still shows an unchangeable picture of my response. I
+// want the actual writing board containing my response."
+//
+// The boards were painted only while an answer was owed, and nothing is owed the
+// moment the tutor writes a `correct` card -- so finishing a problem tore down
+// every surface in the lesson and left the transcript as photographs of what had
+// been sent. A photograph is a record of an answer; it is not a place to add a
+// line to one. The way back, `#reopen`, opens the NEWEST question and only that,
+// so an earlier problem was unreachable however much working was on its page.
+{
+  const q1 = Object.assign({}, lesson, {
+    cards: [card('0031', 'question', 'Problem 1', 1)], turns: [],
+  });
+  es.onmessage({ data: JSON.stringify(q1) });
+  await sleep(20);                    // the surface opens on it and takes a page
+
+  const q2 = Object.assign({}, lesson, {
+    cards: [card('0031', 'question', 'Problem 1', 1),
+            card('0032', 'note', 'take P of both sides', 2),
+            card('0033', 'question', 'Problem 2 — Bonferroni', 3)],
+    turns: [],
+  });
+  es.onmessage({ data: JSON.stringify(q2) });
+  await sleep(20);                    // ...and moves on, which takes another
+
+  const done = Object.assign({}, q2, {
+    cards: q2.cards.concat([card('0034', 'correct', 'that is the proof', 4)]),
+    turns: [{ id: 't0009', rev: 4, kind: 'ink', answers: '0033', t: t0 + 450,
+              iso: '2026-08-31 10:02:00', png: '/answers/t0009-r4.png',
+              ink: '/answers/t0009-r4.json' }],
+  });
+  es.onmessage({ data: JSON.stringify(done) });
+  await sleep(20);
+
+  els.writer.hidden
+    ? ok('a correct answer still closes the panel')
+    : fail('the panel stayed open, which is not what was asked for');
+
+  const shown = (q) => {
+    const n = doc.querySelector('[data-board="' + q + '"]');
+    return !!n && !n.hidden;
+  };
+  shown('0031')
+    ? ok('but an earlier question keeps its board once the exercise is marked right')
+    : fail('finishing a problem deleted the board under every earlier question, '
+           + 'leaving a picture of the answer and nowhere to write');
+  shown('0033')
+    ? ok('and so does the one that was just answered')
+    : fail('the question just finished has no board, so the only way back to the '
+           + 'working is a photograph of it');
+
+  // Touching one is the whole point: it must open the real surface, on THAT
+  // question's page, even though nothing is owed.
+  const slot = doc.querySelector('[data-board="0031"]');
+  slot.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true }));
+  await sleep(20);
+  !els.writer.hidden
+    ? ok('touching an earlier board opens the real surface on a finished lesson')
+    : fail('touching a board on a settled lesson does nothing at all');
+  !doc.querySelector('[data-board="0031"]')
+    ? ok('and that question has the live one now, not a picture')
+    : fail('the board did not go live');
+
+  // And it survives the heartbeat. The request used to be cancelled by
+  // comparing it against the NEWEST question -- and an earlier question is by
+  // definition not the newest, so asking to write on one was withdrawn by the
+  // very next payload, thirty seconds later or sooner.
+  es.onmessage({ data: JSON.stringify(done) });
+  await sleep(20);
+  !els.writer.hidden
+    ? ok('and the next payload does not withdraw it again')
+    : fail('the surface was taken away by the heartbeat, because the question '
+           + 'asked for was not the newest one');
+  doc.querySelector('[data-board="0033"]')
+    ? ok('while the question left behind goes back to being a picture')
+    : fail('the question left behind lost its board');
+
+  // 6c4. The type tab did nothing on a question already answered in ink.
+  //
+  // `panelKind` read the question's history first: a sent ink turn returned
+  // "write" whatever the tabs were told, so pressing *type* set the remembered
+  // kind, repainted, and was overruled on the way back. Which is every question
+  // worth typing about -- you write the proof, the tutor asks what you meant by
+  // a line of it, and the answer to that is a sentence.
+  const board33 = doc.querySelector('[data-board="0033"]');
+  board33.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true }));
+  await sleep(20);
+  const typebox = doc.getElementById('typebox');
+  const slate = doc.getElementById('slate');
+  typebox.hidden
+    ? ok('a question answered in ink opens on the pen, as it should')
+    : fail('the ink answer did not bring back the writing half');
+
+  doc.getElementById('tab-type').dispatchEvent(
+    new window.MouseEvent('click', { bubbles: true }));
+  !typebox.hidden
+    ? ok('and pressing type opens the keyboard half, ink or no ink')
+    : fail('pressing type does nothing on a question already answered in ink, '
+           + 'which is the only kind of question worth typing about');
+  slate.hidden
+    ? ok('with the pen put away rather than stacked above it')
+    : fail('both halves of the panel are open at once');
+
+  doc.getElementById('tab-write').dispatchEvent(
+    new window.MouseEvent('click', { bubbles: true }));
+  typebox.hidden && !slate.hidden
+    ? ok('and the tab goes back, so neither choice is a trap')
+    : fail('having chosen to type there is no way back to the pen');
+
+  // The choice belongs to the question it was made on, and it outlives leaving
+  // that question -- otherwise the history takes it straight back on return,
+  // which is the defect in a slower disguise. (A question with no history of its
+  // own still opens on the globally remembered kind: that is the documented
+  // "whichever you used last opens next time", and it is not what was reported.)
+  doc.getElementById('tab-type').dispatchEvent(
+    new window.MouseEvent('click', { bubbles: true }));
+  const other = doc.querySelector('[data-board="0031"]');
+  if (other) {
+    other.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true }));
+    await sleep(20);
+    const back = doc.querySelector('[data-board="0033"]');
+    if (back) back.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true }));
+    await sleep(20);
+    !doc.getElementById('typebox').hidden
+      ? ok('and coming back to a question you chose to type on keeps the keyboard')
+      : fail('the ink history took the panel back the moment the question was '
+             + 'left and returned to');
+  }
+}
+
 // 6d. And a picture can be handed over from the device. The file input has been
 // in the page from the beginning and nothing ever opened it -- dropping a file
 // and pasting one both worked, and neither is a gesture that exists on a tablet.

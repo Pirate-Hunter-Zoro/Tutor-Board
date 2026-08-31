@@ -54,6 +54,25 @@ which kind of subject it is and the board adapts.
 > [Test review](#test-review--revising-for-a-paper); `review.py` owns the discovery and the scope,
 > `test/review.py` and `test/review.js` hold it.
 >
+> **Two defects from an evening of homework, both about going back up the
+> lesson.** Reported in one message: earlier answers showed as "an unchangeable
+> picture of my response" with no board under them, and the *type* tab did
+> nothing. Both are in the defect table. The first was the boards being tied to
+> whether an answer was owed — the tutor marks a problem right, and every board
+> on the page goes with it; they are painted for the whole live lesson now, and
+> touching one still makes it the live surface on that question's own page. The
+> second was `panelKind` letting the question's history outrank the tab that was
+> just pressed. Shell version `board-shell-v56`.
+>
+> **What only the device can settle about it:** the writing surface is now built
+> on a lesson where nothing is owed — it has to be, because every dormant board
+> is a picture drawn from its pages — so a finished sitting holds one hidden
+> surface plus a photograph per question, where it used to hold none of either.
+> That is the same count an active lesson has always held, but it now persists
+> after the last answer is marked right, and jsdom has no canvas backend to say
+> whether it feels like anything. Watch for a blank board or the app reloading,
+> which is what iPadOS does instead of reporting a canvas budget.
+>
 > **The board now pulls itself, on both machines.** Reported from the compute node: a shipped fix
 > had to be `git pull`-ed there by hand, which was supposed to have stopped being true when the
 > login hook went in. It never was true — the hook runs `tutor resume`, and `resume` pulled the
@@ -303,6 +322,8 @@ these tests fail, the test is right.
 | Pressing Send moved the board upwards and re-fitted the writing surface underneath it. Two causes: nothing put the page under the working, where the receipt and the tutor's "writing…" both are; and the payload the send provoked carried a turn one revision newer than the one on the surface, so `restoreAnswer` fetched the answer back off the server and handed it to `load`, which re-fits the page — throwing away the zoom the working had been written at, on every send | `revealSent` anchors to the foot of the surface; the send records the revision it just sent; `test/feedback.js` |
 | A pen stroke appeared under the nib and was gone by the time the hand moved. Pointer ids are small integers and the platform reuses them, so a palm whose lift the surface never saw stayed in the map and came back attached to the Pencil — and the lift handler, seeing a known palm, returned before committing the stroke | a pen is never a palm, whatever the id says; `isPalm` takes the event, not the number; `test/plane.js` |
 | Ink was lost to two autosaves racing to the disk: a save builds its body when it is called, so the version that lands is whichever the server writes second — regularly the older one — and any save completing cleared the dirty flag, so once a stale one landed last nothing scheduled another. `board.log` showed 111 strokes saved, then 106, then 111 | one save on the wire at a time, and `changeSeq` so a save only reports success for the page it actually carried; `test/plane.js` |
+| Getting an exercise RIGHT deleted every writing board in the lesson. The boards were painted only while an answer was *owed*, and a `correct` card owes nothing — so finishing a problem left the transcript as frozen pictures of what had been sent, with no surface under any earlier question to add a line to. A picture is a record of an answer, not a place to write one | the boards are painted for the whole live lesson; the one question that goes without a picture is the one the real surface is sitting under; `test/feedback.js` |
+| Pressing *type* did nothing on a question already answered in ink. `panelKind` read the question's history before anything else, and a sent ink turn answered "write" whatever the tabs were told — so the press set the remembered kind, repainted, and was overruled on the way back. Which is every question worth typing about: you write the proof, the tutor asks what you meant by a line of it, and the answer to that is a sentence | `pickedKind`, recorded against the question the tab was pressed on and read before the history — the same rule as `chosen.json`, that a decision outranks an inference; `test/feedback.js` |
 | The compute node never pulled the board. Every session pulled the *course*, and the always-on host had a timer for the tool, but `--tool-pull` refuses to install one on a node — so the node ran whatever it was last pulled by hand, indefinitely, while the Mac moved on. And the timer that did run bounced only the proxy on purpose, so the Mac's own boards and tutors went on serving the old code after every pull: a fix reached the disk of both machines and the lesson of neither | `tutor` and `tutor resume` pull this repository, re-exec onto it, and then `tutor restart --tutors`; `scripts/tool-pull.sh` does the same; `test/resume.py` |
 | ...and the first version of that fix could not say it had happened: `execve` throws away whatever is sitting in the process's buffers, and stdout is a pipe or a log file every time this runs for real — so the one line explaining why the board changed under somebody's lesson was dropped on the way out | a flush before the exec; `test/resume.py` drives a real clone and reads what it printed |
 | A deploy dropped somebody mid-proof into a different course: starting a board claimed the tailnet name unconditionally, and `tutor restart` restarts every board on the machine one after another — so the address ended up wherever the course list happened to end. The installed app has one URL baked into it and no way to say which lesson it wanted | `ts_repoint` will not take a name from a board that is still answering; `board vpn serve` is the one command that does, because that is a person asking; `test/address.py` |
