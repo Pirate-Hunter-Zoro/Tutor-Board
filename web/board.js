@@ -801,6 +801,10 @@ function render(data) {
   var owed = !!newestQ && !settled;
 
   lastNewestQ = newestQ || "";
+  if (workingOn && workingOnAt !== (newestQ || "")) {
+    workingOn = null;
+    workingOnAt = null;
+  }
   if (reopenedFor !== null && reopenedFor !== (newestQ || "")) reopenedFor = null;
   if (reopenedFor !== null && !data.archived) owed = true;
 
@@ -2056,8 +2060,20 @@ var reopenedFor = null;
    takes the newest by mtime -- two answers to one question, and the request
    expiring the instant it was made if they ever disagreed. */
 var lastNewestQ = "";
-/* Which question they are answering, if they went back to an earlier one. */
+/* Which question they are answering, if they went back to an earlier one, and
+   which question was newest when they went. Going back is a deliberate excursion
+   and the tutor asking something NEW ends it -- the same rule `reopenedFor` has
+   had from the start, and for the same reason: a request must not outlive what
+   it was made for.
+
+   Without the second half of that, going back to an earlier board pinned the
+   live surface there for the rest of the sitting. A new question then arrived to
+   find the surface parked several cards above it and no page of its own, so it
+   got no board at all -- a question posed with nowhere to answer it, which is
+   the worst state this board has. Reported from the device the evening the
+   boards became reachable enough for anyone to hit it. */
 var workingOn = null;
+var workingOnAt = null;
 /* Which slate page belongs to which question.
  
    One page per question, and no page is ever destroyed. The surface used to be
@@ -2122,6 +2138,7 @@ function boardSlot(qid) {
        this opens the panel on a lesson the tutor has marked right without
        needing a second flag to say so. */
     workingOn = qid;
+    workingOnAt = lastNewestQ;
     reopenedFor = null;
     if (lastLive) render(lastLive);
     if (!writer) return;
@@ -2191,10 +2208,24 @@ function paintBoards(qids, runEndOf, onQ, off) {
     if (anchor.nextSibling !== slot) {
       anchor.parentNode.insertBefore(slot, anchor.nextSibling);
     }
-    var page = questionPage[qid];
-    if (page === undefined) { slot.hidden = true; return; }
     slot.hidden = false;
     slot.querySelector(".board-hint").textContent = "question " + qid + " · tap to write";
+    var page = questionPage[qid];
+    if (page === undefined) {
+      /* Never written on, so there is no picture to take -- but a blank board is
+         still a board. It says the question can be answered here, and touching it
+         cuts the page. It used to show nothing at all, which is fine exactly as
+         long as the live surface happens to be under that question, and is a
+         question posed with nowhere to answer it the moment anything parks the
+         surface somewhere else. Something did. */
+      var blank = slot.querySelector(".board-shot");
+      if (slot.dataset.shot !== "blank") {
+        blank.removeAttribute("src");
+        blank.alt = "";                   /* no broken-image text on a blank sheet */
+        slot.dataset.shot = "blank";
+      }
+      return;
+    }
     /* Redrawn only when the page it is a picture of has actually changed. */
     var mark = page + ":" + (writer.inkOn ? writer.inkOn(page) : 0);
     if (slot.dataset.shot === mark) return;
@@ -2849,6 +2880,7 @@ if (els.reopen) {
   els.reopen.onclick = function () {
     reopenedFor = lastNewestQ;
     workingOn = null;
+    workingOnAt = null;
     els.reopen.hidden = true;
     if (lastLive) render(lastLive);
     /* Straight to it: the button was pressed because there was something to

@@ -724,6 +724,92 @@ const withNew = Object.assign({}, lesson, {
   }
 }
 
+// 6c7. A question arrived with nowhere to answer it.
+//
+// Reported from the device: a preliminary question answered, marked right, the
+// actual homework problem posed — "but no new writing board appeared".
+//
+// Two things had to be true at once, and the boards becoming reachable is what
+// made the pair reachable. Going back to an earlier question pins the live
+// surface there, and nothing cleared the pin: `workingOn` was set by touching a
+// board and outlived everything, including the tutor asking something new. So
+// the new question found the surface parked several cards above it — and,
+// having never been written on, it had no page of its own either, and a question
+// with no page drew no board at all. A question posed with nowhere to answer it
+// is the worst state this board has.
+//
+// The rule is the one `reopenedFor` has always had: a request must not outlive
+// what it was made for.
+{
+  const run = Object.assign({}, lesson, {
+    cards: [card('0051', 'question', 'the preliminary', 1),
+            card('0052', 'note', 'nearly', 2),
+            card('0053', 'correct', 'that is it', 3)],
+    turns: [],
+  });
+  es.onmessage({ data: JSON.stringify(run) });
+  await sleep(20);
+
+  // They go back to the preliminary to add a line — which is what the boards
+  // are for, and what pins the surface.
+  const back = doc.querySelector('[data-board="0051"]');
+  back
+    ? ok('an answered question offers its board back')
+    : fail('there is no board to go back to');
+  if (back) {
+    back.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true }));
+    await sleep(20);
+    !els.writer.hidden
+      ? ok('and touching it parks the live surface there')
+      : fail('touching the board opened nothing');
+  }
+
+  // Now the tutor poses the actual problem.
+  const posed = Object.assign({}, run, {
+    cards: run.cards.concat([card('0054', 'question', 'Problem 4 — E before F', 4)]),
+  });
+  es.onmessage({ data: JSON.stringify(posed) });
+  await sleep(20);
+
+  !els.writer.hidden
+    ? ok('a new question opens a surface')
+    : fail('the new question has no writing surface at all');
+  const under = doc.querySelector('[data-card="0054"]');
+  under && under.nextElementSibling === els.writer
+    ? ok('and it is the LIVE one, under the question just asked')
+    : fail('the live surface stayed parked on the earlier question, so the new '
+           + 'one was posed with nowhere to answer it');
+  doc.querySelector('[data-board="0051"]')
+    ? ok('while the question left behind goes back to being a board')
+    : fail('going back to the earlier question is no longer offered');
+
+  // The safety net, independent of the above: a question nobody has written on
+  // still shows a board. It cannot be a picture — there is nothing to
+  // photograph — so it is a blank one, and touching it cuts the page.
+  const never = Object.assign({}, lesson, {
+    cards: [card('0061', 'question', 'one', 1),
+            card('0062', 'question', 'another nobody has reached', 2)],
+    turns: [],
+  });
+  es.onmessage({ data: JSON.stringify(never) });
+  await sleep(20);
+  const b61 = doc.querySelector('[data-board="0061"]');
+  b61 && !b61.hidden
+    ? ok('a question never written on still shows a board, blank')
+    : fail('a question with no page shows nothing at all, so anything that '
+           + 'parks the surface elsewhere leaves it unanswerable');
+  b61 && !b61.querySelector('.board-shot').getAttribute('src')
+    ? ok('with no picture on it, there being nothing yet to photograph')
+    : fail('a blank board is showing a picture of something');
+  if (b61) {
+    b61.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true }));
+    await sleep(20);
+    !els.writer.hidden && !doc.querySelector('[data-board="0061"]')
+      ? ok('and touching it gives that question the real surface')
+      : fail('a blank board cannot be written on, which makes it decoration');
+  }
+}
+
 // 6d. And a picture can be handed over from the device. The file input has been
 // in the page from the beginning and nothing ever opened it -- dropping a file
 // and pasting one both worked, and neither is a gesture that exists on a tablet.
