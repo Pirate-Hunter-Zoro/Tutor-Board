@@ -330,6 +330,18 @@ check("and a tutor still writing its handoff is said to be, not claimed restarte
 check("and stopping one waits for its handoff to be written",
       "agent_live(c[\"root\"])" in tool_src)
 
+# A restart is when a changed default actually reaches a course. It used to
+# bring back whatever the record named, so a config that said `claude` sat beside
+# a board running `free` indefinitely -- and the only way out was to stop the
+# tutor by hand. The stop is the safe moment: SIGTERM makes the outgoing tutor
+# write HANDOFF.md, which is exactly what the incoming one reads.
+check("a restart asks configuration which tutor to bring back",
+      "resolve_agent(cfg, c) or was_name" in tool_src)
+check("and falls back to the one that was running if nothing resolves",
+      "or was_name" in tool_src)
+check("and says so when the restart changed the tutor",
+      '"%s (%s -> %s)" % (c["dir"], was_name, name)' in tool_src)
+
 push_src = open(os.path.join(ROOT, "scripts", "save-and-push.sh"), encoding="utf-8").read()
 check("pushing the tool restarts the boards it drives", "tutor restart" in push_src)
 check("but a course pushing its own work does not",

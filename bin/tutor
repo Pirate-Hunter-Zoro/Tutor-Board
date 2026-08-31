@@ -979,7 +979,15 @@ def cmd_restart(cfg, args):
         if st.get("state") == "working":
             held.append("%s (mid-turn)" % c["dir"])
             continue
-        name = st.get("agent")
+        # What configuration says NOW, not what happened to be running. A restart
+        # used to bring back whatever the record named, which meant changing
+        # `default_agent` never reached a course whose tutor was restarted rather
+        # than stopped -- the config said one thing and the board ran another, for
+        # ever. This is the safe moment to act on it: the daemon is being stopped
+        # anyway, and the SIGTERM below makes it write HANDOFF.md, which is
+        # precisely the continuity a different tutor picks up from.
+        was_name = st.get("agent")
+        name = resolve_agent(cfg, c) or was_name
         was = st.get("pid")
         try:
             os.kill(was, _sig.SIGTERM)
@@ -1005,7 +1013,8 @@ def cmd_restart(cfg, args):
         code, msg = agent_start(cfg, c, name)
         now = agent_live(c["root"]) or {}
         if code == 0 and now.get("pid") and now["pid"] != was:
-            bounced.append(c["dir"])
+            bounced.append(c["dir"] if name == was_name
+                           else "%s (%s -> %s)" % (c["dir"], was_name, name))
         else:
             held.append("%s (%s)" % (c["dir"], msg.strip() or "did not come back"))
 
