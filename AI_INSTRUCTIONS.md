@@ -267,15 +267,23 @@ in the admin console still has the old name in its local state, and a missing
   A model is never a concept in the code: an agent entry is a command recipe, so a different model
   is a different entry whose `cmd` carries the flag. If you find yourself adding a `model` field,
   stop.
-- **A headless recipe carries its own permission grant, and that is not a model leaking into the
-  code.** Nobody is at a terminal, so nothing can be approved while a turn runs — and a refused
-  tool is not an error: the agent apologises into a log nobody opens and exits 0, which reaches the
-  iPad as a tutor who answered with silence. The default recipe shipped without one and could run
-  `board recap` and then be refused the card write that was the entire point of the turn. Whatever
-  flags an agent needs to write unattended belong in its recipe, alongside its `--continue`, for
-  exactly the reason a model does: the recipe is the extension point and the code stays ignorant.
-  Keep the grant narrow — the files a tutor writes and the board's own command — and never widen it
-  by default. `test/agents.py` holds it.
+- **A headless tutor's permissions are written once, by `board start`, into the course.** Nobody is
+  at a terminal, so nothing can be approved while a turn runs, and a refused tool is not an error:
+  the agent apologises into a log nobody opens and exits 0, which reaches the iPad as a tutor who
+  answered with silence. `TUTOR_PERMISSIONS` in `bin/board` is the whole answer — created never
+  edited, so a course keeps a list it has built up, and committed so its owner can see it. Do not
+  also put the grant on the agent's command line. One policy in two places drifts the first time
+  either moves, and the flag is the copy nobody can see. `test/agents.py` holds it.
+- **The machine's name is pinned, and derived in exactly one place.** Every record that crosses
+  `live/` carries it and every liveness check compares it, so if it moves a machine stops
+  recognising its own boards: `tutor restart` skips them, the hub reports them elsewhere, and a
+  board that is answering becomes impossible to bounce onto new code. It moved here — a Mac with no
+  `HostName` set takes its name from the network, and Tailscale's DNS renamed this one mid-session
+  — and it was being derived four different ways in four files (`os.uname()` in the launcher,
+  `socket.gethostname()` in the board and the server), which can disagree on one machine.
+  `boardlib.node_name()` is the only place allowed to answer, it prefers a pinned file over
+  anything the network says, and `board start` pins it the first time. Never reach for
+  `gethostname()` or `uname()` again. `test/node.py` holds it.
 - **The assistant belongs to the course, not to the terminal.** One is alive at a time, in the
   repository whose board is showing, resolved most-specific-first: `--agent`, then the course's
   `tutorboard.json`, then the machine by hostname, then `default_agent`. Switching course on the

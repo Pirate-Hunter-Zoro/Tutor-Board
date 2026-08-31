@@ -26,6 +26,7 @@ import urllib.request
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+import boardlib  # noqa: E402
 import serve  # noqa: E402
 
 fails = []
@@ -177,7 +178,12 @@ try:
         with open(agent_path, "w", encoding="utf-8") as fh:
             json.dump(kw, fh)
 
-    host = socket.gethostname().split(".")[0]
+    # Ask the board what this machine is called, exactly as the code does. This
+    # line used to derive it here with `socket.gethostname()`, and that is the
+    # whole bug in miniature: the machine renamed itself from the network, the
+    # test went on writing records under the old name, and the mismatch it was
+    # meant to catch was the one thing it could not see.
+    host = boardlib.node_name()
     write_agent(host=host, pid=os.getpid(), agent="claude", state="attached",
                 mode="interactive", cmd=sys.executable,
                 last_seen=_time.time() - 6000)

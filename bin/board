@@ -30,6 +30,7 @@ The assistant runs these. The student never does.
     board vpn status|serve|down, for devices off this network
     board init [name] [--code|--math]  write tutorboard.json for this repository
     board doctor                       check the machine has what this needs
+    board node [name]                  what this machine calls itself, pinned
     board eyes [--answer]              can the assistant driving this actually see?
 
 Card kinds: lesson, question, correct, wrong, review, note, recap.
@@ -120,8 +121,14 @@ class Live:
 
 
 def this_node():
-    import socket as _s
-    return _s.gethostname().split(".")[0]
+    """What this machine calls itself. One place decides; see boardlib.
+
+    This used to be `socket.gethostname()` here and `os.uname()` in the launcher,
+    which can disagree on the same machine -- and both follow the network, which
+    renamed this one mid-session and orphaned a running board from every command
+    that wanted to restart it.
+    """
+    return boardlib.node_name()
 
 
 def alive(info):
@@ -298,6 +305,16 @@ def cmd_start(live, args):
             print("start one here anyway with: board start --force")
             if "--force" not in args:
                 return 1
+
+    # Freeze what this machine calls itself, before anything writes a record
+    # carrying that name. A Mac with no `HostName` set takes its name from the
+    # network, so the name that goes into `.board.json` here is one Tailscale or
+    # a DHCP lease can change by tomorrow -- and then this board belongs to a
+    # machine that no longer exists and nothing will restart it.
+    pinned = boardlib.node_name_pinned()
+    if not pinned:
+        print("this machine is now '%s' as far as the board is concerned "
+              "(pinned, so the network cannot change it)" % boardlib.pin_node_name())
 
     install_teaching(live)
     granted = install_permissions(live)
@@ -1562,8 +1579,7 @@ def cmd_vpn(live, args):
 
 
 def socket_hostname():
-    import socket as _s
-    return _s.gethostname().split(".")[0]
+    return this_node()
 
 
 def cmd_net(live, args):
@@ -1763,6 +1779,36 @@ def machine_shape():
     return boardlib.machine_shape()
 
 
+def cmd_node(live, args):
+    """Show, or pin, what this machine calls itself.
+
+    There is a command for this because a wrong pin has to be correctable, and
+    because the failure it prevents is invisible: nothing looks broken when a
+    machine renames itself, right up until a board cannot be restarted and a
+    shipped fix appears not to have landed.
+    """
+    want = next((a for a in args if not a.startswith("-")), None)
+    if not want:
+        pinned = boardlib.node_name_pinned()
+        print("node:    %s%s" % (this_node(), "  (pinned)" if pinned else ""))
+        print("system:  %s" % boardlib.system_node_name())
+        if not pinned:
+            print("\nnot pinned: this machine takes its name from the network, and a")
+            print("rename orphans every board record written under the old one.")
+            print("pin it with:  board node %s" % boardlib.system_node_name())
+        return 0
+
+    was = this_node()
+    now = boardlib.pin_node_name(want)
+    print("this machine is '%s'%s" % (now, "" if now == was else ", was '%s'" % was))
+    if now != was:
+        print("\nrecords written as '%s' are this machine's again only if they say so."
+              % now)
+        print("a board recorded under the old name will not be restarted by "
+              "`tutor restart`; bounce it once by hand.")
+    return 0
+
+
 def cmd_doctor(live, args):
     import platform as _pl
     import shutil as _sh
@@ -1788,7 +1834,14 @@ def cmd_doctor(live, args):
     cfg = read_config(live.root)
     print("repo:     %s" % live.root)
     print("course:   %s  (%s mode)" % (cfg["name"], cfg["mode"]))
-    print("node:     %s" % this_node())
+    pinned = boardlib.node_name_pinned()
+    sysname = boardlib.system_node_name()
+    print("node:     %s%s" % (this_node(),
+                              "  (pinned)" if pinned else
+                              "  (NOT pinned — the network can rename this machine)"))
+    if pinned and pinned != sysname:
+        print("          the system currently says '%s'; the pinned name is what "
+              "every record uses" % sysname)
     print("port:     %d (default for this repo)" % default_port(live.root))
     owner = ts_owner()
     v4, tsname = ts_info()
@@ -1808,7 +1861,7 @@ COMMANDS = {
     "doctor": cmd_doctor, "slate": cmd_slate, "wait": cmd_wait,
     "net": cmd_net, "vpn": cmd_vpn, "init": cmd_init, "eyes": cmd_eyes,
     "finish": cmd_finish, "push": cmd_push, "history": cmd_history,
-    "hw": cmd_hw, "recap": cmd_recap,
+    "hw": cmd_hw, "recap": cmd_recap, "node": cmd_node,
 }
 
 

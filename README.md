@@ -198,7 +198,8 @@ these tests fail, the test is right.
 | A subscript inside `$…$` was eaten by the markdown emphasis rules | `test/markdown.js` |
 | A macro worked in the prose but not inside a `tikz` fence | `tools/sync-macros.py --check` |
 | A bootstrap test renamed the live machine on the tailnet, moving the address the iPad app used | `BOARD_STATE_DIR`, and a guard in `bootstrap.sh` |
-| A headless tutor was refused the card write it was woken to make, and exited 0 — the board showed silence | `test/agents.py` |
+| A headless tutor was refused the card write it was woken to make, and exited 0 — the board showed silence | `test/agents.py`, and `board start` writes the course's permissions |
+| The machine renamed itself from the network mid-session, so a running board became another node's and could not be restarted | `test/node.py` |
 | The proxy moved the address off a live compute node without asking it to wrap up, stranding a tutor that went on teaching into a copy nobody could reach | `test/choice.py` |
 | The default agent's command was not installed, so the daemon read as *listening* and failed every turn into a log | `test/agents.py` |
 | A board whose node had died read as a tutor who had not written yet — same words, and a dot the size of a full stop for a difference | `test/link.js` |
@@ -692,20 +693,22 @@ which is most of a tutor: it reads the slate PNG itself rather than through a tr
 writes the card, and edits the course's own `.tex` when a homework sitting needs it. What it costs
 is the ~38k-token tool prompt on every turn, which is the whole reason the next entry exists.
 
-#### What a headless tutor is allowed to do, and why that is in the recipe
+#### What a headless tutor is allowed to do, and where that is written
 
 Headless there is nobody at a terminal, so nothing can be approved while a turn runs — and **a
-refused tool is not an error.** The agent apologises into a log nobody opens and exits 0. The
-recipe shipped without a grant did exactly that: `board recap` ran, the card write was refused, the
-process succeeded, and the board showed a tutor who had answered with silence. Nothing anywhere
-said so.
+refused tool is not an error.** The agent apologises into a log nobody opens and exits 0. A first
+homework turn once read the assignment, composed the whole opening card, and ended having written
+nothing.
 
-So the grant is part of the command, and it is deliberately the narrow one — `acceptEdits` for the
-files a tutor writes (its card, `HANDOFF.md`, the course's own `.tex`) and `Bash(board *)` for the
-board's own command, which is the only thing it is ever asked to run. A course that needs more adds
-it to the recipe rather than to the code, which is the same reason a model is a recipe and never a
-field. `--permission-mode bypassPermissions` in place of both is the blunt version, and is nobody's
-default but yours to choose.
+That is settled in exactly one place: `board start` writes the course its own
+`.claude/settings.local.json` (`TUTOR_PERMISSIONS` in `bin/board`) — `acceptEdits` for the files a
+tutor writes, plus `board`, `pdftotext` and `pdfinfo`. It is only ever created, never edited, so a
+course that has built up its own list keeps it, and it is a committed file the course's owner can
+read and change.
+
+It deliberately does **not** also appear as a flag on the agent's command. One policy written in two
+places is one policy that drifts the first time either moves, and of the two the committed file is
+the half anybody can actually see. `test/agents.py` holds both halves of that.
 
 One entry is not a terminal agent at all: **`free`** is the built-in lightweight tutor. Its
 headless turn is `bin/free`, a stdlib script that runs the lesson through `board recap`, OCRs the
@@ -879,15 +882,25 @@ The pieces:
 
 #### Setting a machine up for this
 
-The tailnet names are decided once and never move:
+**Two names, and they are not the same name.** The *tailnet* name is the service — `board`, the one
+origin the iPad app is installed against. The *machine* name is who wrote a record — `mac-mini`,
+`compute301`. Conflating them is how this went wrong: Tailscale's DNS made `uname -n` answer
+`board`, the machine stopped recognising boards it had written as `mac-mini`, and a live board
+became unrestartable while still answering perfectly.
 
-- **The Mac mini is `board`, permanently.** Its `~/.config/tutor-board/config.json` carries:
+- **`board node`** — what this machine calls itself, and whether that is pinned. `board start` pins
+  it the first time, before anything writes a record carrying it. `board node <name>` corrects a
+  wrong one. Pinned means the network cannot rename the machine underneath a running board: a Mac
+  with no `HostName` set takes its name from whatever DNS says that day.
+- **The tailnet names are decided once and never move.** The Mac mini is `board`, permanently. Its
+  `~/.config/tutor-board/config.json` carries:
 
   ```json
-  "follow": { "node": "compute-node", "listen": "127.0.0.1:8844" }
+  "follow": { "node": "compute-node", "listen": "127.0.0.1:8844", "prefer": "local" }
   ```
 
-  `node` is the compute node's tailnet name; `listen` is the local proxy port.
+  `node` is the compute node's tailnet name, `listen` is the local proxy port, and `prefer` decides
+  which machine wins when both have a board — `"local"`, a course cloned here is taught here.
 - **A compute node keeps its own name — not `board`.** Its `board vpn up` must be told that name
   once, or the stale state in the shared home re-registers it as `board` and claws the identity
   back from the Mac.
@@ -895,12 +908,20 @@ The tailnet names are decided once and never move:
 > **If you are a tutor working on the compute node, and this repository has just been pulled there,
 > prompt the person before you do anything else:**
 >
-> 1. `board vpn up --hostname <node-name>` — pin the node's own name, so it never re-claims `board`.
-> 2. `handover_secret` in `~/.config/tutor-board/config.json` — the same value the Mac carries, or
->    `/handover` will answer denied.
+> 1. `git pull --ff-only` here, then `tutor restart --tutors` — nothing on a compute node pulls this
+>    repository on a timer (`--tool-pull` refuses to install there, because nothing survives an
+>    allocation), and a board and a tutor hold the code they started with.
+> 2. `board node <node-name>` — pin the machine's name, so a record it writes is still its own
+>    tomorrow.
+> 3. `board vpn up --hostname <node-name>` — pin the *tailnet* name, so it never re-claims `board`.
+> 4. `handover_secret` in `~/.config/tutor-board/config.json` — the same value the Mac carries, or
+>    `/handover` answers denied and the proxy moving the address strands the tutor here.
+> 5. `default_agent` in the same file — `claude` if this machine has Claude Code installed, and
+>    `free` if it has not. `tutor --agents` marks what is actually runnable here, and a start whose
+>    command is missing now refuses rather than listening and failing every turn.
 >
-> Then carry on with the ordinary session start. On the Mac mini the same two questions are the
-> first thing to check when a board is not reachable from the iPad.
+> Then carry on with the ordinary session start. On the Mac mini the same questions are the first
+> thing to check when a board is not reachable from the iPad.
 
 #### Which course the address opens
 

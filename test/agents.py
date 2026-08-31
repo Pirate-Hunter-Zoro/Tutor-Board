@@ -70,12 +70,14 @@ check("an unknown name resolves to nothing rather than to a wrong agent",
 check("a course with no opinion and no machine entry still resolves",
       tutor.resolve_agent(no_host, None) == "claude")
 
-# --- the default, and what it is allowed to do -------------------------------
+# --- the default, and where its permissions are NOT written ------------------
 # Claude Code is the default tutor. Headless there is nobody to approve anything,
-# and a refused tool is not an error: the shipped recipe ran `board recap` fine
-# and was then refused the write that is the whole point of the turn, exiting 0
-# while the board showed a tutor who had answered with silence. The grant lives
-# in the recipe, so this is where it is held.
+# and a refused tool is not an error -- the agent apologises into a log nobody
+# opens and exits 0, which reaches the board as a tutor who answered with
+# silence. That is already solved, and solved in one place: `board start` writes
+# the course its own `.claude/settings.local.json`. The recipe must not repeat
+# it. One policy in two files is one policy that drifts the first time either
+# moves, and the committed file is the half a course's owner can actually see.
 D = tutor.DEFAULT_CONFIG
 claude = D["agents"]["claude"]
 
@@ -83,14 +85,25 @@ check("Claude is the tutor unless something more specific says otherwise",
       D["default_agent"] == "claude")
 
 for kind in ("headless_first", "headless"):
-    recipe = claude[kind]
-    check("a %s turn may write the card it was woken to write" % kind,
-          "acceptEdits" in recipe)
-    check("and may run the board's own command to do it (%s)" % kind,
-          any("Bash(board " in a for a in recipe))
+    recipe = " ".join(claude[kind])
+    check("the %s recipe does not carry a second copy of the permissions" % kind,
+          "acceptEdits" not in recipe and "allowedTools" not in recipe)
 
 check("a resumed turn is still a resumed turn",
       "--continue" in claude["headless"] and "--continue" not in claude["headless_first"])
+
+# The one place it does live, and what it has to cover.
+board_src = open(os.path.join(ROOT, "bin", "board"), encoding="utf-8").read()
+check("the board is what grants a headless tutor its permissions",
+      "TUTOR_PERMISSIONS" in board_src and "def install_permissions(" in board_src)
+check("and starting a board is when the course gets them",
+      "install_permissions(live)" in board_src)
+check("the grant lets it write the card, which is the whole job",
+      '"defaultMode": "acceptEdits"' in board_src)
+check("and run the board's own command",
+      '"Bash(board *)"' in board_src)
+check("but it never edits a list a course has built up for itself",
+      "if os.path.exists(path):" in board_src)
 
 # The free tutor is not the default any more and is not gone: it is what a
 # machine that pays for no model runs, and removing it would leave that machine

@@ -239,6 +239,90 @@ def _cmdline(pid):
 
 
 # ---------------------------------------------------------------------------
+# What this machine calls itself
+# ---------------------------------------------------------------------------
+# Every record that crosses `live/` carries this name, and every liveness check
+# compares it before trusting a pid. So if it moves, a machine stops recognising
+# its own boards: `tutor restart` skips them as another node's, the hub says they
+# are running somewhere else, and a board that is answering perfectly well
+# becomes impossible to bounce onto new code. That is not hypothetical -- it
+# happened here, and it cost an evening of wondering why a shipped fix had not
+# landed.
+#
+# It moved because nothing had pinned it. A Mac with no `HostName` set derives
+# its name from the network, so Tailscale's DNS renamed this machine from
+# `mac-mini` to `board` between one board starting and the next command asking
+# who was running it. Worse, the name was being *derived* in four places in four
+# files -- `os.uname()` in the launcher, `socket.gethostname()` in the board and
+# the server -- which can disagree with each other on the same machine.
+#
+# So: one function, and a pinned answer. The board is not entitled to a stable
+# machine name from the operating system, so it keeps its own.
+STATE_DIR = os.environ.get("BOARD_STATE_DIR") or \
+    os.path.join(HOME, ".local", "state", "tutor-board")
+NODE_NAME_FILE = os.path.join(STATE_DIR, "nodename")
+
+
+def _normal_node(name):
+    """One form for one machine.
+
+    First label, lowercased: `board.tail0c6c62.ts.net` and `Mac-mini` and
+    `mac-mini` must not be three machines, because a record written under one
+    spelling has to be believed under another.
+    """
+    return (name or "").strip().split(".")[0].lower() or "unknown"
+
+
+def system_node_name():
+    """Whatever the operating system says today. Not to be trusted alone."""
+    return _normal_node(os.uname().nodename)
+
+
+def node_name():
+    """What this machine calls itself. The only place that decides.
+
+    Most explicit first: the environment (for a test, or a one-off), then the
+    pinned file, then -- only when nothing has ever pinned one -- the system.
+    """
+    env = os.environ.get("BOARD_NODE_NAME")
+    if env and env.strip():
+        return _normal_node(env)
+    try:
+        with open(NODE_NAME_FILE, "r", encoding="utf-8") as fh:
+            name = fh.read().strip()
+            if name:
+                return _normal_node(name)
+    except OSError:
+        pass
+    return system_node_name()
+
+
+def node_name_pinned():
+    """The pinned name, or None if this machine is still trusting the network."""
+    try:
+        with open(NODE_NAME_FILE, "r", encoding="utf-8") as fh:
+            return _normal_node(fh.read()) or None
+    except OSError:
+        return None
+
+
+def pin_node_name(name=None):
+    """Freeze this machine's name so the network cannot change it underneath us.
+
+    With no argument it pins whatever the machine is called right now, which is
+    the right move the first time: it freezes a name that already matches the
+    records sitting on disk. Returns the name pinned.
+    """
+    name = _normal_node(name) if name else system_node_name()
+    os.makedirs(STATE_DIR, exist_ok=True)
+    tmp = NODE_NAME_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(name + "\n")
+    os.replace(tmp, NODE_NAME_FILE)
+    return name
+
+
+# ---------------------------------------------------------------------------
 # Tailscale
 # ---------------------------------------------------------------------------
 # BOARD_STATE_DIR exists so a test can be run without writing the real thing.

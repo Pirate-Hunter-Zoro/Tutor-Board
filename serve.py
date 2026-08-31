@@ -609,7 +609,7 @@ def load_agent(repo):
             st = json.load(fh)
     except (OSError, ValueError):
         return None
-    if not boardlib.agent_is_attached(st, socket.gethostname().split(".")[0]):
+    if not boardlib.agent_is_attached(st, boardlib.node_name()):
         st["state"] = "stale"
     return st
 
@@ -1033,7 +1033,7 @@ def sibling_courses(repo):
             with open(os.path.join(live, ".board.json"), "r", encoding="utf-8") as fh:
                 info = json.load(fh)
             entry["node"] = info.get("node")
-            if info.get("node") == socket.gethostname().split(".")[0]:
+            if info.get("node") == boardlib.node_name():
                 try:
                     os.kill(info.get("pid", -1), 0)
                     entry["running"] = True
@@ -2085,7 +2085,7 @@ def main(argv):
         # The home directory is shared across compute nodes, so a pid on its own
         # says nothing -- the same number is very likely alive on this node and
         # belong to something else entirely.
-        "node": socket.gethostname().split(".")[0],
+        "node": boardlib.node_name(),
         "root": repo.root,
         # Only advertise what is actually listening.
         "urls": (["http://127.0.0.1:%d/" % port] +

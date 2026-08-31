@@ -45,19 +45,6 @@ CONFIG_DIR = os.path.join(
     "tutor-board")
 CONFIG = os.path.join(CONFIG_DIR, "config.json")
 
-# Headless there is nobody at a terminal, so nothing can be approved while a turn
-# is running -- and a refused tool is not an error. The agent says so into a log
-# nobody opens and exits 0, which reaches the board as a tutor that answered with
-# silence: the shipped recipe could run `board recap` and then be refused the one
-# thing the turn exists to do, and nothing anywhere said so. The grant therefore
-# belongs in the recipe, and it is deliberately the narrow one -- the files a
-# tutor writes (its card, HANDOFF.md, the course's own .tex) and the board's own
-# command, which is the only thing it is ever asked to run. A course that needs
-# more adds it here rather than in the code, for the same reason a model is a
-# recipe and never a field.
-CLAUDE_HEADLESS = ["--permission-mode", "acceptEdits",
-                   "--allowedTools", "Bash(board *)"]
-
 DEFAULT_CONFIG = {
     "courses_dir": os.path.dirname(TOOL),
     "default_agent": "claude",
@@ -75,12 +62,19 @@ DEFAULT_CONFIG = {
         # the card, and edits the course's own .tex when a homework sitting needs
         # it. What it costs is the ~38k-token tool prompt on every turn, which is
         # why `free` exists below and why it is still a name in this file.
+        #
+        # What it is allowed to do headless is NOT set here. `board start` writes
+        # the course its own `.claude/settings.local.json` -- see
+        # `TUTOR_PERMISSIONS` in bin/board -- because that file is committed,
+        # readable by the course's owner and adjustable per course. Repeating the
+        # same grant as a flag on this command would be a second source of truth
+        # for one policy, and the two would drift the first time either moved.
         "claude": {
             "cmd": ["claude"], "prompt": "argv",
             # `headless_first` opens the session; `headless` continues it, so the
             # agent is not re-reading the whole contract on every single turn.
-            "headless_first": ["claude", "-p", "{prompt}"] + CLAUDE_HEADLESS,
-            "headless": ["claude", "-p", "{prompt}", "--continue"] + CLAUDE_HEADLESS,
+            "headless_first": ["claude", "-p", "{prompt}"],
+            "headless": ["claude", "-p", "{prompt}", "--continue"],
         },
         "opencode": {
             "cmd": ["opencode"], "prompt": "argv",
@@ -169,7 +163,9 @@ def read_course(root):
 
 
 def this_host():
-    return os.uname().nodename.split(".")[0]
+    """What this machine calls itself. One place decides; see boardlib."""
+    import boardlib
+    return boardlib.node_name()
 
 
 def missing_command(recipe):
@@ -507,7 +503,7 @@ def headless_stop(cfg, args):
         # not what anyone typing it meant.
         if st.get("mode") == "interactive":
             continue
-        if pid and st.get("host") == os.uname().nodename.split(".")[0]:
+        if pid and st.get("host") == this_host():
             try:
                 os.kill(pid, signal.SIGTERM)
                 print("  stopped %s (pid %d)" % (c["dir"], pid))
@@ -757,7 +753,7 @@ def headless(cfg, course, agent_name, session):
         print("'%s' needs `%s`, which is not on the path on %s.\n"
               "Install it, or name another in %s -- `tutor --agents` lists what "
               "this machine can actually run."
-              % (agent_name, gone, os.uname().nodename.split(".")[0], CONFIG),
+              % (agent_name, gone, this_host(), CONFIG),
               file=sys.stderr)
         return 1
 
@@ -765,7 +761,7 @@ def headless(cfg, course, agent_name, session):
     live = os.path.join(root, "live")
     os.makedirs(live, exist_ok=True)
     log = open(os.path.join(live, "agent.log"), "a", buffering=1)
-    host = os.uname().nodename.split(".")[0]
+    host = this_host()
 
     board(root, "start")
     link(root)
@@ -1255,7 +1251,7 @@ def ensure_agent(cfg, course, args, say):
 
 def cmd_where(cfg, args):
     """What is up, and whether anything is listening."""
-    host = os.uname().nodename.split(".")[0]
+    host = this_host()
     print("this machine: %s\n" % host)
     any_up = False
     for c in courses(cfg):

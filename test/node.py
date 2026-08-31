@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+"""What this machine calls itself, and why it must not be asked twice.
+
+Every record that crosses `live/` carries this name -- board records, agent
+records -- and every liveness check compares it before trusting a pid. So the
+name is not cosmetic: if it moves, a machine stops recognising its own boards.
+`tutor restart` skips them as another node's, the hub reports them running
+somewhere else, and a board that is answering perfectly well becomes impossible
+to bounce onto new code. A shipped fix then appears not to have landed, which is
+the most expensive kind of bug this repository has.
+
+It moved. A Mac with no `HostName` set derives its name from the network, and
+Tailscale's DNS renamed this machine from `mac-mini` to `board` between one board
+starting and the next command asking who was running it.
+
+And it was being derived four ways in four files -- `os.uname()` in the launcher,
+`socket.gethostname()` in the board and the server -- which are not required to
+agree on one machine.
+
+So: one function, a pinned answer, and no caller allowed to ask the system
+directly.
+"""
+
+import importlib.machinery
+import importlib.util
+import os
+import shutil
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+
+fails = []
+
+
+def check(name, cond):
+    if cond:
+        print("ok   " + name)
+    else:
+        fails.append(name)
+        print("FAIL " + name)
+
+
+# A state directory of its own. BOARD_STATE_DIR exists precisely so a test can
+# never write the real one -- a bootstrap test once renamed the live machine on
+# the tailnet, which silently moved the address the iPad app was installed
+# against.
+sandbox = tempfile.mkdtemp(prefix="tutor-node-")
+os.environ["BOARD_STATE_DIR"] = sandbox
+os.environ.pop("BOARD_NODE_NAME", None)
+sys.path.insert(0, ROOT)
+import boardlib  # noqa: E402
+
+
+def reload_lib():
+    importlib.reload(boardlib)
+
+
+reload_lib()
+
+# --- one form for one machine ----------------------------------------------
+check("a fully qualified name is just the first label",
+      boardlib._normal_node("board.tail0c6c62.ts.net") == "board")
+check("and case is not an identity: Mac-mini and mac-mini are one machine",
+      boardlib._normal_node("Mac-mini") == boardlib._normal_node("mac-mini") == "mac-mini")
+check("and nothing at all is not an empty string in a record",
+      boardlib._normal_node("") == "unknown")
+
+# --- pinning ----------------------------------------------------------------
+check("nothing is pinned to start with", boardlib.node_name_pinned() is None)
+check("so the name is whatever the system says",
+      boardlib.node_name() == boardlib.system_node_name())
+
+boardlib.pin_node_name("mac-mini")
+check("a pinned name reads back", boardlib.node_name_pinned() == "mac-mini")
+check("and it is what the machine is called from then on",
+      boardlib.node_name() == "mac-mini")
+
+# The whole point: the system name moving must not move ours.
+real = boardlib.system_node_name
+boardlib.system_node_name = lambda: "something-the-network-decided"
+check("the network renaming the machine does not rename the board's idea of it",
+      boardlib.node_name() == "mac-mini")
+boardlib.system_node_name = real
+
+check("pinning normalises, so a careless capital cannot fork a machine in two",
+      boardlib.pin_node_name("Mac-Mini") == "mac-mini" and
+      boardlib.node_name() == "mac-mini")
+
+os.environ["BOARD_NODE_NAME"] = "override"
+check("the environment still wins, for a test or a one-off",
+      boardlib.node_name() == "override")
+os.environ.pop("BOARD_NODE_NAME")
+check("and removing it falls back to the pin, not to the system",
+      boardlib.node_name() == "mac-mini")
+
+# --- nobody derives it for themselves ---------------------------------------
+# This is the half that actually broke. Two files asked `socket.gethostname()`
+# and one asked `os.uname()`; on a Mac those are allowed to differ, and either
+# can follow the network.
+import ast  # noqa: E402
+
+
+def asks_the_system(path):
+    """Names of system calls this file makes to find out the hostname.
+
+    Parsed, not grepped. A rule about what the code does must not be broken by
+    prose describing it -- the docstring on `this_node` says the words
+    `socket.gethostname()` precisely to record what it stopped doing.
+    """
+    tree = ast.parse(open(path, encoding="utf-8").read())
+    found = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        f = node.func
+        name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
+        if name in ("gethostname", "uname"):
+            found.add(name)
+    return found
+
+
+for rel in ("bin/board", "bin/tutor", "bin/follow", "serve.py"):
+    check("%s does not ask the system for the hostname itself" % rel,
+          not asks_the_system(os.path.join(ROOT, rel)))
+
+check("boardlib is the one place that may",
+      asks_the_system(os.path.join(ROOT, "boardlib.py")) == {"uname"})
+
+board_src = open(os.path.join(ROOT, "bin", "board"), encoding="utf-8").read()
+start_body = board_src[board_src.index("def cmd_start("):]
+start_body = start_body[:start_body.index("\ndef ", 1)]
+check("starting a board pins the name before any record carries it",
+      "pin_node_name()" in start_body and
+      start_body.index("pin_node_name()") < start_body.index("install_teaching(live)"))
+check("and a name already pinned is never quietly repinned",
+      "if not pinned:" in board_src)
+check("doctor says whether the name is pinned, since an unpinned one is the bug",
+      "NOT pinned" in board_src)
+check("and there is a command to correct a wrong one",
+      "def cmd_node(" in board_src and '"node": cmd_node' in board_src)
+check("which warns that a board under the old name needs bouncing by hand",
+      "bounce it once by hand" in board_src)
+
+# --- the launcher and the board must agree ----------------------------------
+loader = importlib.machinery.SourceFileLoader("tutorcli", os.path.join(ROOT, "bin", "tutor"))
+spec = importlib.util.spec_from_loader("tutorcli", loader)
+tutor = importlib.util.module_from_spec(spec)
+loader.exec_module(tutor)
+
+bloader = importlib.machinery.SourceFileLoader("boardcli", os.path.join(ROOT, "bin", "board"))
+bspec = importlib.util.spec_from_loader("boardcli", bloader)
+board = importlib.util.module_from_spec(bspec)
+bloader.exec_module(board)
+
+check("the launcher and the board call this machine the same thing",
+      tutor.this_host() == board.this_node() == boardlib.node_name())
+check("and the server's own record would agree with both",
+      board.socket_hostname() == boardlib.node_name())
+
+shutil.rmtree(sandbox, ignore_errors=True)
+print()
+print("%d FAILURES" % len(fails) if fails else "a machine knows its own name")
+sys.exit(1 if fails else 0)
