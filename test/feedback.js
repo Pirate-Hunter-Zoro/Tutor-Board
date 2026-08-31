@@ -801,6 +801,12 @@ const withNew = Object.assign({}, lesson, {
   b61 && !b61.querySelector('.board-shot').getAttribute('src')
     ? ok('with no picture on it, there being nothing yet to photograph')
     : fail('a blank board is showing a picture of something');
+  // An empty board that is captioned like a full one reads as a board whose
+  // working has gone missing — which is how it was read on the first evening it
+  // existed, by someone whose ink was on disk the whole time.
+  b61 && /nothing written here yet/.test(b61.querySelector('.board-hint').textContent)
+    ? ok('and saying so, so an empty board never reads as lost work')
+    : fail('an empty board is captioned exactly like one with working on it');
   if (b61) {
     b61.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true }));
     await sleep(20);

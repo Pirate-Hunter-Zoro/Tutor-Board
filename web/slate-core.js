@@ -61,6 +61,7 @@ var ZOOM_MAX = 8;
    still rasterise a page-wide derivation at 1:1, and capping alone would spend
    the whole budget on empty paper. */
 var PNG_PAD = 26;           /* logical units of margin around the ink */
+var FIT_PAD = 32;           /* ...and above it, when framing a page to open it */
 var PNG_MAX_EDGE = 2000;    /* longest side of the image, in pixels */
 var PNG_MAX_AREA = 2600 * 2600;
 
@@ -556,10 +557,29 @@ function create(opts) {
     view.fit = wrap.clientWidth / p.w;
     view.k = view.fit;
     view.ox = 0;
-    /* A page shorter than the surface is centred; a taller one starts at the
-       top, where the writing begins. */
+    /* A page shorter than the surface is centred. A taller one starts where the
+       writing does -- which is NOT the top of the page.
+
+       It used to start at the top, on the reasoning that the top is "where the
+       writing begins". That is true of a fresh page and false of every page
+       somebody has worked down. This surface is a plane: you pan down and carry
+       on, and the page box grows to hold what you wrote, so on a real page of
+       an evening's homework the ink began 769 units down a box 1514 tall and the
+       top of it was blank paper. Opening that page showed the blank paper.
+       Reported as the working having disappeared off the boards, which from the
+       other side of the glass is exactly what it looks like -- and it took
+       reading the stroke coordinates to see that nothing had been lost at all.
+
+       The scale is untouched: still the page width, which is what makes
+       handwriting come out the size it was written at. Only the parking is
+       different. */
     var h = p.h * view.k;
-    view.oy = h < wrap.clientHeight ? (wrap.clientHeight - h) / 2 : 0;
+    if (h < wrap.clientHeight) {
+      view.oy = (wrap.clientHeight - h) / 2;
+    } else {
+      var b = inkBox();
+      view.oy = b ? -Math.max(0, b.y0 - FIT_PAD) * view.k : 0;
+    }
     clampView();
     invalidate();
   }
@@ -1715,7 +1735,17 @@ function create(opts) {
     if (!g) return "";
     var k = cssW / p.w;
     var drawn = p.h * k;
-    var oy = drawn < cssH ? (cssH - drawn) / 2 : 0;
+    /* Framed exactly as the live surface frames the same page -- on the writing,
+       not on the top of the box. A photograph has nobody to pan it, so a preview
+       parked above the ink is a board that reads as empty, and a board that reads
+       as empty reads as work that has been lost. */
+    var oy;
+    if (drawn < cssH) {
+      oy = (cssH - drawn) / 2;
+    } else {
+      var ib = inkBoxOf(p);
+      oy = ib ? -Math.max(0, ib.y0 - FIT_PAD) * k : 0;
+    }
     var skin = PAPERS[tool.paper];
     g.setTransform(k, 0, 0, k, 0, oy);
     var x0 = 0, y0 = -oy / k, x1 = cssW / k, y1 = y0 + cssH / k;

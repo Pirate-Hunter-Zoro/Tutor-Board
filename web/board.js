@@ -2218,6 +2218,13 @@ function paintBoards(qids, runEndOf, onQ, off) {
          long as the live surface happens to be under that question, and is a
          question posed with nowhere to answer it the moment anything parks the
          surface somewhere else. Something did. */
+      /* And it has to SAY it is blank. An empty board with the same caption as
+         a full one reads as a board whose working has gone missing, which is
+         how it was read the first evening it existed -- by someone whose ink
+         was on disk the whole time. A board is allowed to be empty; it is not
+         allowed to be ambiguous about it. */
+      slot.querySelector(".board-hint").textContent =
+        "question " + qid + " · nothing written here yet · tap to write";
       var blank = slot.querySelector(".board-shot");
       if (slot.dataset.shot !== "blank") {
         blank.removeAttribute("src");

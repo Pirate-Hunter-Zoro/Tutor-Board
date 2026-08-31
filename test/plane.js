@@ -38,8 +38,18 @@ const { window } = dom;
 const doc = window.document;
 
 const W = 900, H = 500;
+// Every 2d call is a no-op except `setTransform`, which is recorded: it is the
+// only way to ask, without a layout engine, WHERE on a page a drawing was framed
+// — and framing a page above its own writing is what made a board full of work
+// read as an empty one.
+window.__transforms = [];
 window.HTMLCanvasElement.prototype.getContext = () =>
-  new Proxy({}, { get: () => () => {}, set: () => true });
+  new Proxy({}, {
+    get: (t, k) => (k === 'setTransform'
+      ? (a, b, c, d, e, f) => { window.__transforms.push({ k: a, ox: e, oy: f }); }
+      : () => {}),
+    set: () => true,
+  });
 window.HTMLCanvasElement.prototype.toDataURL = () => 'data:image/png;base64,';
 Object.defineProperty(window.HTMLElement.prototype, 'clientWidth', { get: () => W });
 Object.defineProperty(window.HTMLElement.prototype, 'clientHeight', { get: () => H });
@@ -440,6 +450,78 @@ const heelSwipe = (id, x, y, dx, dy) => {
   typeof slate.busy === 'function'
     ? ok('and the surface can say whether a hand is in the middle of something')
     : fail('nothing can ask the slate whether it is being written on');
+
+// ------------------------------------------- opening a page frames the writing
+//
+// Reported as work having disappeared: the boards were still there and every
+// one of them was empty. Nothing had been lost — the page held 537 strokes and
+// was still saving — and that is the point. The surface is a plane. You pan
+// down and carry on, the page box grows to hold what you wrote, and on a real
+// page of an evening's homework the ink began 769 units down a box 1514 tall.
+//
+// `fitPage` parked the view at the top of the box, "where the writing begins",
+// which is true of a fresh page and false of every page anyone has worked down.
+// So opening that page showed a screenful of blank paper with the working below
+// the fold — and a dormant board, which is a photograph and has nobody to pan
+// it, showed blank paper and nothing else.
+{
+  const far = { w: 1130, h: 1514, strokes: [
+    { c: '#eee', w: 2, pts: [[200, 900], [400, 900], [400, 1100]] },
+    { c: '#eee', w: 2, pts: [[200, 1300], [600, 1320]] },
+  ] };
+  slate.load(far);
+
+  const box = slate.inkBox();
+  box && box.y0 > 800
+    ? ok('a page can have its writing far below the top of its box')
+    : fail('the fixture does not reproduce the shape that caused this');
+
+  const v = slate.view();
+  const topShown = -v.oy / v.k;             // the page-y sitting at the top edge
+  const bottomShown = topShown + H / v.k;
+  topShown > 700 && topShown <= box.y0
+    ? ok('and opening it parks the view on the writing, not above it')
+    : fail('the page opens on blank paper with the working below the fold '
+           + '(showing ' + Math.round(topShown) + '..' + Math.round(bottomShown)
+           + ', ink at ' + Math.round(box.y0) + ')');
+  bottomShown > box.y0
+    ? ok('so the first thing on the page is actually on screen')
+    : fail('nothing written is inside the opened view');
+
+  // The scale is not what changed. Handwriting comes out the size it was
+  // written at because the page WIDTH sets the zoom, and that is tested for its
+  // own reasons in test/sizing.js — framing must not quietly start zooming.
+  Math.abs(v.k - W / far.w) < 1e-9
+    ? ok('and the zoom is still the page width, so nothing is resized')
+    : fail('framing the ink changed the writing scale, which it must not');
+
+  // The photograph is framed the same way, because it stands for the same page.
+  window.__transforms.length = 0;
+  const url = slate.preview(0, 900, 500);
+  const drew = window.__transforms[0] || null;
+  url ? ok('a dormant board still gets a picture')
+      : fail('no preview was produced at all');
+  drew ? ok('drawn through a transform, which is what says where it looked')
+       : fail('the preview drew nothing at all');
+  if (drew) {
+    const top = -drew.oy / drew.k;
+    top > 700 && top <= box.y0
+      ? ok('and the picture is of the writing, not of the paper above it')
+      : fail('the board shows an empty band above the ink, which reads as work '
+             + 'that has been lost (showing from ' + Math.round(top)
+             + ', ink at ' + Math.round(box.y0) + ')');
+  }
+
+  // A page written from the top is unaffected: it frames from the top, as it
+  // always did, because that is where its ink is.
+  slate.load({ w: 1130, h: 1514, strokes: [
+    { c: '#eee', w: 2, pts: [[100, 40], [300, 60]] },
+  ] });
+  const v2 = slate.view();
+  -v2.oy / v2.k < 40
+    ? ok('and a page written from the top still opens at the top')
+    : fail('an ordinary page now opens somewhere other than its first line');
+}
 
   console.log(errors.length ? '\n' + errors.length + ' FAILURES'
                             : '\nthe surface is a plane, and a finger is not a pen');
