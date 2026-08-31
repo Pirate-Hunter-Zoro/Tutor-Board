@@ -20,7 +20,9 @@ git pull --ff-only
 A fix shipped from the other machine has to be in front of you before you build on
 it, or you will be fixing a board that is not the one running. It is deliberately
 never fatal: no remote, no network, or a diverged branch say so in one line and you
-carry on. But start from what is on disk, not from what was there when you last
+carry on. `tutor` and `tutor resume` now do this for the machine — pull, re-exec,
+and bounce what is holding old code — but a session of yours may have been open
+since before the last one of those ran, so pull anyway. But start from what is on disk, not from what was there when you last
 opened it. The same rule applies to a course repository — its lesson transcript
 (cards, turns, ink, answers) is versioned too, so a lecture picked up here is the
 same one taught there. The headless tutor pushes that transcript on a beat and the

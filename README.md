@@ -54,6 +54,17 @@ which kind of subject it is and the board adapts.
 > [Test review](#test-review--revising-for-a-paper); `review.py` owns the discovery and the scope,
 > `test/review.py` and `test/review.js` hold it.
 >
+> **The board now pulls itself, on both machines.** Reported from the compute node: a shipped fix
+> had to be `git pull`-ed there by hand, which was supposed to have stopped being true when the
+> login hook went in. It never was true — the hook runs `tutor resume`, and `resume` pulled the
+> *course* and never the tool. `tutor` and `tutor resume` now fast-forward this repository as well,
+> re-exec onto what arrived, and then run `tutor restart --tutors`; `scripts/tool-pull.sh` on the
+> Mac does the same rather than bouncing only the proxy, which is what had left the always-on
+> host's own boards serving old code after every pull. Under
+> [Every session starts by catching up](#every-session-starts-by-catching-up), guarded by
+> `test/resume.py`. **The one thing to know about it:** the node has to be pulled by hand *once
+> more*, because the version of the launcher that would do it for you is the one being installed.
+>
 > Two things came out of screenshotting it, and both are in the defect table: the contents drawer
 > had never actually been a drawer (an empty `#contents { }` rule under a comment claiming it
 > borrowed the scratch drawer's), and `TEST REVIEW` in the badge was wide enough to squeeze the
@@ -292,6 +303,8 @@ these tests fail, the test is right.
 | Pressing Send moved the board upwards and re-fitted the writing surface underneath it. Two causes: nothing put the page under the working, where the receipt and the tutor's "writing…" both are; and the payload the send provoked carried a turn one revision newer than the one on the surface, so `restoreAnswer` fetched the answer back off the server and handed it to `load`, which re-fits the page — throwing away the zoom the working had been written at, on every send | `revealSent` anchors to the foot of the surface; the send records the revision it just sent; `test/feedback.js` |
 | A pen stroke appeared under the nib and was gone by the time the hand moved. Pointer ids are small integers and the platform reuses them, so a palm whose lift the surface never saw stayed in the map and came back attached to the Pencil — and the lift handler, seeing a known palm, returned before committing the stroke | a pen is never a palm, whatever the id says; `isPalm` takes the event, not the number; `test/plane.js` |
 | Ink was lost to two autosaves racing to the disk: a save builds its body when it is called, so the version that lands is whichever the server writes second — regularly the older one — and any save completing cleared the dirty flag, so once a stale one landed last nothing scheduled another. `board.log` showed 111 strokes saved, then 106, then 111 | one save on the wire at a time, and `changeSeq` so a save only reports success for the page it actually carried; `test/plane.js` |
+| The compute node never pulled the board. Every session pulled the *course*, and the always-on host had a timer for the tool, but `--tool-pull` refuses to install one on a node — so the node ran whatever it was last pulled by hand, indefinitely, while the Mac moved on. And the timer that did run bounced only the proxy on purpose, so the Mac's own boards and tutors went on serving the old code after every pull: a fix reached the disk of both machines and the lesson of neither | `tutor` and `tutor resume` pull this repository, re-exec onto it, and then `tutor restart --tutors`; `scripts/tool-pull.sh` does the same; `test/resume.py` |
+| ...and the first version of that fix could not say it had happened: `execve` throws away whatever is sitting in the process's buffers, and stdout is a pipe or a log file every time this runs for real — so the one line explaining why the board changed under somebody's lesson was dropped on the way out | a flush before the exec; `test/resume.py` drives a real clone and reads what it printed |
 | A deploy dropped somebody mid-proof into a different course: starting a board claimed the tailnet name unconditionally, and `tutor restart` restarts every board on the machine one after another — so the address ended up wherever the course list happened to end. The installed app has one URL baked into it and no way to say which lesson it wanted | `ts_repoint` will not take a name from a board that is still answering; `board vpn serve` is the one command that does, because that is a person asking; `test/address.py` |
 
 The pattern in most of them: a stub that returns a plausible object for everything will report that
@@ -512,8 +525,10 @@ tutor resume --no-agent      the board, and you drive the tutor yourself
 tutor resume --force         move it even from a node that is still alive
 ```
 
-It brings the link up, starts the board for the course you were last in, re-points the tailnet
-name, and attaches a tutor.
+It catches this machine up on the board and on the course, brings the link up, starts the board for
+the course you were last in, re-points the tailnet name, and attaches a tutor. The first of those is
+the reason the hook below matters as much as it does: nothing else pulls this repository on a
+compute node, because nothing on one survives long enough to run a timer.
 
 **Which course** is the newer of two signals: when you last *named* one (`tutor galois`,
 `tutor headless galois`, `tutor resume galois` — recorded in
@@ -540,7 +555,10 @@ bash scripts/install-autostart.sh --login-hook
 bash scripts/install-autostart.sh --uninstall
 ```
 
-That appends a marked block to `~/.bashrc`, which the shared home puts on every node. It runs in
+That appends a marked block to `~/.bashrc`, which the shared home puts on every node. It is what
+keeps the node current: a fix shipped from the Mac is pulled, the launcher re-execs onto it, and
+anything still running the old code is bounced — see
+[Every session starts by catching up](#every-session-starts-by-catching-up). It runs in
 **interactive shells only** — a login file that writes to stdout breaks `scp`, `sftp` and
 git-over-ssh with a remote error nobody can read — takes a lock so five terminals do not race, and
 backgrounds itself so no prompt ever waits on the network. `~/.tutor-resume.log` has whatever it
@@ -861,6 +879,29 @@ It is deliberately never fatal. No remote, no network, or a branch that has dive
 one line and the session starts anyway on what is on disk. Somebody holding an iPad cannot resolve
 a merge, and a session that refuses to start is worse than a session that starts a commit behind.
 
+**And the board pulls itself, on the same beat.** The course was only ever half of it: `tutor` and
+`tutor resume` also fast-forward *this* repository, under the same never-fatal rule. The always-on
+host had a timer for that and a compute node had nothing at all — `--tool-pull` refuses to install
+one there, because a timer on a machine that ceases to exist is not a plan — so a fix shipped from
+the Mac sat on GitHub until somebody remembered to `git pull` by hand on the node. Remembering by
+hand is the thing this repository keeps failing at, and a login is the only moment a node gets.
+
+Two things follow from the pull, and neither is optional:
+
+- **The launcher re-execs itself** when the pull moves `HEAD`. `bin/tutor` was read into memory
+  when the process started, exactly the way a board reads `serve.py`, so carrying on inside the
+  launcher that was there before the pull is the same defect one level further in — and the hardest
+  version of it to see, because the code reporting what it did would be the code that was replaced.
+- **Then it bounces what is still holding the old code**, which is `tutor restart --tutors`: the
+  boards answering on this machine, the tutors that are not mid-turn, and the proxy if this is the
+  always-on host. This is `scripts/ship.sh` seen from the other end. Shipping bounces the machine a
+  change is *written* on; without the same act on the machine that *receives* it, the fix is on
+  disk and nowhere else, and the pages look new while the endpoints behind them are the old ones.
+
+Only the two commands that begin a session do this. `tutor restart` does not, because `ship.sh`
+calls it seconds after its own push and a second fetch there is a network round trip that finds
+nothing.
+
 ### Always-on, with the machine that holds the repository preferred
 
 **The goal.** Open the app on the iPad, pick a course, get a session. No command anywhere, ever.
@@ -927,9 +968,11 @@ The pieces:
 - **`scripts/install-autostart.sh --always-on`** — the course-less form, registering three
   LaunchAgents: `com.tutorboard.follow` (KeepAlive proxy), `com.tutorboard.resume`
   (StartInterval `tutor resume --quiet`, the warm board it falls back to), and
-  `com.tutorboard.pull` (`scripts/tool-pull.sh`, which keeps this repository current and restarts
-  the follower when the pull moves HEAD — the follower has to agree with the compute node about
-  where courses live, and a process holds the code it started with).
+  `com.tutorboard.pull` (`scripts/tool-pull.sh`, which keeps this repository current and, when the
+  pull moves HEAD, runs `tutor restart --tutors` — the boards, the tutors and the follower all hold
+  the code they started with, and the follower in particular has to agree with the compute node
+  about where courses live). The periodic resume pulls by the same route a login on the node does;
+  whichever of the two gets there first does the same thing.
 - **`/handover`** in `serve.py` — a secret-gated way for one machine to ask the other to wrap up
   its tutor before the proxy moves. `bin/follow` is its caller, on the transition off a remote
   machine and only there.

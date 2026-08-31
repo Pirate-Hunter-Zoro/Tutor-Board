@@ -1,19 +1,28 @@
 #!/usr/bin/env bash
 # ===========================================================================
-#  tool-pull.sh -- keep this repository, and the proxy running out of it,
+#  tool-pull.sh -- keep this repository, and the processes running out of it,
 #  current on a machine that is always on.
 #
-#  The pull on its own was not enough. `bin/follow` is a long-lived process that
-#  read its code once, when launchd started it, so pulling a fix to the proxy put
-#  the new file on disk beside an old process and changed nothing at all -- the
-#  same way a board holds the `serve.py` it started with. That is invisible from
-#  the outside and it is exactly the shape of bug this repository keeps relearning.
+#  The pull on its own was not enough, twice over.
 #
-#  So: pull, and if the pull actually moved HEAD, restart the follower.
+#  `bin/follow` is a long-lived process that read its code once, when launchd
+#  started it, so pulling a fix to the proxy put the new file on disk beside an
+#  old process and changed nothing at all. That was the first version of this
+#  script's discovery, and it is the same one a board makes about `serve.py`.
 #
-#  Boards are deliberately NOT restarted here. A board is somebody's lesson, and
-#  bouncing one because a commit landed on another machine is a decision for
-#  `tutor restart`, made by a person who knows whether anybody is mid-proof.
+#  The second is that a board makes it too, and this script used to leave boards
+#  alone on purpose -- the argument being that bouncing somebody's lesson because
+#  a commit landed elsewhere was a person's decision. In practice nobody ever
+#  made that decision, so a fix shipped from the compute node reached the Mac's
+#  disk and never reached the lesson: the pages are served from disk and look new
+#  while the endpoints behind them are the old ones. `scripts/ship.sh` bounces
+#  boards and tutors on the machine a change is written on, and the machine that
+#  receives the change has to do the same or the change is not shipped, it is
+#  merely stored.
+#
+#  So: pull, and if the pull actually moved HEAD, put this machine on the code
+#  that arrived. `tutor restart --tutors` owns what is safe to touch -- only
+#  boards answering on this node, the proxy, and never a tutor mid-turn.
 #
 #      bash scripts/tool-pull.sh
 # ===========================================================================
@@ -38,15 +47,6 @@ fi
 
 echo "$(date '+%Y-%m-%d %H:%M:%S') pulled ${before:0:8} -> ${after:0:8}"
 
-# The follower is the half that has to match the other machine: it derives the
-# ports a course serves on and reads the choice a board publishes, so a stale one
-# looks for boards where they are no longer and quietly serves the local warm
-# board instead of the compute node.
-if [ "$(uname -s)" = "Darwin" ]; then
-  LABEL="com.tutorboard.follow"
-  if launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
-    launchctl kickstart -k "gui/$(id -u)/$LABEL" \
-      && echo "  restarted $LABEL on the new code" \
-      || echo "  could not restart $LABEL; it is still on the old code" >&2
-  fi
-fi
+# One implementation of "put this machine on the new code", in `bin/tutor`, so
+# this script and `tutor resume` cannot drift apart about what gets bounced.
+python3 "$HERE/bin/tutor" restart --tutors 2>&1 | sed 's/^/  /'

@@ -317,6 +317,215 @@ try:
           os.path.exists(ghost_rec))
     shutil.rmtree(ghost)
 
+
+    # --- the board catches ITSELF up ---------------------------------------
+    # `sync` above pulls a course. Nothing pulled the board, on the one machine
+    # where nothing else could: `--tool-pull` refuses to install a timer on a
+    # compute node, because a timer on a machine that ceases to exist is not a
+    # plan. So a fix shipped from the Mac sat on GitHub until somebody pulled it
+    # by hand -- and remembering by hand is precisely the thing this repository
+    # keeps failing at. The login hook is the only moment a node gets, and
+    # `tutor resume` is what the hook runs.
+    import contextlib  # noqa: E402
+    import io as _io   # noqa: E402
+    import subprocess as _sp  # noqa: E402
+
+    def git(where, *args):
+        return _sp.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                        "-c", "commit.gpgsign=false"] + list(args), cwd=where,
+                       stdout=_sp.PIPE, stderr=_sp.STDOUT, timeout=60)
+
+    gits = tempfile.mkdtemp(prefix="tutor-toolpull-")
+    try:
+        origin = os.path.join(gits, "origin")
+        os.makedirs(origin)
+        git(origin, "init", "-q", "-b", "main")
+        open(os.path.join(origin, "serve.py"), "w").write("one\n")
+        git(origin, "add", "-A")
+        git(origin, "commit", "-qm", "one")
+
+        clone = os.path.join(gits, "clone")
+        git(gits, "clone", "-q", origin, clone)
+
+        check("a clone that is already current says nothing at all",
+              tutor.tool_pull(clone) == (False, None))
+
+        open(os.path.join(origin, "serve.py"), "w").write("two\n")
+        git(origin, "add", "-A")
+        git(origin, "commit", "-qm", "two")
+
+        moved, msg = tutor.tool_pull(clone)
+        check("a commit pushed from the other machine is pulled here",
+              moved and open(os.path.join(clone, "serve.py")).read() == "two\n")
+        check("and it says which two commits, because a log is read afterwards",
+              bool(msg) and "->" in msg)
+
+        # Never fatal, in every way a pull can fail. Somebody is holding an iPad
+        # and cannot resolve a merge; a launcher that refuses to launch is worse
+        # than a launcher one commit behind.
+        open(os.path.join(clone, "serve.py"), "w").write("mine\n")
+        git(clone, "add", "-A")
+        git(clone, "commit", "-qm", "diverged")
+        open(os.path.join(origin, "serve.py"), "w").write("theirs\n")
+        git(origin, "add", "-A")
+        git(origin, "commit", "-qm", "theirs")
+        moved, msg = tutor.tool_pull(clone)
+        check("a diverged branch is reported and left alone, never resolved",
+              moved is False and msg and "did not update" in msg)
+
+        lone = os.path.join(gits, "lone")
+        os.makedirs(lone)
+        git(lone, "init", "-q", "-b", "main")
+        open(os.path.join(lone, "x"), "w").write("x\n")
+        git(lone, "add", "-A")
+        git(lone, "commit", "-qm", "x")
+        check("a clone with no remote is not a failure, it is a machine",
+              tutor.tool_pull(lone) == (False, None))
+        check("and neither is a directory that is not a repository at all",
+              tutor.tool_pull(gits) == (False, None))
+    finally:
+        shutil.rmtree(gits, ignore_errors=True)
+
+    # The half that matters more than the pull. A board read `serve.py` when it
+    # started, a tutor read `bin/tutor`, and the proxy read `bin/follow`: a pull
+    # that bounces nothing leaves the fix on disk and out of the lesson, which is
+    # the most expensive misunderstanding this repository has produced. And the
+    # launcher itself is one of those processes, so it re-execs -- otherwise the
+    # code reporting what it did would be the code that was just replaced.
+    ran = {"pull": 0, "exec": 0, "restart": []}
+    real_pull, real_exec, real_restart = tutor.tool_pull, tutor.tool_reexec, tutor.cmd_restart
+    try:
+        def fake_pull(root=None):
+            ran["pull"] += 1
+            return ran["answer"]
+
+        def fake_exec():
+            ran["exec"] += 1
+            return False        # the real one does not return; this one has to
+
+        tutor.tool_pull = fake_pull
+        tutor.tool_reexec = fake_exec
+        tutor.cmd_restart = lambda cfg, args: ran["restart"].append(list(args)) or 0
+
+        def sync_with(stage, answer, quiet=False):
+            for k in ("pull", "exec"):
+                ran[k] = 0
+            ran["restart"] = []
+            ran["answer"] = answer
+            os.environ.pop(tutor.TOOL_SYNC, None)
+            if stage:
+                os.environ[tutor.TOOL_SYNC] = stage
+            said = _io.StringIO()
+            with contextlib.redirect_stdout(said):
+                tutor.tool_sync(cfg, quiet=quiet)
+            return said.getvalue()
+
+        said = sync_with(None, (False, None))
+        check("a pull that moves nothing restarts nothing and says nothing",
+              ran["pull"] == 1 and not ran["exec"] and not ran["restart"] and not said)
+
+        said = sync_with(None, (True, "  pulled the board: aaaaaaaa -> bbbbbbbb"))
+        check("a pull that moves HEAD re-execs, so the rest runs the new code",
+              ran["exec"] == 1)
+        check("and says so even under --quiet, because a lesson just changed",
+              "pulled the board" in sync_with(None, (True, "  pulled the board: a -> b"),
+                                              quiet=True))
+
+        said = sync_with("moved", (False, None))
+        check("on the other side of the re-exec it does not pull again",
+              ran["pull"] == 0)
+        check("and puts the boards, the tutors and the proxy on the new code",
+              ran["restart"] == [["--tutors"]])
+
+        said = sync_with("done", (True, "  pulled"))
+        check("and once a process tree has pulled, nothing pulls again",
+              ran["pull"] == 0 and not ran["restart"] and not said)
+
+        said = sync_with(None, (False, "  the board could not reach its remote"), quiet=True)
+        check("no network on a login is silent — the hook runs on every shell",
+              not said)
+        said = sync_with(None, (False, "  the board could not reach its remote"))
+        check("...and is said out loud when a person is watching",
+              "could not reach" in said)
+    finally:
+        tutor.tool_pull, tutor.tool_reexec, tutor.cmd_restart = real_pull, real_exec, real_restart
+        os.environ.pop(tutor.TOOL_SYNC, None)
+
+    # The re-exec, for real, because a stub cannot prove it. A real launcher, in
+    # a real clone, with a real commit waiting on its remote: it must come out the
+    # other side running the code that arrived, and it must still be able to say
+    # so. The first version could not -- `execve` throws away whatever is sitting
+    # in this process's buffers, and stdout is a pipe or a log file every time
+    # this runs for real, so the one line explaining why the board changed under
+    # somebody's lesson was dropped on the way.
+    real = tempfile.mkdtemp(prefix="tutor-reexec-")
+    try:
+        up = os.path.join(real, "origin")
+        os.makedirs(os.path.join(up, "bin"))
+        for rel in ("bin/tutor", "bin/board", "boardlib.py"):
+            shutil.copy(os.path.join(ROOT, rel), os.path.join(up, rel))
+        git(up, "init", "-q", "-b", "main")
+        git(up, "add", "-A")
+        git(up, "commit", "-qm", "the tool")
+
+        down = os.path.join(real, "clone")
+        git(real, "clone", "-q", up, down)
+
+        with open(os.path.join(up, "shipped.txt"), "w") as fh:
+            fh.write("a fix written on the other machine\n")
+        git(up, "add", "-A")
+        git(up, "commit", "-qm", "a fix")
+
+        conf2 = os.path.join(real, "conf", "tutor-board")
+        os.makedirs(conf2)
+        with open(os.path.join(conf2, "config.json"), "w", encoding="utf-8") as fh:
+            json.dump({"courses_dir": os.path.join(real, "courses"),
+                       "default_agent": "free"}, fh)
+        os.makedirs(os.path.join(real, "courses"))
+
+        env = dict(os.environ, XDG_CONFIG_HOME=os.path.join(real, "conf"))
+        env.pop(tutor.TOOL_SYNC, None)
+        run = _sp.run([sys.executable, os.path.join(down, "bin", "tutor")], env=env,
+                      stdout=_sp.PIPE, stderr=_sp.STDOUT, timeout=180)
+        said = run.stdout.decode("utf-8", "replace")
+        check("a real launcher pulls the fix waiting on its remote",
+              os.path.exists(os.path.join(down, "shipped.txt")))
+        check("and the line saying so survives the re-exec into it",
+              "pulled the board" in said)
+        check("and what was holding the old code is bounced on the other side",
+              "no boards were running" in said)
+    finally:
+        shutil.rmtree(real, ignore_errors=True)
+
+    # And the wiring, which is the part that was missing rather than wrong: the
+    # login hook runs `tutor resume --quiet`, so unless the dispatch calls this
+    # before the course is chosen the node goes on running whatever it was
+    # cloned with.
+    order = []
+    real_sync, real_resume = tutor.tool_sync, tutor.cmd_resume
+    real_cfg = tutor.load_config
+    try:
+        tutor.load_config = lambda: cfg
+        tutor.tool_sync = lambda c, quiet=False: order.append(("sync", quiet))
+        tutor.cmd_resume = lambda c, a: order.append(("resume", list(a))) or 0
+        tutor.main(["resume", "--quiet"])
+        check("`tutor resume` catches the board up before it resumes anything",
+              order == [("sync", True), ("resume", ["--quiet"])])
+        order[:] = []
+        tutor.main(["resume", "galois"])
+        check("and without --quiet it is allowed to say why it did nothing",
+              order and order[0] == ("sync", False))
+    finally:
+        tutor.tool_sync, tutor.cmd_resume, tutor.load_config = real_sync, real_resume, real_cfg
+
+    # The launcher must not pull inside `tutor restart`: `ship.sh` calls that
+    # immediately after its own push, and a second fetch there finds nothing,
+    # takes a network round trip, and prints a line about it.
+    body = open(os.path.join(ROOT, "bin", "tutor"), encoding="utf-8").read()
+    after_restart = body.split('if args and args[0] in ("restart"')[1]
+    check("`tutor restart` does not pull; the ship it follows just pushed",
+          "tool_sync" not in after_restart.split("\n\n")[0])
+
     # --- the login hook itself ---------------------------------------------
     # It is appended to a file that runs on every shell on every machine, so the
     # ways it can do damage are: printing something (which breaks scp, sftp and

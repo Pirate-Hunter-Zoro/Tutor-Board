@@ -629,6 +629,171 @@ def sync(root, quiet=False):
     return True
 
 
+# ---------------------------------------------------------------------------
+# The tool pulls itself.
+#
+# `sync` above catches a COURSE up -- the lesson, the handoff, the chapters
+# another machine taught. Nothing ever caught up the *board*. On the always-on
+# host a launchd timer does it (`scripts/tool-pull.sh`), and `--tool-pull`
+# deliberately refuses to install on a compute node, because a timer on a machine
+# that ceases to exist is not a plan. So the node had nothing at all: a fix
+# shipped from the Mac sat on GitHub until somebody remembered to pull it by
+# hand, and remembering by hand is the thing this repository keeps failing at.
+#
+# The only moment a compute node gets is the moment you log in to it, which is
+# already where `tutor resume` runs. So the pull goes there, and the launcher
+# gets it too.
+#
+# Three states, carried in the environment across the re-exec below:
+#
+#   unset     nothing has been pulled yet in this process tree;
+#   "moved"   the pull moved HEAD, and this process is the one running the code
+#             that arrived -- what is still holding the old code must be bounced;
+#   "done"    pulled, or there was nothing to pull. Do not pull again.
+TOOL_SYNC = "TUTOR_TOOL_SYNC"
+FOLLOW_LABEL = "com.tutorboard.follow"
+
+
+def tool_pull(root=None):
+    """Fast-forward this repository, the tool itself. Returns (moved, message).
+
+    Same rules as `sync`, for the same reasons: `--ff-only`, never fatal, and
+    quiet when there was nothing to do. A diverged branch or a dead remote is one
+    line and the session starts anyway -- somebody holding an iPad cannot resolve
+    a merge, and a launcher that refuses to launch is worse than a launcher one
+    commit behind.
+    """
+    root = root or TOOL
+    if not os.path.isdir(os.path.join(root, ".git")):
+        return False, None
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_ASKPASS="/bin/false")
+
+    def git(*args, **kw):
+        return subprocess.run(["git"] + list(args), cwd=root, env=env,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              timeout=kw.get("timeout", 45))
+    try:
+        if git("remote", "get-url", "origin").returncode != 0:
+            return False, None
+        before = git("rev-parse", "HEAD").stdout.decode().strip()
+        p = git("pull", "--ff-only", timeout=60)
+        after = git("rev-parse", "HEAD").stdout.decode().strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return False, "  the board could not reach its remote; running what is here"
+    if p.returncode != 0:
+        out = p.stdout.decode("utf-8", "replace").strip().splitlines()
+        return False, ("  the board did not update: %s"
+                       % (out[-1] if out else "pull failed"))
+    if not before or before == after:
+        return False, None
+    return True, "  pulled the board: %s -> %s" % (before[:8], after[:8])
+
+
+def restart_follower():
+    """Bounce the always-on host's proxy, which is a process like any other.
+
+    It is the one process here that has to agree with the OTHER machine: it
+    derives the ports a course serves on and reads the choice a board publishes,
+    so a stale one looks for boards where they are no longer and quietly serves
+    the local warm board instead of the lesson on the node.
+
+    Only the one launchd owns. An ad-hoc `bin/follow` on another port is
+    somebody's experiment and is not ours to kill.
+    """
+    if sys.platform != "darwin":
+        return False
+    target = "gui/%d/%s" % (os.getuid(), FOLLOW_LABEL)
+    try:
+        seen = subprocess.run(["launchctl", "print", target],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if seen.returncode != 0:
+            return False
+        done = subprocess.run(["launchctl", "kickstart", "-k", target],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        return False
+    if done.returncode == 0:
+        print("  restarted %s on the new code" % FOLLOW_LABEL)
+        return True
+    print("  could not restart %s; it is still on the old code" % FOLLOW_LABEL)
+    return False
+
+
+def tool_reexec():
+    """Replace this process with the version of it that was just pulled.
+
+    `bin/tutor` was read into memory when this process started, exactly the way a
+    board reads `serve.py` and the proxy reads `bin/follow`. Pulling a fix to the
+    launcher and then carrying on inside the launcher that was there before the
+    pull is the same bug this repository keeps relearning, one level further in --
+    and it is the one that would be hardest to see, because the version that
+    reports what it did would be the old one.
+
+    Normally this does not return. If the exec fails there is nothing to do but
+    carry on with what is loaded, which is a commit behind and still works.
+    """
+    os.environ[TOOL_SYNC] = "moved"
+    # `execve` throws away whatever is sitting in this process's buffers, and
+    # stdout is a pipe or a log file every time this runs for real -- which is
+    # to say buffered. The line saying what was pulled would be lost in exactly
+    # the situation it was written for: reading the log afterwards to find out
+    # why the board changed under a lesson.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    try:
+        os.execve(sys.executable,
+                  [sys.executable, os.path.realpath(__file__)] + sys.argv[1:],
+                  dict(os.environ))
+    except OSError:
+        os.environ[TOOL_SYNC] = "done"
+    return False
+
+
+def tool_adopt(cfg):
+    """Put the processes still holding the old code onto the code that arrived.
+
+    This is `scripts/ship.sh` seen from the other end. Shipping bounces the boards
+    and tutors on the machine the change was written on; the machine that
+    *receives* the change has to do the same thing, or the fix is on disk and
+    nowhere else -- the pages are served from disk and look new while the
+    endpoints behind them are the old ones. That is the single most expensive
+    misunderstanding this repository has produced, and a pull without a restart
+    is how it happens quietly.
+
+    `cmd_restart` decides what is safe to touch: only boards answering on this
+    node, the proxy if this machine has one, and never a tutor mid-turn.
+    """
+    return cmd_restart(cfg, ["--tutors"]) == 0
+
+
+def tool_sync(cfg, quiet=False):
+    """Catch this machine up on the board, and bounce what is holding old code.
+
+    Called from the two places a session begins -- `tutor resume`, which is what a
+    login hook runs, and the launcher. Not from `tutor restart`, which `ship.sh`
+    calls immediately after a push, where there is nothing to pull.
+
+    `quiet` silences the "there is no network today" line, which would otherwise
+    appear on every login on a machine that has none. It does not silence an
+    actual update: a board that has just changed underneath a running lesson is
+    worth a line in the log, and both callers of `--quiet` write to one.
+    """
+    stage = os.environ.get(TOOL_SYNC)
+    if stage == "moved":
+        os.environ[TOOL_SYNC] = "done"
+        return tool_adopt(cfg)
+    if stage:
+        return False
+    moved, msg = tool_pull()
+    os.environ[TOOL_SYNC] = "done"
+    if msg and (moved or not quiet):
+        print(msg)
+    if not moved:
+        return False
+    tool_reexec()                 # normally never returns
+    return tool_adopt(cfg)
+
+
 def sync_transcript(root, log=None):
     """Commit and push the lesson transcript, pulling first.
 
@@ -1119,7 +1284,7 @@ def headless(cfg, course, agent_name, session):
 
 
 def cmd_restart(cfg, args):
-    """Restart every board running on this machine, on the current code.
+    """Restart every long-lived process on this machine, on the current code.
 
     A board is a long-lived process that read `serve.py` when it started, so a
     change to this tool reaches a course only when its board comes back. That is
@@ -1129,7 +1294,8 @@ def cmd_restart(cfg, args):
 
     Only boards that are actually answering on this node are touched -- a record
     on a shared filesystem may belong to another machine, and stopping a stranger's
-    process is worse than leaving a stale one.
+    process is worse than leaving a stale one. The always-on host's proxy is
+    bounced too, for the same reason the boards are; `--tutors` adds the daemons.
     """
     import boardlib
     host = this_host()
@@ -1159,6 +1325,14 @@ def cmd_restart(cfg, args):
         print("no boards were running on %s" % host)
     for s2 in skipped:
         print("  left alone: %s" % s2)
+
+    # The proxy on the always-on host is a long-lived process out of this same
+    # repository, and "restart every board here on the current code" has to mean
+    # it too: it derives the ports a course serves on, so a follower a few commits
+    # behind the boards it is looking for knocks in the wrong place and quietly
+    # serves the local warm board instead of the lesson. A no-op anywhere there is
+    # no follower, which is every machine but one.
+    restart_follower()
 
     if "--tutors" not in args:
         return 0
@@ -1552,7 +1726,11 @@ def main(argv):
         return cmd_where(cfg, args[1:])
 
     if args and args[0] == "resume":
-        return cmd_resume(cfg, argv[argv.index("resume") + 1:])
+        rest = argv[argv.index("resume") + 1:]
+        # Before anything, and before the course is caught up: this is what a
+        # login hook runs, and on a compute node it is the only moment there is.
+        tool_sync(cfg, quiet="--quiet" in rest)
+        return cmd_resume(cfg, rest)
 
     if args and args[0] == "agent":
         return cmd_agent(cfg, argv[argv.index("agent") + 1:])
@@ -1566,6 +1744,11 @@ def main(argv):
         remember_course(course)
         return headless(cfg, course, resolve_agent(cfg, course, flags["agent"]),
                         flags["session"])
+
+    # Starting a session by hand is the other moment worth catching up in. It
+    # comes before the course is chosen because a re-exec throws away everything
+    # done so far, and doing that after a prompt would ask the question twice.
+    tool_sync(cfg)
 
     found = courses(cfg)
     if not found:

@@ -63,7 +63,11 @@ if [ "${1:-}" = "--login-hook" ]; then
   cat >> "$RC" <<HOOK
 
 $BEGIN_MARK
-# Take the board over on whatever machine this is, if it should be taken over.
+# Catch this machine up on the board and take it over, if it should be taken
+# over. A login is the only moment a compute node gets: nothing here survives the
+# allocation, and no timer can keep the tool current on a machine that ceases to
+# exist -- so \`tutor resume\` pulls this repository as well as the course, and
+# bounces whatever is still holding the old code.
 # Interactive shells only: a login file that writes to stdout breaks scp, sftp
 # and git-over-ssh, and that failure is remote and baffling. Backgrounded, so a
 # slow network never delays a prompt. The resume command itself decides whether
@@ -112,14 +116,15 @@ fi
 
 if [ "${1:-}" = "--tool-pull" ]; then
   # Keep this repository fresh on a machine that is always on. A person ships a
-  # board fix from a compute node and comes back to the Mac: the next session
-  # here should read the new code without anybody remembering to pull. `--ff-only`
+  # board fix from a compute node and comes back to the Mac: the lesson here
+  # should be on the new code without anybody remembering to pull. `--ff-only`
   # so a diverged branch is logged and left, never force-resolved; a session that
-  # starts a commit behind is still a session. This does NOT restart a running
-  # board -- that is `tutor restart`, and a board holds the code it started with.
+  # starts a commit behind is still a session.
   #
-  # It does restart the follower, which is the one process here that MUST agree
-  # with the other machine about where courses live. See scripts/tool-pull.sh.
+  # A pull that moves HEAD is followed by `tutor restart --tutors`, because a
+  # board, a tutor and the proxy all hold the code they started with -- a pull
+  # that bounces nothing leaves the fix on disk and out of the lesson. See
+  # scripts/tool-pull.sh.
   SH="$(command -v bash)"
   case "$(uname -s)" in
     Darwin)
