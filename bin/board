@@ -9,6 +9,8 @@ The assistant runs these. The student never does.
     board stop                         bring it down
     board open "Galois Theory" "Ch 7 -- splitting fields" [--lecture|--homework]
                                        archive the last lesson, label the new one
+    board open "Galois" --review --over ch01 --over ch07
+                                       a test review over the chapters named
     board finish                       offer the push, on the iPad, at session end
     board push ["message"]             commit and push this repository now
     board next [kind] [slug]           print the path of the next card to write
@@ -25,6 +27,9 @@ The assistant runs these. The student never does.
     board hw use <name>                say which set this sitting is (hw04, ch07)
     board hw build                     compile it; the result appears on the board
     board hw file <label> [--turn tNN]  file a sent page into the set's handwritten/
+    board review [status]              what this test review covers
+    board review list                  everything this repository can be reviewed over
+    board review over ch01 ch07        say what the review covers, without reopening
     board net                          every URL the board answers on
     board vpn up [--hostname N]        the Tailscale link (name defaults to 'board')
     board vpn status|serve|down, for devices off this network
@@ -35,7 +40,9 @@ The assistant runs these. The student never does.
     board limit [--clear|--set S]      has the tutor's allowance here run out
     board eyes [--answer]              can the assistant driving this actually see?
 
-Card kinds: lesson, question, correct, wrong, review, note, recap.
+Card kinds: lesson, question, correct, wrong, review, note, recap. (A `review`
+card is you reviewing an answer; a `--review` sitting is the student revising for
+a test. Different namespaces, same word.)
 """
 
 import glob
@@ -52,6 +59,7 @@ TOOL = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, TOOL)
 import boardlib
 import homework
+import review
 SERVE = os.path.join(TOOL, "serve.py")
 KINDS = ("lesson", "question", "correct", "wrong", "review", "note", "recap")
 
@@ -409,6 +417,10 @@ def cmd_status(live, args):
     print("chapter: %s" % st.get("chapter", "-"))
     print("session: %s%s" % (st.get("session", "lecture"),
                              "  (finish offered)" if st.get("finished") else ""))
+    if (st.get("session") or "") == "review":
+        scope = review.scope(live.root, st)
+        print("review:  %s"
+              % (", ".join(u["short"] for u in scope) if scope else "nothing chosen"))
     print("cards:   %d" % len(live.card_names()))
     msgs = read_messages(live)
     print("unread:  %d" % sum(1 for m in msgs if not m.get("read")))
@@ -425,6 +437,7 @@ def cmd_open(live, args):
     """
     session = None
     which = None
+    over = []
     rest = []
     skip_next = False
     for i, a in enumerate(args):
@@ -435,17 +448,48 @@ def cmd_open(live, args):
             session = "lecture"
         elif a == "--homework":
             session = "homework"
+        elif a in ("--review", "--test-review"):
+            session = "review"
         elif a == "--set":
             which = args[i + 1] if i + 1 < len(args) else None
+            skip_next = True
+        elif a == "--over":
+            # Repeated rather than comma-separated: a chapter title is allowed a
+            # comma in it and a scope that splits on one would quietly review
+            # half a chapter.
+            if i + 1 < len(args):
+                over.append(args[i + 1])
             skip_next = True
         else:
             rest.append(a)
     course = rest[0] if len(rest) > 0 else None
     chapter = rest[1] if len(rest) > 1 else None
+
+    chosen = []
+    if session == "review":
+        chosen, unknown = review.resolve(live.root, over)
+        for name in unknown:
+            print("  not in this repository, ignored: %s" % name, file=sys.stderr)
+        if not chapter:
+            # Even with nothing chosen: a sitting with no label at all shows a
+            # bare dash on the board where the chapter line goes.
+            chapter = review.sitting_label(chosen, review.kind(live.root) or "chapters")
+
     cmd_archive(live, [])
     live.set_state(course=course, chapter=chapter, session=session or "lecture",
-                   finished=None, hw=None, opened=time.strftime("%Y-%m-%d %H:%M"))
+                   finished=None, hw=None,
+                   review=[u["name"] for u in chosen] or None,
+                   opened=time.strftime("%Y-%m-%d %H:%M"))
     print("%s open: %s / %s" % (session or "lecture", course or "-", chapter or "-"))
+    if session == "review":
+        if chosen:
+            print("  over %s: %s"
+                  % (review.noun(review.kind(live.root), len(chosen)),
+                     ", ".join(u["label"] for u in chosen)))
+            print("  the questions are yours; the scope is theirs")
+        else:
+            print("  nothing chosen to review. Say what it covers:")
+            print("  board review over <name> [<name> ...]   (board review list)")
     if session == "homework":
         print("  you write the mathematics; the write-up and the compile are mine")
         # Bind the sitting to a problem set now, so nothing later has to guess.
@@ -582,6 +626,66 @@ def read_turns(live):
     except OSError:
         pass
     return out
+
+
+# ---------------------------------------------------------------------------
+# test review: revision over a scope the student chose
+# ---------------------------------------------------------------------------
+def cmd_review(live, args):
+    """What this test review covers, and how to say what it covers.
+
+    A review is the homework loop pointed at a scope the student picked rather
+    than at a sheet somebody set, so there is nothing here about documents: no
+    write-up, no compile, nothing to file. The tool owns one thing -- which
+    chapters (or, in a project, which parts) are in scope -- because that is the
+    part the assistant would otherwise have to guess at.
+    """
+    sub = args[0] if args else "status"
+    rest = args[1:]
+    st = review.status(live.root, live.state())
+
+    if st is None:
+        print("nothing in this repository to review: no chapters and no parts")
+        return 1
+
+    if sub in ("--list", "list"):
+        for u in st["units"]:
+            print("  %-10s %s" % (u["short"], u["label"]))
+        print(review.noun(st["of"], st["total"]))
+        return 0
+
+    if sub == "over":
+        if not rest:
+            print("usage: board review over <name> [<name> ...]   "
+                  "(board review list to see them)", file=sys.stderr)
+            return 1
+        chosen, unknown = review.resolve(live.root, rest)
+        for name in unknown:
+            print("no %s called %r in this repository"
+                  % (st["of"][:-1] if st["of"] else "chapter", name), file=sys.stderr)
+        if not chosen:
+            return 1
+        live.set_state(review=[u["name"] for u in chosen])
+        print("this review covers %s: %s"
+              % (review.noun(st["of"], len(chosen)),
+                 ", ".join(u["label"] for u in chosen)))
+        if (live.state().get("session") or "lecture") != "review":
+            print("  this sitting is not a review yet: board open <course> --review")
+        return 0
+
+    # status
+    if not st["scope"]:
+        print("no test review open here. Start one:")
+        print("  board open %r --review --over %s"
+              % (live.state().get("course") or "<course>",
+                 st["units"][0]["short"] if st["units"] else "<name>"))
+        print("%s to choose from; board review list shows them all"
+              % review.noun(st["of"], st["total"]))
+        return 1
+    print("test review over %s" % review.noun(st["of"], len(st["scope"])))
+    for u in st["chosen"]:
+        print("  %-10s %s" % (u["short"], u["label"]))
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -946,6 +1050,12 @@ def cmd_recap(live, args):
     hw = st.get("hw")
     if hw:
         print("homework set: %s" % hw)
+    # A resumed review has to be told what it is a review of, or the next turn
+    # widens the scope back to the whole course without meaning to.
+    if (st.get("session") or "") == "review":
+        scope = review.scope(live.root, st)
+        print("test review over: %s"
+              % (", ".join(u["label"] for u in scope) if scope else "nothing chosen yet"))
 
     # Newest revision per turn id: the file is append-only and a correction
     # supersedes in place, so an older revision is not part of the lesson.
@@ -1964,7 +2074,7 @@ COMMANDS = {
     "doctor": cmd_doctor, "slate": cmd_slate, "wait": cmd_wait,
     "net": cmd_net, "vpn": cmd_vpn, "init": cmd_init, "eyes": cmd_eyes,
     "finish": cmd_finish, "push": cmd_push, "history": cmd_history,
-    "hw": cmd_hw, "recap": cmd_recap, "node": cmd_node,
+    "hw": cmd_hw, "review": cmd_review, "recap": cmd_recap, "node": cmd_node,
     "egress": cmd_egress, "limit": cmd_limit,
 }
 

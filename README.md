@@ -43,7 +43,34 @@ which kind of subject it is and the board adapts.
 >   board that is answering) but it is worth confirming: the port the HTTPS name points at should
 >   be the course they are working in.
 >
-> ### Where this is right now, 30 August 2026
+> ### Where this is right now, 31 August 2026
+>
+> **Test review shipped today.** A third kind of sitting, beside lecture and homework, for revising
+> for a paper: the badge offers *test review*, that opens a picker of every chapter the course has,
+> and starting one wakes the tutor over exactly the chapters ticked. It teaches in the homework
+> shape — state the question, they write it, it comes back with the break located — and produces no
+> document, because nothing is being handed in. A code project has no chapters and is offered its
+> own top-level parts instead. Written up under
+> [Test review](#test-review--revising-for-a-paper); `review.py` owns the discovery and the scope,
+> `test/review.py` and `test/review.js` hold it.
+>
+> Two things came out of screenshotting it, and both are in the defect table: the contents drawer
+> had never actually been a drawer (an empty `#contents { }` rule under a comment claiming it
+> borrowed the scratch drawer's), and `TEST REVIEW` in the badge was wide enough to squeeze the
+> chapter label and the tutor chip out of the title bar — the badge says `REVIEW` and the strip
+> underneath carries the rest.
+>
+> **Not verified, and only a person with the hardware can settle it:** whether a twenty-chapter
+> picker is comfortable to tick on an iPad with a pen in the other hand, and whether a review turn
+> actually reads the way it is written — no tutor has run one. The scope reaches the prompt and the
+> prompt says the right things; what a model does with it is the untested half.
+>
+> **One more thing worth someone's attention, not fixed here:** at iPad-portrait width the tutor
+> chip is squeezed out of the title bar entirely, in a plain lecture as much as in a review. The
+> invariant says that chip is never hidden. It is a flex-shrink in `.bar-left` and it predates this
+> change, so it is not in it.
+>
+> ### Where this was, 30 August 2026
 >
 > The Mac mini exists, and the always-on path described under
 > [Always-on](#always-on-with-the-machine-that-holds-the-repository-preferred) is running for the first time: the Mac
@@ -213,6 +240,8 @@ these tests fail, the test is right.
 | An empty maths board could not be answered, asked, or prodded from the iPad at all: the first turn needed a terminal | `test/begin.py` |
 | A writing prompt could not be declined, so an unwanted exercise had to be answered badly to clear it | `test/modes.js` |
 | The writing surface vanished after closing and reopening the app: it survived a send only through an in-memory pin, and a pin is a variable | `test/link.js`, `test/modes.js` |
+| The contents drawer laid out in the flow of the page under the lesson rather than over it: it carried a comment saying it borrowed the scratch drawer and an empty rule that borrowed nothing, because an ID selector is not inheritance | `test/review.js` |
+| A sitting badge reading `TEST REVIEW` pushed the chapter label to `Tes…` and the tutor chip to `no` — the title bar is the one row on this page that cannot grow | `test/review.js` |
 | A marker stroke came out of the export as a black smudge over the working it pointed at: the light-ink-to-dark-ink conversion was applied to a six-times-wide translucent stroke | `asHighlight` in `slate-core.js` |
 | The marker was invisible on black paper and perfect in the sent PNG: a highlighter multiplies, and multiplying into near-black gives back near-black | `test/chrome.js` reads the CSS; the blend now follows the surface, not the setting |
 | A sent answer was frozen into the transcript directly above the surface the same ink was still sitting on | `test/interactive.js`, `test/link.js` |
@@ -1280,21 +1309,25 @@ A session is opened with a kind, and in a mathematics course the kind matters:
 ```
 board open "Galois Theory" "Ch 7 — Splitting fields" --lecture
 board open "Galois Theory" "Problem set 4"           --homework
+board open "Galois Theory" --review --over ch01 --over ch07
 ```
 
 **Lecture** is teaching: one concept, one question, then wait. **Homework** is producing work that
 has to end up typeset and compiled — the user writes each solution by hand, the assistant reviews
 it, and once it is agreed correct the assistant transcribes it into the `.tex` and compiles the
 finished assignment. The write-up is clerical once the mathematics is settled; making someone
-retype their own proof teaches nothing.
+retype their own proof teaches nothing. **Test review** is revision: the student says which
+chapters the test covers and the tutor asks questions over exactly those, in the same shape a
+homework problem is posed, with no document at the end because nothing is being handed in.
 
 The kind shows as a badge on the board, so there is never a question about which sitting this is.
 
 ### Getting around a course
 
 **☰** in the title bar opens the contents: every chapter the course has, every problem set,
-and the way back to what has already been filed. Tapping a chapter opens a lecture there;
-tapping a set opens a homework sitting bound to it. The chapter you are in is marked.
+the way into a test review, and the way back to what has already been filed. Tapping a chapter
+opens a lecture there; tapping a set opens a homework sitting bound to it. The chapter you are
+in is marked.
 
 Nothing here is registered. Chapters come from the course's own `chapters.tsv` or its
 `chapters/chNN-*/` directories, problem sets from the two layouts described below — the same
@@ -1310,30 +1343,74 @@ A code repository has neither chapters nor problem sets, and is not told it is b
 sections are made as it goes. Each piece of work that gets committed is filed as one, which
 is what `board push` marks there.
 
-### Switching between a lecture and homework
+### Switching between a lecture, homework and a test review
 
-The **LECTURE / HOMEWORK** badge in the title bar is the control. Tap it, and it offers
-*lecture* or any problem set the repository actually has — `hw01`, `hw02`, `ch07`. Nothing is
-typed, so nothing invented can reach the filesystem, and switching to homework binds the set
-in one action. Switching back to a lecture unbinds it.
+The **LECTURE / HOMEWORK / REVIEW** badge in the title bar is the control. Tap it, and it offers
+*lecture*, any problem set the repository actually has — `hw01`, `hw02`, `ch07` — or *test
+review*. Nothing is typed, so nothing invented can reach the filesystem, and switching to homework
+binds the set in one action. Switching back to a lecture unbinds it.
 
 This was a terminal-only decision until it wasn't: `board open … --homework`. A student who
 wanted help with a problem set had to find a keyboard to say so, which is the ceremony this
 whole tool exists to remove.
 
-**The two sittings differ in exactly one thing: who chooses the problems.**
+**The three sittings differ in one thing: who chooses what gets worked on.**
 
-| | lecture | homework |
-|---|---|---|
-| The problem list | the tutor picks a manageable few from the section's exercises | the assignment sheet chose them; all of them, in order |
-| Leaving some undone | fine — sections are archived and can be returned to | not fine; a skipped problem is a lost mark |
-| Everything else | identical | identical |
+| | lecture | homework | test review |
+|---|---|---|---|
+| The problem list | the tutor picks a manageable few from the section's exercises | the assignment sheet chose them; all of them, in order | the student chose the *chapters*; inside them the questions are the tutor's |
+| Leaving some undone | fine — sections are archived and can be returned to | not fine; a skipped problem is a lost mark | fine — the point is finding what is not solid, not finishing a list |
+| A document at the end | only if a set is bound | yes, and compiled | no; nothing is handed in, so nothing is typeset |
+| Everything else | identical | identical | identical |
 
 In a homework sitting the tutor is woken with the path to the sheet itself — for Probability
 that is `homework/hw01/assignment/Prob.Homework1.2026.pdf` — and told to read it and do
 exactly what it assigns. If no sheet is filed, it is told to ask rather than to infer a
 problem list from the chapter. Statements are transcribed into the set's `.tex` first, then
 the problems are taught one at a time exactly as in a lecture.
+
+### Test review — revising for a paper
+
+Tapping *test review* does not start a sitting. It asks what the test covers, because the
+student is the only person who knows: a drawer of every chapter the course has, each one a
+tick, *select all*, and **start review**. Nothing is typed there either — every name in it came
+off the repository's own chapter table — and the whole scope goes in one action, because a review
+over four chapters is one decision and sending it four times would file the lesson away four
+times over.
+
+Then it teaches exactly as a homework sitting does. A card states a question, the answer block
+takes the working, the tutor reads it and locates the break rather than repairing it. What
+differs is where the questions come from and what happens at the end:
+
+- **The scope is not the tutor's to widen or narrow.** It is named in the line the tutor is
+  woken with and it is on a strip under the title bar the student can see, so a review that
+  quietly turns into a lecture on chapter one is visible while it is happening. **change** on
+  that strip reopens the picker with the current scope already ticked.
+- **The questions are spread across the whole scope**, and anything answered cleanly is moved
+  on from. A review exists to find what is not solid yet.
+- **Nothing is written up.** No `.tex`, no compile, no `board hw` at all — nothing is being
+  handed in, and the lesson is the record.
+
+From a terminal, if you are already at one:
+
+```
+board review list                     everything this repository can be reviewed over
+board open "Galois Theory" --review --over ch01 --over ch07
+board review over ch02 ch03           change what it covers, without reopening
+board review                          what it covers now
+tutor galois --review --over ch07     or straight from the launcher
+```
+
+Chapters are matched on their label, their short form or their bare number, so `ch07`, `Ch 7`
+and `7` all find the same one. A name the repository does not have is refused and named, never
+silently dropped.
+
+**In a code project there are no chapters, and it is not told it is broken.** It is offered its
+own top-level parts instead — `loader/`, `pipeline/`, `web/` — discovered the same way
+everything else here is discovered, and a flat repository falls back to its own source files.
+The sitting then asks about code that already exists: what a function does, why it is written
+that way, what would break if it changed. It never sets work, and a repository whose stance is
+`do` does not turn a review into an implementation — a review asks.
 
 ### A homework sitting is bound to a problem set
 
@@ -1551,6 +1628,8 @@ board export --build             # the whole lesson as a typeset PDF
 board hw                         # this sitting's problem set: what is still empty
 board hw build                   # compile it; the result lands on the board
 board hw file 7.2                # file a sent page into the set's handwritten/
+board review list                # everything this repository can be reviewed over
+board review over ch01 ch07      # what a test review covers
 board vpn up|status|serve|down   # the Tailscale link
 board doctor                     # is this machine equipped
 board limit                      # has the tutor's allowance here run out

@@ -53,7 +53,17 @@ var els = {
   kind: document.getElementById("kind"),
   kindLecture: document.getElementById("kind-lecture"),
   kindSets: document.getElementById("kind-sets"),
+  kindReview: document.getElementById("kind-review"),
   kindCancel: document.getElementById("kind-cancel"),
+  rvbar: document.getElementById("rvbar"),
+  rvScope: document.getElementById("rv-scope"),
+  rvChange: document.getElementById("rv-change"),
+  review: document.getElementById("review"),
+  reviewTitle: document.getElementById("review-title"),
+  reviewList: document.getElementById("review-list"),
+  reviewAll: document.getElementById("review-all"),
+  reviewCount: document.getElementById("review-count"),
+  reviewStart: document.getElementById("review-start"),
   contents: document.getElementById("contents"),
   contentsList: document.getElementById("contents-list"),
   agent: document.getElementById("agent"),
@@ -498,7 +508,13 @@ function render(data) {
   }
   var state = data.state || {};
   els.course.textContent = state.course || "board";
-  els.chapter.textContent = state.chapter ? "· " + state.chapter : "";
+  /* A review's label is "Test review — Ch 1, Ch 7", which the strip underneath
+     already says in full and in the course's own words. Repeating it here costs
+     the bar the width that the chapter line exists to have, and the bar is the
+     one row on this page that cannot grow. The label still goes into the state,
+     because a filed lesson needs a name in the history. */
+  var reviewing = (state.session || "") === "review";
+  els.chapter.textContent = (state.chapter && !reviewing) ? "· " + state.chapter : "";
   document.title = (state.course || "Board") + (state.chapter ? " · " + state.chapter : "");
 
   /* The lesson is one transcript: the tutor's cards and the student's answers
@@ -708,6 +724,7 @@ function render(data) {
 
   paintSession(state, data.push, data.agent);
   paintHomework(data.hw);
+  paintReview(state, data.review);
   if (!started) paintWaiting(data);
   seedTextDrafts(data);
   paintNotesSend();
@@ -1023,9 +1040,13 @@ function paintSession(state, push, agent) {
   var kind = state.session || "lecture";
   sittingKind = kind;
   els.session.hidden = false;
+  /* "review", not "test review": the badge sits in a bar that is already at
+     capacity, and eleven uppercase letters at this letter-spacing pushed the
+     chapter label to "Tes…" and the tutor chip to "no". The strip underneath
+     carries the full name, so the bar does not have to. */
   els.session.textContent = kind;
   els.session.dataset.kind = kind;
-  els.session.title = "tap to switch between lecture and homework";
+  els.session.title = "tap to switch between lecture, homework and test review";
   if (leavingTo) return;              /* a decision is in front of the student */
   if (state.finished) {
     els.finishLead.textContent = "Session finished.";
@@ -1627,6 +1648,10 @@ var sittingKind = "lecture";
 
 function paintKindChooser() {
   els.kindLecture.classList.toggle("on", sittingKind === "lecture");
+  els.kindReview.classList.toggle("on", sittingKind === "review");
+  /* Offered only where there is something to review. A repository with no
+     chapters and no parts would open a picker with nothing in it. */
+  els.kindReview.hidden = !(reviewInfo && (reviewInfo.units || []).length);
   els.kindSets.innerHTML = "";
   if (!knownSets.length) {
     var none = document.createElement("span");
@@ -1661,7 +1686,116 @@ els.session.onclick = function () {
   els.kind.hidden = false;
 };
 els.kindLecture.onclick = function () { setSitting("lecture"); };
+els.kindReview.onclick = function () { els.kind.hidden = true; openReview(); };
 els.kindCancel.onclick = function () { els.kind.hidden = true; };
+
+
+/* ----------------------------------------------------------- test review */
+/* Revision for a test, and the one sitting whose scope is the student's to
+   choose: they know what is on the paper and the tutor does not. So it cannot
+   start from a single tap the way a lecture does -- it asks what it covers
+   first, from a list of what this repository actually has.
+
+   Everything offered is discovered: the course's chapters, or, in a project with
+   none, the project's own top-level parts. A tick is a name from that list and
+   nothing else, so nothing typed can reach the filesystem and nothing invented
+   can reach the tutor's prompt.
+
+   The picks are held here rather than sent one at a time: a review over four
+   chapters is one decision, and sending it four times would archive the lesson
+   four times over. */
+var reviewInfo = null;              /* what the payload says can be reviewed */
+var reviewPick = [];                /* names ticked but not yet started */
+
+function paintReview(state, info) {
+  reviewInfo = info || null;
+  var on = (state.session || "lecture") === "review";
+  var scope = (info && info.scope) || [];
+  els.rvbar.hidden = !on;
+  if (!on) return;
+  var by = {};
+  ((info && info.units) || []).forEach(function (u) { by[u.name] = u; });
+  els.rvScope.textContent = scope.length
+    ? scope.map(function (n) { return (by[n] && by[n].label) || n; }).join(" · ")
+    /* Reachable from a terminal, not from this page. Say what is missing rather
+       than showing an empty strip that reads as "nothing to see". */
+    : "nothing chosen yet — tap change";
+}
+
+function reviewNoun(info) {
+  return (info && info.of) === "parts" ? "parts of the project" : "chapters";
+}
+
+function paintReviewPicker() {
+  var host = els.reviewList;
+  host.innerHTML = "";
+  var units = (reviewInfo && reviewInfo.units) || [];
+  els.reviewTitle.textContent = "Which " + reviewNoun(reviewInfo) + " is the test over?";
+
+  if (!units.length) {
+    var p = document.createElement("p");
+    p.className = "none";
+    p.textContent = "There is nothing here to review: this repository has no "
+      + "chapters and no parts to ask over.";
+    host.appendChild(p);
+    els.reviewStart.disabled = true;
+    els.reviewCount.textContent = "";
+    return;
+  }
+
+  units.forEach(function (u) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.innerHTML = '<span class="tick">✓</span><span class="what"></span>';
+    b.querySelector(".what").textContent = u.label;
+    if (reviewPick.indexOf(u.name) >= 0) b.classList.add("on");
+    b.onclick = function () {
+      var at = reviewPick.indexOf(u.name);
+      if (at >= 0) reviewPick.splice(at, 1); else reviewPick.push(u.name);
+      paintReviewPicker();
+    };
+    host.appendChild(b);
+  });
+
+  els.reviewCount.textContent = reviewPick.length
+    ? reviewPick.length + " of " + units.length + " chosen"
+    : "nothing chosen yet";
+  els.reviewAll.textContent = reviewPick.length === units.length
+    ? "clear" : "select all";
+  /* A review over nothing is not a sitting, and starting one would file the
+     lesson they are in away for no reason. */
+  els.reviewStart.disabled = reviewPick.length === 0;
+}
+
+function openReview() {
+  /* Reopening starts from what the sitting already covers, so "change" is an
+     edit rather than a fresh decision. */
+  reviewPick = ((reviewInfo && reviewInfo.scope) || []).slice();
+  paintReviewPicker();
+  els.review.hidden = false;
+}
+
+els.reviewAll.onclick = function () {
+  var units = (reviewInfo && reviewInfo.units) || [];
+  reviewPick = reviewPick.length === units.length
+    ? [] : units.map(function (u) { return u.name; });
+  paintReviewPicker();
+};
+
+els.reviewStart.onclick = function () {
+  if (!reviewPick.length) return;
+  els.review.hidden = true;
+  fetch("/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session: "review", over: reviewPick })
+  }).catch(function () { /* the payload will say what actually happened */ });
+};
+
+els.rvChange.onclick = openReview;
+document.getElementById("btn-review-close").onclick = function () {
+  els.review.hidden = true;
+};
 
 
 /* --------------------------------------------------------------- contents */
@@ -1736,6 +1870,19 @@ function openContents() {
         + "is filed as one, and stays readable under ◷."
       : "No chapters or problem sets found in this repository.";
     host.appendChild(p);
+  }
+
+  /* A test review is a way around the course too -- it is just one that covers
+     several chapters at once instead of opening one. */
+  if (reviewInfo && (reviewInfo.units || []).length) {
+    host.appendChild(group("Test review"));
+    var scope = reviewInfo.scope || [];
+    host.appendChild(row(
+      scope.length ? "change what this review covers" : "revise for a test",
+      scope.length ? scope.length + " chosen"
+                   : reviewInfo.units.length + " " + reviewNoun(reviewInfo),
+      sittingKind === "review",
+      function () { els.contents.hidden = true; openReview(); }));
   }
 
   host.appendChild(group("Past lessons"));

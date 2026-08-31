@@ -55,6 +55,15 @@ for phrase, why in [
     ("board finish", "the session ends by offering the push"),
     ("assignment sheet", "a homework sitting reads the sheet it was set"),
     ("not yours", "and does not choose its own problems there"),
+    # Revising for a test inverts the homework rule: the student chose the
+    # scope, and inside it the questions are the tutor's. Both halves have to be
+    # written down, because the failure in either direction is silent -- a tutor
+    # that asks outside the scope wastes the evening, and one that treats the
+    # scope as a syllabus teaches it instead of testing it.
+    ("test review", "a test review is a sitting of its own"),
+    ("Do not widen the scope", "and its scope is not the tutor's to widen"),
+    ("Spread the questions", "and the questions are spread across all of it"),
+    ("no write-up", "and nothing is transcribed or compiled for a review"),
     ("no exception to this", "and nothing outranks getting the card up first"),
     ("Never label a question", "a question is answered, not graded"),
     ("do not know how to start", "and not knowing where to start is a real answer"),
@@ -132,6 +141,12 @@ try:
     check("a code project gets the project method and not the homework rules",
           "A project, from where you are" in code
           and "A homework sitting" not in code)
+    # A project can be reviewed too, but the method for it rides on the sitting's
+    # own prompt rather than on this document -- so a project pays nothing for a
+    # feature it may never use, and the maths course is not handed a section
+    # about a repository it does not have.
+    check("the review method goes to the course, not to the project",
+          "A test review" in maths and "A test review" not in code)
     check("and both get the rules that belong to neither in particular",
           "Write the card before you do anything else" in maths
           and "Write the card before you do anything else" in code)

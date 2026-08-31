@@ -156,6 +156,7 @@ body { background: var(--paper); min-height: 100vh; min-height: 100dvh; }
 @keyframes pulse { 50% { opacity: .25; } }
 
 .session[data-kind="homework"] { color: var(--ask); background: color-mix(in srgb, var(--ask) 14%, transparent); }
+.session[data-kind="review"] { color: var(--note); background: color-mix(in srgb, var(--note) 16%, transparent); }
 
 /* ---------- the board ---------- */
 #board {
@@ -190,6 +191,18 @@ body { background: var(--paper); min-height: 100vh; min-height: 100dvh; }
 #hw-build { margin-left: auto; flex: none; font-size: .76rem; }
 #hw-build[data-ok="yes"] { color: var(--good); }
 #hw-build[data-ok="no"] { color: var(--bad); font-family: var(--mono); }
+
+/* The review strip. Same job as the homework one -- say what the sitting is
+   about, because nothing else on an iPad can. */
+.rvbar { background: color-mix(in srgb, var(--note) 10%, var(--paper)); font-size: .82rem; }
+#rv-lead { font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+           font-size: .68rem; color: var(--note); flex: none; }
+#rv-scope { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#rv-change {
+  margin-left: auto; flex: none; font: inherit; font-size: .74rem; cursor: pointer;
+  padding: .2rem .5rem; border-radius: .35rem;
+  border: 1px solid var(--rule); background: var(--paper); color: var(--ink-2);
+}
 
 /* The ink layer sits over the card it belongs to, and is inert until annotate
    mode is on -- otherwise it would eat every scroll and every text selection in
@@ -799,7 +812,11 @@ body.tools-out .jump { bottom: calc(6.5rem + env(safe-area-inset-bottom)); }
 body[data-mode2="code"] { padding-bottom: 5rem; }
 
 /* ---------- scratch drawer ---------- */
-#scratch {
+/* Three drawers, one shape: the scratch list, the contents, and the review
+   picker. #contents used to carry a comment saying it borrowed this and an
+   empty rule that borrowed nothing, so it laid out in the flow of the page
+   under the lesson rather than over it. An ID selector is not inheritance. */
+#scratch, #contents, #review {
   position: fixed; top: 0; right: 0; bottom: 0; z-index: 60;
   width: min(24rem, 92vw);
   background: var(--paper); border-left: 1px solid var(--rule);
@@ -896,7 +913,7 @@ body.viewing { overflow: hidden; }
 
 /* ---------- print ---------- */
 @media print {
-  #bar, #drawbar, #composer, #scratch, .jump, .drop, .finish, .pushed,
+  #bar, #drawbar, #composer, #scratch, #contents, #review, .jump, .drop, .finish, .pushed,
   #panic, #reopen, #viewer { display: none !important; }
   body { background: #fff; color: #000; }
   #board { max-width: none; padding: 0; }
@@ -989,7 +1006,7 @@ body.tools-out .annbar { bottom: calc(5.6rem + env(safe-area-inset-bottom)); }
 #session { cursor: pointer; border: 1px solid transparent; font-family: var(--ui); }
 #session:hover { border-color: var(--rule); }
 #kind-sets { display: inline-flex; gap: .3rem; flex-wrap: wrap; }
-#kind-sets button.on, #kind-lecture.on {
+#kind-sets button.on, #kind-lecture.on, #kind-review.on {
   background: var(--note); border-color: var(--note); color: #fff; font-weight: 600;
 }
 
@@ -1012,6 +1029,47 @@ body.tools-out .annbar { bottom: calc(5.6rem + env(safe-area-inset-bottom)); }
 #contents-list button.here { border-color: var(--note); font-weight: 650; }
 #contents-list button .sub { color: var(--ink-3); font-weight: 400; }
 #contents-list .none { color: var(--ink-3); font-size: .82rem; }
+
+/* ---------- the review picker ---------- */
+/* A list of things to tick, sized for a thumb rather than a mouse: a review is
+   chosen on a tablet, with a pen in the other hand. */
+#review-list { flex: 1; overflow-y: auto; padding: .5rem; }
+#review-list .group {
+  font-family: var(--ui); font-size: .66rem; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3);
+  margin: .9rem .3rem .35rem;
+}
+#review-list button {
+  display: flex; align-items: center; gap: .55rem;
+  width: 100%; text-align: left; cursor: pointer; font: inherit; color: var(--ink);
+  padding: .6rem .7rem; margin-bottom: .3rem;
+  border: 1px solid var(--rule); border-radius: .5rem; background: var(--paper);
+}
+#review-list button:hover { background: var(--paper-2); }
+#review-list button .tick {
+  flex: none; width: 1.15rem; height: 1.15rem; border-radius: .3rem;
+  border: 1.5px solid var(--rule); background: var(--paper);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: .8rem; line-height: 1; color: var(--paper);
+}
+#review-list button.on { border-color: var(--note); background: color-mix(in srgb, var(--note) 8%, var(--paper)); }
+#review-list button.on .tick { background: var(--note); border-color: var(--note); }
+#review-list button .what { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+#review-list .none { color: var(--ink-3); font-size: .82rem; padding: .5rem .3rem; }
+.review-acts { display: flex; align-items: center; gap: .5rem; }
+.review-acts button {
+  font: inherit; font-size: .78rem; cursor: pointer;
+  padding: .45rem .7rem; border-radius: .4rem;
+  border: 1px solid var(--rule); background: var(--paper); color: var(--ink);
+}
+.review-acts button.primary {
+  margin-left: auto; background: var(--note); border-color: var(--note);
+  color: #fff; font-weight: 600;
+}
+.review-acts button.quiet { border-color: transparent; color: var(--ink-3); }
+.review-acts button:disabled { opacity: .45; cursor: default; }
+#review-count { flex: none; font-size: .74rem; }
+.review-note { margin: .55rem 0 0; font-size: .72rem; line-height: 1.35; }
 
 /* ---------- the overflow menu ---------- */
 /* Anchored under the bar rather than floating over the lesson, so it reads as

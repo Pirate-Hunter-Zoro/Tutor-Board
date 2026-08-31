@@ -5,6 +5,8 @@ tutor -- start a tutoring session.
     tutor                       pick a course from what is on disk
     tutor galois                match a course by name
     tutor galois --homework     and open a homework sitting
+    tutor galois --review --over ch01 --over ch07
+                                or a test review over the chapters named
     tutor trd --agent opencode  with a particular assistant
     tutor galois --no-agent     just bring the board up
     tutor resume                take the board over on this machine (for a login hook)
@@ -1499,7 +1501,7 @@ def cmd_where(cfg, args):
 
 def main(argv):
     cfg = load_config()
-    args, flags = [], {"session": None, "agent": None, "no_agent": False}
+    args, flags = [], {"session": None, "agent": None, "no_agent": False, "over": []}
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -1525,6 +1527,13 @@ def main(argv):
             flags["session"] = "homework"
         elif a == "--lecture":
             flags["session"] = "lecture"
+        elif a in ("--review", "--test-review"):
+            flags["session"] = "review"
+        elif a == "--over":
+            # Repeated, one per chapter: a chapter title may contain a comma.
+            i += 1
+            if i < len(argv):
+                flags["over"].append(argv[i])
         elif a == "--no-agent":
             flags["no_agent"] = True
         elif a == "--stop":
@@ -1577,8 +1586,11 @@ def main(argv):
     link(course["root"])
     if flags["session"]:
         title = " ".join(args[1:]) or "session"
+        extra = []
+        for name in flags["over"]:
+            extra += ["--over", name]
         board(course["root"], "open", course.get("name") or course["dir"], title,
-              "--" + flags["session"])
+              "--" + flags["session"], *extra)
     _, net = board(course["root"], "net")
     urls = "\n".join("  " + l.strip() for l in net.splitlines()
                      if l.strip().startswith("http"))

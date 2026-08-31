@@ -191,11 +191,23 @@ preferred".
   on the save itself, from a `git status` cached for eight seconds, and re-offers once when a
   session is returned to with work outstanding.
 - **The kind of sitting is chosen on the board, and only from what exists.** The badge is the
-  control; `/session` accepts `lecture` or `homework` plus a set name matched against the
-  repository's own sets, so a name from a request never reaches the filesystem. A homework
-  sitting is woken with the path to its assignment sheet and told the problems are not its to
-  choose — the one thing that differs from a lecture. Do not let a homework prompt inherit the
-  lecture's "pick a manageable few".
+  control; `/session` accepts `lecture`, `homework` or `review`, plus a set name or a list of
+  chapter names matched against the repository's own, so a name from a request never reaches the
+  filesystem. A homework sitting is woken with the path to its assignment sheet and told the
+  problems are not its to choose — the one thing that differs from a lecture. Do not let a
+  homework prompt inherit the lecture's "pick a manageable few".
+- **A test review is held over a scope the student chose, and the scope is a list.** They are the
+  only person who knows what is on the paper, so a review cannot start from one tap the way the
+  other two do: the picker asks first, and it offers `review.units()` — the course's chapters, or,
+  in a project that has none, the project's own top-level parts. A test is not one chapter, so
+  every layer takes a list and never a single name, and the whole scope goes in one request:
+  sending it a chapter at a time would archive the lesson once per tap. Names are re-resolved
+  against the repository on the way out as well as on the way in, so a chapter renamed under a
+  running sitting drops off the strip rather than sending the tutor to read a file that is not
+  there. A review produces **no document** — nothing transcribed into a `.tex`, nothing compiled
+  — because nothing is being handed in and the lesson is the record. Do not give it one, and do
+  not let its prompt inherit the lecture's "pick a manageable few" or the homework's write-up.
+  `review.py`, `test/review.py` and `test/review.js` hold it.
 - **A board is a process, and processes hold old code.** `serve.py` is read once, at start, so a
   change to this repository reaches a course only when its board restarts — while the pages,
   served from disk, already look new. `scripts/save-and-push.sh` runs `tutor restart` after a

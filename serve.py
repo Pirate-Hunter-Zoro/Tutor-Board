@@ -33,6 +33,7 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 import boardlib
 import homework
+import review
 import syllabus
 WEB = os.path.join(HERE, "web")
 
@@ -405,6 +406,67 @@ def code_sense(label, stance="teach"):
     )
 
 
+def review_sense(repo, st, mode):
+    """A test review, in a sentence the assistant can act on.
+
+    A review is not a third way of teaching -- it is the homework loop pointed at
+    a scope the student chose instead of at a sheet somebody set. So this says
+    the two things that are actually different, and leaves the shape of a turn to
+    live/TEACHING.md where it belongs: what the scope is, and that it is not the
+    assistant's to widen.
+
+    The chapters are NAMED here rather than left to be looked up. In a headless
+    session this string is the whole prompt, and a tutor that has to glob the
+    repository to find out what it is reviewing pays a round trip for something
+    the board already knew.
+    """
+    chosen = review.scope(repo.root, st)
+    of = review.kind(repo.root) or "chapters"
+    project = mode == "code"
+    what = "parts of this project" if project else "chapters"
+    counted = (review.noun("parts", len(chosen)) + " of this project") \
+        if project else review.noun("chapters", len(chosen))
+
+    if not chosen:
+        # Reachable from `board open --review` with nothing named. The board's
+        # own picker cannot produce it, and inferring a scope is exactly the
+        # mistake a homework sitting with no sheet is told not to make.
+        return ("Follow live/TEACHING.md. This is a TEST REVIEW sitting and "
+                "nothing has been chosen for it to cover. Ask in your first card "
+                "which %s the test is over, and do not choose them yourself -- "
+                "they know what is on it and you do not." % what)
+
+    named = ", ".join(u["label"] for u in chosen)
+    where = (
+        "Read those parts of the repository before your first card, then ask "
+        "about the code that is already there: what a function does, why it is "
+        "written that way, what would break if it changed. This is not a sitting "
+        "for setting work -- do not assign a change, and do not write code into a "
+        "card even where this repository's stance is to do the work, because a "
+        "review asks. "
+        if project else
+        "Draw each question from those chapters' own exercises where there are "
+        "some, and write one in the same style where there are not. "
+    )
+    return (
+        "Follow live/TEACHING.md: teach only what the question in front of them "
+        "needs, one question per turn, then stop. This is a TEST REVIEW over %s, "
+        "in this order: %s. "
+        "The scope is theirs and is not yours to widen or narrow -- ask over "
+        "exactly those and nothing else, and spread the questions across all of "
+        "them rather than exhausting the first. A review is for finding what is "
+        "not solid yet, so a question they answer cleanly is a question you move "
+        "on from. %s"
+        "Pose them exactly as a homework problem is posed: state the question in "
+        "full in a `question` card, stop, and read what comes back -- locate the "
+        "break rather than repairing it. "
+        "Nothing is being handed in, so there is no write-up: do not transcribe "
+        "into a .tex and do not compile anything. The lesson itself is the record. "
+        "Say in your first card what this review covers and which one you are "
+        "starting on." % (counted, named, where)
+    )
+
+
 def session_sense(repo):
     """What this sitting is, in a sentence an assistant can act on.
 
@@ -426,6 +488,13 @@ def session_sense(repo):
     # section headings and opened "Chapter 1". There are no chapters in a
     # project. There is a README, and the README says where the work is planned.
     cfg_here = read_config(repo.root)
+    # A test review is the one sitting that reads the same in both kinds of
+    # repository, so it is settled before the project branch rather than inside
+    # it: a project being revised is being asked questions, not set work, and
+    # falling through to code_sense would have told it to go and find the next
+    # change instead.
+    if kind == "review":
+        return review_sense(repo, st, cfg_here.get("mode"))
     if cfg_here.get("mode") == "code":
         return code_sense(chapter, cfg_here.get("stance"))
     # In a headless session this line is the whole prompt, so it has to carry the
@@ -636,6 +705,25 @@ def load_hw(repo):
             st["build"] = json.load(fh)
     except (OSError, ValueError):
         st["build"] = None
+    return st
+
+
+def load_review(repo):
+    """What this test review covers, so the board can say so and paint the picker.
+
+    Cheap and always sent: it is a directory listing behind a lookup the payload
+    already does, and the picker needs the list of things to pick from before a
+    review sitting exists. The scope is re-resolved on every build rather than
+    echoed back from `state.json` -- a chapter renamed out from under a sitting
+    would otherwise stay on the strip for ever.
+    """
+    try:
+        st = review.status(repo.root, repo.state())
+    except Exception:                                        # noqa: BLE001
+        return None
+    if not st:
+        return None
+    st.pop("chosen", None)     # the names are enough; the board paints from units
     return st
 
 
@@ -1302,6 +1390,9 @@ class Hub:
         except Exception:
             data["sets"] = []
         data["contents"] = load_contents(self.repo)
+        # Always, in both kinds of repository: a review is chosen from the board
+        # and the chooser needs something to offer before the sitting exists.
+        data["review"] = load_review(self.repo)
         return data
 
     def poll_loop(self):
@@ -1678,10 +1769,44 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 return self.send_json({"ok": False, "error": "bad json"}, status=400)
             kind = (payload.get("session") or "").strip().lower()
-            if kind not in ("lecture", "homework"):
+            if kind not in ("lecture", "homework", "review"):
                 return self.send_json({"ok": False, "error": "bad session"}, status=400)
             want = (payload.get("hw") or "").strip()
             chapter = (payload.get("chapter") or "").strip()
+
+            # A test review is held over a scope the student picks, and a scope is
+            # a list: a test is not one chapter. Every name in it is matched
+            # against what this repository actually has before anything is
+            # written, exactly as a problem set name is -- nothing typed reaches
+            # the filesystem and nothing invented reaches the tutor's prompt.
+            if kind == "review":
+                over = payload.get("over")
+                if not isinstance(over, list):
+                    over = [over] if over else []
+                chosen, unknown = review.resolve(repo.root, [str(x) for x in over])
+                if unknown:
+                    return self.send_json({"ok": False, "error": "no such chapter",
+                                           "unknown": unknown[:8]}, status=400)
+                if not chosen:
+                    # A review over nothing is not a sitting, and opening one
+                    # would archive the lesson they are in to no purpose.
+                    return self.send_json({"ok": False, "error": "nothing chosen"},
+                                          status=400)
+                names = [u["name"] for u in chosen]
+                of = review.kind(repo.root) or "chapters"
+                course = repo.state().get("course") or read_config(repo.root)["name"] or ""
+                args = ["open", course, review.sitting_label(chosen, of), "--review"]
+                for n in names:
+                    args += ["--over", n]
+                board_cli(repo.root, args)
+                st = repo.state()
+                st["session"] = kind
+                st["review"] = names
+                st.pop("hw", None)
+                with open(repo.state_path, "w", encoding="utf-8") as fh:
+                    json.dump(st, fh, indent=2)
+                self.server.hub.worker.dirty.set()
+                return self.send_json({"ok": True, "session": kind, "review": names})
 
             # Moving to a different chapter is starting a different lesson, and
             # `board open` is what starts one: it files the current lesson away
@@ -1699,6 +1824,7 @@ class Handler(BaseHTTPRequestHandler):
 
             st = repo.state()
             st["session"] = kind
+            st.pop("review", None)
             if kind == "homework":
                 # Only a set this repository actually has. A name from the
                 # request never reaches the filesystem.

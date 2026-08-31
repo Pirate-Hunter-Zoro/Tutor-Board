@@ -33,7 +33,7 @@
     <span id="dot" class="dot" title="connection"></span>
     <span id="course">board</span>
     <span id="chapter" class="muted"></span>
-    <button id="session" class="session" type="button" hidden title="lecture or homework"></button>
+    <button id="session" class="session" type="button" hidden title="lecture, homework or test review"></button>
     <span id="agent" class="agent" hidden></span>
   </div>
   <!-- Thirteen controls in one row is a row that overlaps itself on a tablet.
@@ -89,6 +89,16 @@
   <span id="hw-set"></span>
   <span id="hw-count" class="muted"></span>
   <span id="hw-build"></span>
+</div>
+
+<!-- A test review is held over a scope the student chose, and a scope that is
+     not written down anywhere is a scope the tutor can quietly widen. Same
+     argument as the homework strip: the state of the sitting is not visible on
+     an iPad unless the board says it. -->
+<div id="rvbar" class="rvbar" hidden>
+  <span id="rv-lead">test review</span>
+  <span id="rv-scope" class="muted"></span>
+  <button id="rv-change" type="button">change</button>
 </div>
 
 <!-- A lesson already on screen when the link drops stays readable, but it must
@@ -184,6 +194,9 @@
   <span id="kind-lead">This sitting:</span>
   <button id="kind-lecture" type="button">lecture</button>
   <span id="kind-sets"></span>
+  <!-- Not a fourth button that starts something: a review has to be told what
+       it covers before it can begin, so this opens the picker. -->
+  <button id="kind-review" type="button">test review…</button>
   <button id="kind-cancel" type="button" class="quiet">cancel</button>
 </div>
 
@@ -242,6 +255,28 @@
   <div id="contents-list"></div>
   <div class="scratch-foot muted">Opening one files the lesson you are in — it stays
     readable under ◷.</div>
+</aside>
+
+<!-- What a test review covers is the student's to choose, and it is a list
+     rather than one thing: a test is not one chapter. Everything offered here is
+     discovered from the repository itself -- its chapters, or, in a project with
+     none, its own top-level parts -- so nothing typed can reach the filesystem
+     and nothing invented can reach the tutor's prompt. -->
+<aside id="review" hidden>
+  <div class="scratch-head">
+    <strong id="review-title">What should this review cover?</strong>
+    <button id="btn-review-close">✕</button>
+  </div>
+  <div id="review-list"></div>
+  <div class="scratch-foot">
+    <div class="review-acts">
+      <button id="review-all" type="button" class="quiet">select all</button>
+      <span id="review-count" class="muted"></span>
+      <button id="review-start" type="button" class="primary" disabled>start review</button>
+    </div>
+    <p class="review-note muted">The questions are the tutor's; the scope is yours.
+      Starting one files the lesson you are in — it stays readable under ◷.</p>
+  </div>
 </aside>
 
 <div id="reading" class="reading" hidden>

@@ -35,7 +35,7 @@ if ! node -e "require('jsdom')" >/dev/null 2>&1; then
   echo
 fi
 
-SUITES="markdown macros hidden chrome theme pages modes typeface export interactive plane answer feedback panic sizing link hub"
+SUITES="markdown macros hidden chrome theme pages modes typeface export interactive plane answer feedback panic sizing link hub review"
 fails=0
 skipped=0
 
@@ -112,6 +112,15 @@ fi
 
 printf '%-12s ' "teaching"
 if out="$(python3 test/teaching.py 2>&1)"; then
+  printf '%s\n' "$out" | tail -1
+else
+  fails=$((fails + 1))
+  echo "FAILED"
+  printf '%s\n' "$out" | grep '^FAIL' | sed 's/^/             /'
+fi
+
+printf '%-12s ' "review"
+if out="$(python3 test/review.py 2>&1)"; then
   printf '%s\n' "$out" | tail -1
 else
   fails=$((fails + 1))
