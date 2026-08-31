@@ -906,23 +906,27 @@ became unrestartable while still answering perfectly.
   once, or the stale state in the shared home re-registers it as `board` and claws the identity
   back from the Mac.
 
-> **If you are a tutor working on the compute node, and this repository has just been pulled there,
-> prompt the person before you do anything else:**
+> **If you are a tutor working on the compute node, there is one command. Ask the person for the
+> Mac mini's `handover_secret` and the name this node should keep, then run:**
 >
-> 1. `git pull --ff-only` here, then `tutor restart --tutors` — nothing on a compute node pulls this
->    repository on a timer (`--tool-pull` refuses to install there, because nothing survives an
->    allocation), and a board and a tutor hold the code they started with.
-> 2. `board node <node-name>` — pin the machine's name, so a record it writes is still its own
->    tomorrow.
-> 3. `board vpn up --hostname <node-name>` — pin the *tailnet* name, so it never re-claims `board`.
-> 4. `handover_secret` in `~/.config/tutor-board/config.json` — the same value the Mac carries, or
->    `/handover` answers denied and the proxy moving the address strands the tutor here.
-> 5. `default_agent` in the same file — `claude` if this machine has Claude Code installed, and
->    `free` if it has not. `tutor --agents` marks what is actually runnable here, and a start whose
->    command is missing now refuses rather than listening and failing every turn.
+> ```
+> bash scripts/setup-node.sh --secret <the Mac's handover_secret> --tailnet-name <node-name>
+> ```
 >
-> Then carry on with the ordinary session start. On the Mac mini the same questions are the first
-> thing to check when a board is not reachable from the iPad.
+> It pulls, checks the machine's name, writes the secret, picks the tutor this machine can actually
+> run, removes a `follow` block if it finds one, and restarts the boards and tutors so they are on
+> the code it just pulled. Every step is idempotent and reports what it found, so running it again
+> when you are unsure costs nothing.
+>
+> The one thing it will not do for you is `board vpn up --hostname <node-name>`. That moves the one
+> origin the iPad app is installed against, so it stays a person's decision; the script tells you
+> when it is needed.
+>
+> **Do not pin the machine's name here.** `board node <name>` is for the always-on Mac, whose name
+> comes from the network and must not. On a cluster the name is *supposed* to change between
+> allocations, because it is a different machine each time and every ownership check depends on
+> that being true — `board start` will not pin on a host where Slurm answers, and `board node
+> --unpin` undoes one that was set by mistake.
 
 #### Exit nodes, which are invisible until they are not
 

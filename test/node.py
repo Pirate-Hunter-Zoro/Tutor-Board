@@ -192,6 +192,20 @@ check("and never re-registers the tailnet name, which is the iPad's one address"
 check("and restarts what is running, since a board holds the code it started with",
       "restart --tutors" in setup_src)
 
+# The documentation a node session actually reads. It told one to pin the
+# machine's name for a while after that had become the wrong thing to do there --
+# a doc that instructs the harmful action is worse than no doc, because it will
+# be followed.
+for doc in ("README.md", "AI_INSTRUCTIONS.md"):
+    text = open(os.path.join(ROOT, doc), encoding="utf-8").read()
+    check("%s tells a compute node to run the setup script" % doc,
+          "setup-node.sh" in text)
+    node_bits = [ln for ln in text.splitlines()
+                 if "board node" in ln and "--unpin" not in ln]
+    check("%s never tells a compute node to pin its name" % doc,
+          not any("node-name" in ln or "<name>" in ln for ln in node_bits)
+          or "Do not pin the machine's name" in text)
+
 blocks = setup_src.split("python3 - <<'PY'")
 check("the setup script has a config block to test", len(blocks) >= 3)
 config_block = blocks[2].split("\nPY\n")[0]

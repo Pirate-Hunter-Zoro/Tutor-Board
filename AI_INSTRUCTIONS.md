@@ -31,8 +31,19 @@ always-on Mac mini (`board` on the tailnet) and on a compute node, and each has
 two things that have to be true for the one iPad address to work. Prompt the
 person for them rather than assuming they are done — a node whose name was changed
 in the admin console still has the old name in its local state, and a missing
-`handover_secret` fails silently. The exact two checks are in `README.md`, under
-"Always-on, with the machine that holds the repository preferred".
+`handover_secret` fails silently.
+
+**On the compute node this is one command, not a checklist:**
+
+```
+bash scripts/setup-node.sh --secret <the Mac mini's handover_secret> --tailnet-name <node-name>
+```
+
+Ask the person for both values; the script refuses to run anywhere but a compute node, is
+idempotent, and reports what it found rather than what it assumed. Do not pin the machine's name
+there — on a cluster it is supposed to change with the allocation. The reasoning, and the one step
+left to a person, are in `README.md` under "Always-on, with the machine that holds the repository
+preferred".
 
 ## What this must never become
 
