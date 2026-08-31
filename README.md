@@ -201,6 +201,7 @@ these tests fail, the test is right.
 | A headless tutor was refused the card write it was woken to make, and exited 0 — the board showed silence | `test/agents.py`, and `board start` writes the course's permissions |
 | The machine renamed itself from the network mid-session, so a running board became another node's and could not be restarted | `test/node.py` |
 | The proxy moved the address off a live compute node without asking it to wrap up, stranding a tutor that went on teaching into a copy nobody could reach | `test/choice.py` |
+| A restart brought back the tutor that was running rather than the one the config named, so a changed default never reached a course | `test/agents.py` |
 | The default agent's command was not installed, so the daemon read as *listening* and failed every turn into a log | `test/agents.py` |
 | A board whose node had died read as a tutor who had not written yet — same words, and a dot the size of a full stop for a difference | `test/link.js` |
 | `board net` re-pointed the HTTPS name at a dead port, trusting a stale record from another node | `alive()` in `cmd_net` |
@@ -922,6 +923,46 @@ became unrestartable while still answering perfectly.
 >
 > Then carry on with the ordinary session start. On the Mac mini the same questions are the first
 > thing to check when a board is not reachable from the iPad.
+
+#### Exit nodes, which are invisible until they are not
+
+An exit node routes **all** of this machine's outbound traffic through somewhere else. Nothing about
+*serving* a lesson notices — tailnet traffic does not go through it, so the iPad reaches the board
+exactly as before. Everything about *teaching* one does, because the tutor's provider is out on the
+ordinary internet, and commercial VPN egress is precisely the address a provider geo-blocks,
+rate-limits or challenges.
+
+The failure that produces is total and looks like nothing: turns fail, the board shows an assistant
+listening, and the reason is four lines into a log nobody opens.
+
+```
+board egress             what a turn can reach, and through where
+board egress --repair    rotate exit nodes until one works
+```
+
+`board doctor` names the exit node when there is one. A headless tutor asks the same question by
+itself, but **only after a turn has actually failed** — a probe before every turn would put a round
+trip to the internet in front of every card a student is sitting waiting for, to answer a question
+whose answer is almost always yes. If the egress is the fault, it rotates, and then re-answers the
+message whose turn was lost rather than leaving the student to wonder and send again.
+
+Three things it will not do:
+
+- **It never turns the exit node off.** Dropping back to the bare connection is the obvious repair
+  and the wrong one: somebody routing everything through an exit node is doing it deliberately, and
+  exposing the address they arranged not to expose in order to rescue a tutoring session is not a
+  trade this gets to make on their behalf. If nothing works, the original goes back and the fault is
+  reported.
+- **It never walks the whole list.** Four tries. A rotation that works through four hundred Mullvad
+  endpoints is an outage of its own.
+- **It never decides which endpoints matter.** `egress_probe` in the config is a list of URLs, with
+  a default that suits the default agent. The board is not allowed to know which assistant is
+  driving it — the same rule that makes a model a command recipe rather than a field — so the
+  provider is named in one default value and nowhere else.
+
+Ordering matters in the probe: any HTTP answer counts, including `401`. The question is whether the
+packets arrive, not whether we are allowed in, and a 401 to an unauthenticated request has proved
+the entire path.
 
 #### Which course the address opens
 

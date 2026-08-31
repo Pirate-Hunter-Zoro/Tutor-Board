@@ -274,6 +274,14 @@ in the admin console still has the old name in its local state, and a missing
   edited, so a course keeps a list it has built up, and committed so its owner can see it. Do not
   also put the grant on the agent's command line. One policy in two places drifts the first time
   either moves, and the flag is the copy nobody can see. `test/agents.py` holds it.
+- **A repair may move the egress, never remove it.** An exit node routes all of this machine's
+  outbound traffic elsewhere; serving a lesson does not notice and teaching one entirely does, so a
+  turn that fails is asked about rather than assumed — and only once it has already failed, because
+  a probe in front of every turn is a round trip the student waits through. Rotation is bounded and
+  every candidate is proved before it is kept. It must never switch the exit node *off*: somebody
+  routing everything through one chose to, and exposing the address they hid in order to rescue a
+  session is not a trade this code makes for them. Which endpoints count is `egress_probe` in the
+  config, so no provider is named anywhere but one default value. `test/egress.py` holds it.
 - **The machine's name is pinned, and derived in exactly one place.** Every record that crosses
   `live/` carries it and every liveness check compares it, so if it moves a machine stops
   recognising its own boards: `tutor restart` skips them, the hub reports them elsewhere, and a

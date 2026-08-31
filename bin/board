@@ -30,7 +30,8 @@ The assistant runs these. The student never does.
     board vpn status|serve|down, for devices off this network
     board init [name] [--code|--math]  write tutorboard.json for this repository
     board doctor                       check the machine has what this needs
-    board node [name]                  what this machine calls itself, pinned
+    board node [name|--unpin]          what this machine calls itself, pinned
+    board egress [--repair]            can a turn get out, and through which exit node
     board eyes [--answer]              can the assistant driving this actually see?
 
 Card kinds: lesson, question, correct, wrong, review, note, recap.
@@ -311,8 +312,7 @@ def cmd_start(live, args):
     # network, so the name that goes into `.board.json` here is one Tailscale or
     # a DHCP lease can change by tomorrow -- and then this board belongs to a
     # machine that no longer exists and nothing will restart it.
-    pinned = boardlib.node_name_pinned()
-    if not pinned:
+    if not boardlib.node_name_pinned() and boardlib.should_pin_node_name():
         print("this machine is now '%s' as far as the board is concerned "
               "(pinned, so the network cannot change it)" % boardlib.pin_node_name())
 
@@ -1779,6 +1779,37 @@ def machine_shape():
     return boardlib.machine_shape()
 
 
+def cmd_egress(live, args):
+    """Can a turn actually leave this machine, and through where.
+
+        board egress             report
+        board egress --repair    rotate exit nodes until a turn can get out
+
+    An exit node is invisible to everything about serving a lesson -- tailnet
+    traffic does not go through it, so the iPad reaches the board exactly as
+    before. It is entirely visible to the tutor, whose every request leaves from
+    somewhere else, and a provider that geo-blocks or challenges commercial VPN
+    egress turns that into a tutor which listens, fails every turn, and says so
+    only in a log.
+    """
+    node = boardlib.exit_node()
+    print("exit node: %s" % (node["name"] if node else "none (direct)"))
+    print("probe:     %s" % ", ".join(boardlib.egress_probe_urls()))
+    ok = boardlib.egress_ok()
+    print("egress:    %s" % ("reachable" if ok else "NOT REACHABLE"))
+    if ok:
+        if node:
+            boardlib.remember_good_exit_node(node["ip"])
+        return 0
+    if "--repair" not in args:
+        print("\na turn cannot get out from here. rotate with:  board egress --repair")
+        return 1
+    ok, detail = boardlib.rotate_exit_node(log=lambda m: print("  " + m))
+    print("\n%s" % ("now reachable through %s" % detail if ok else
+                     "could not repair: %s" % detail))
+    return 0 if ok else 1
+
+
 def cmd_node(live, args):
     """Show, or pin, what this machine calls itself.
 
@@ -1788,17 +1819,38 @@ def cmd_node(live, args):
     shipped fix appears not to have landed.
     """
     want = next((a for a in args if not a.startswith("-")), None)
+    cluster = not boardlib.should_pin_node_name()
     if not want:
         pinned = boardlib.node_name_pinned()
         print("node:    %s%s" % (this_node(), "  (pinned)" if pinned else ""))
         print("system:  %s" % boardlib.system_node_name())
-        if not pinned:
+        if pinned and cluster:
+            print("\nthis machine is on a cluster, where the name changes between")
+            print("allocations because it is a different machine each time. A pin here")
+            print("makes a record from a node that has gone look alive for ever.")
+            print("unpin it with:  board node --unpin")
+        elif not pinned and not cluster:
             print("\nnot pinned: this machine takes its name from the network, and a")
             print("rename orphans every board record written under the old one.")
             print("pin it with:  board node %s" % boardlib.system_node_name())
+        elif not pinned:
+            print("\nnot pinned, which is right on a cluster: the name changes between")
+            print("allocations because the machine does.")
+        return 0
+
+    if want == "--unpin" or "--unpin" in args:
+        try:
+            os.remove(boardlib.NODE_NAME_FILE)
+        except OSError:
+            pass
+        print("unpinned; this machine is '%s', from the system"
+              % boardlib.system_node_name())
         return 0
 
     was = this_node()
+    if cluster:
+        print("warning: Slurm answers here, so this is a cluster node and its name")
+        print("is supposed to change between allocations. Pinning one is usually wrong.")
     now = boardlib.pin_node_name(want)
     print("this machine is '%s'%s" % (now, "" if now == was else ", was '%s'" % was))
     if now != was:
@@ -1843,6 +1895,12 @@ def cmd_doctor(live, args):
         print("          the system currently says '%s'; the pinned name is what "
               "every record uses" % sysname)
     print("port:     %d (default for this repo)" % default_port(live.root))
+    xn = boardlib.exit_node()
+    if xn:
+        print("exit node: %s  (every request a tutor makes leaves from there)"
+              % xn["name"])
+        print("egress:   %s" % ("reachable" if boardlib.egress_ok()
+                                else "NOT REACHABLE — board egress --repair"))
     owner = ts_owner()
     v4, tsname = ts_info()
     print("tailnet:  %s  (this machine calls itself '%s')"
@@ -1862,6 +1920,7 @@ COMMANDS = {
     "net": cmd_net, "vpn": cmd_vpn, "init": cmd_init, "eyes": cmd_eyes,
     "finish": cmd_finish, "push": cmd_push, "history": cmd_history,
     "hw": cmd_hw, "recap": cmd_recap, "node": cmd_node,
+    "egress": cmd_egress,
 }
 
 

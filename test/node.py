@@ -159,6 +159,101 @@ check("the launcher and the board call this machine the same thing",
 check("and the server's own record would agree with both",
       board.socket_hostname() == boardlib.node_name())
 
+# --- setting a compute node up ----------------------------------------------
+# `scripts/setup-node.sh` is the thing a person is told to run there, so its
+# effect on that machine's config has to be exercised rather than read. The block
+# is extracted from the script itself, not copied: a test holding its own copy of
+# the logic proves only that the copy works.
+
+setup_src = open(os.path.join(ROOT, "scripts", "setup-node.sh"), encoding="utf-8").read()
+check("the setup script refuses to run on the always-on host",
+      'This script is for the compute node. Nothing has been changed.' in setup_src)
+def script_code(text):
+    """The script's lines with comments and printed prose dropped.
+
+    A rule about what the script *does* must not be satisfied or broken by the
+    header explaining what it deliberately does not do -- which is exactly how
+    this check first passed and then failed for the wrong reason.
+    """
+    out = []
+    for line in text.splitlines():
+        bare = line.split("#", 1)[0].strip()
+        if not bare or bare.startswith(("say ", "good ", "warn ", "print(")):
+            continue
+        out.append(bare)
+    return "\n".join(out)
+
+
+setup_code = script_code(setup_src)
+check("and never pins a name on a cluster, where the machine really does change",
+      "boardlib.pin_node_name(" not in setup_code)
+check("and never re-registers the tailnet name, which is the iPad's one address",
+      "vpn" not in setup_code and "board vpn up --hostname" in setup_src)
+check("and restarts what is running, since a board holds the code it started with",
+      "restart --tutors" in setup_src)
+
+blocks = setup_src.split("python3 - <<'PY'")
+check("the setup script has a config block to test", len(blocks) >= 3)
+config_block = blocks[2].split("\nPY\n")[0]
+
+
+def run_setup(start, secret):
+    """Run the script's own config block against a throwaway config."""
+    box = tempfile.mkdtemp(prefix="tutor-setup-")
+    path = os.path.join(box, "config.json")
+    if start is not None:
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(start, fh)
+    env = dict(os.environ, TB_CFG=path, TB_SECRET=secret or "", TB_TSNAME="")
+    p = subprocess.run([sys.executable, "-c", config_block], env=env,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60)
+    out = p.stdout.decode("utf-8", "replace")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            got = json.load(fh)
+    except (OSError, ValueError):
+        got = None
+    shutil.rmtree(box, ignore_errors=True)
+    return got, out
+
+
+import json  # noqa: E402
+import subprocess  # noqa: E402
+
+# Which tutor is right here is a property of this machine, not of the test.
+expected_agent = "claude" if shutil.which("claude") else "free"
+
+got, out = run_setup(None, "s3cret")
+check("a node with no config at all comes out with one",
+      got and got.get("handover_secret") == "s3cret")
+check("and with the tutor this machine can actually run",
+      got and got.get("default_agent") == expected_agent)
+
+got, out = run_setup({"handover_secret": "s3cret", "default_agent": expected_agent}, "s3cret")
+check("a matching secret is left exactly as it was",
+      got and got.get("handover_secret") == "s3cret")
+
+got, out = run_setup({"handover_secret": "stale-and-wrong"}, "s3cret")
+check("a secret that does not match the Mac's is replaced, since denied is silent",
+      got and got.get("handover_secret") == "s3cret")
+
+got, out = run_setup({"handover_secret": "already-here"}, None)
+check("with nothing passed to check against, an existing secret is not clobbered",
+      got and got.get("handover_secret") == "already-here")
+check("but it is said out loud that nothing verified it",
+      "nothing was passed to check it against" in out)
+
+got, out = run_setup(None, None)
+check("and a node with no secret at all is told what that costs",
+      "strand the tutor" in out)
+
+# The block that must never be on a compute node.
+got, out = run_setup({"follow": {"node": "somewhere"}, "handover_secret": "s"}, "s")
+check("a `follow` block on a compute node is removed, not left to proxy to itself",
+      got is not None and "follow" not in got)
+check("and the removal is reported rather than done quietly",
+      "removed a `follow` block" in out)
+
 shutil.rmtree(sandbox, ignore_errors=True)
 print()
 print("%d FAILURES" % len(fails) if fails else "a machine knows its own name")

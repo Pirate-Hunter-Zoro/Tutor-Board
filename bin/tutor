@@ -38,6 +38,7 @@ import sys
 
 TOOL = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, TOOL)
+import boardlib  # noqa: E402  -- after the path insert, which is what finds it
 
 BOARD = os.path.join(TOOL, "bin", "board")
 CONFIG_DIR = os.path.join(
@@ -812,20 +813,29 @@ def headless(cfg, course, agent_name, session):
 
     turns = 0
     carried = 0          # turns the agent's current session is carrying
+    # An inbox whose turn failed for a reason that has since been repaired. The
+    # student sent something and got nothing back; `board wait` will not hand it
+    # over twice, so it is carried here rather than waiting for them to give up
+    # and send again.
+    pending = None
     recycle = int(cfg.get("session_turns", 12) or 0)
     while running["go"]:
-        running["waiter"] = subprocess.Popen(
-            [sys.executable, BOARD, "wait", "--timeout", "300"], cwd=root,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        raw = running["waiter"].communicate()[0]
-        code = running["waiter"].returncode
-        out = raw.decode("utf-8", "replace")
-        running["waiter"] = None
-        if not running["go"]:
-            break
-        if code != 0:
-            agent_state(live, state="listening")     # timed out; still alive
-            continue
+        if pending is not None:
+            out, pending = pending, None
+            log.write("-- answering the message whose turn failed before\n")
+        else:
+            running["waiter"] = subprocess.Popen(
+                [sys.executable, BOARD, "wait", "--timeout", "300"], cwd=root,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            raw = running["waiter"].communicate()[0]
+            code = running["waiter"].returncode
+            out = raw.decode("utf-8", "replace")
+            running["waiter"] = None
+            if not running["go"]:
+                break
+            if code != 0:
+                agent_state(live, state="listening")     # timed out; still alive
+                continue
 
         turns += 1
         agent_state(live, state="working", turns=turns)
@@ -891,6 +901,32 @@ def headless(cfg, course, agent_name, session):
 
         if err:
             log.write("!! %s\n" % err)
+            # A failed turn has two very different causes and they need telling
+            # apart. The model refusing, or the agent falling over, is nothing
+            # this can fix. The machine being unable to reach the provider at all
+            # is -- and on a host routing everything through an exit node it is
+            # the likelier one, because commercial VPN egress is exactly what a
+            # provider geo-blocks or challenges. The symptom is identical from
+            # here: a turn that failed. So ask the network, rather than guess.
+            #
+            # Only when a turn has actually failed. Probing on every turn would
+            # add a round trip to the internet to every card the student waits
+            # for, to answer a question that is almost always yes.
+            if not boardlib.egress_ok():
+                log.write("!! nothing can get out from here; the turn may not be "
+                          "the tutor's fault\n")
+                agent_state(live, state="listening", last_error="no egress")
+                fixed, detail = boardlib.rotate_exit_node(
+                    log=lambda m: log.write("   %s\n" % m))
+                if fixed:
+                    log.write("-- egress repaired via %s; retrying the turn\n" % detail)
+                    # The student sent something and got nothing. Put the same
+                    # inbox back so the next pass answers it rather than waiting
+                    # for them to send again.
+                    pending = out
+                else:
+                    log.write("!! egress still broken (%s); turns will keep "
+                              "failing until the network is fixed\n" % detail)
             agent_state(live, state="listening", last_error=err)
         else:
             carried = 1 if fresh else carried + 1
