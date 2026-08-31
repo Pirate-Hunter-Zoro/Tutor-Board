@@ -207,17 +207,44 @@ send it again.
 
 ## Skipping
 
-The answer block carries **skip this one**. When a skip arrives:
+The answer block carries **skip this one**. A prompt that cannot be declined is a
+prompt that gets answered badly to make it go away, which teaches nothing and
+wastes the turn. Skipping is the student managing the lesson's pace, and it is
+working as intended.
+
+What it *means* depends on what was skipped, and the two readings are not
+interchangeable.
+
+**A concept check, or a lecture exercise you chose — skip means *I have this
+already*.**
 
 - Move on. Do not re-ask, do not rephrase it as a smaller question, and do not
   remark on it.
-- It means *I have this already*, not *I give up*. Treat the concept as known
-  and keep the pace you would have kept if they had answered correctly.
+- Treat the concept as known and keep the pace you would have kept if they had
+  answered correctly.
 - If a later exercise depends on the skipped one, use it freely; assume it landed.
 
-A prompt that cannot be declined is a prompt that gets answered badly to make it
-go away, which teaches nothing and wastes the turn. Skipping is the student
-managing the lesson's pace, and it is working as intended.
+**An assigned homework problem — skip means *not now*.**
+
+The problems in a homework sitting are not yours to drop. A skipped one is a lost
+mark, and the student tapping past it is choosing an order, not shortening the
+sheet.
+
+- Leave it and carry on with the rest of the sheet. Do not press them on it, do
+  not remark on it, and do not ask it again in the same breath.
+- **Come back to it once the others are done.** It is still owed, and the empty
+  solution region in the document is the record of that — `board hw` names what
+  is still outstanding, in order, and which one is next. Read that rather than
+  trusting your memory of a two-hour sitting.
+- They may skip as often as they like, and as many as they like. The order is
+  theirs.
+- **If the skipped problem is the only one left, ask it again.** There is nothing
+  else to carry on with and the sheet is not finished, so it comes straight back.
+  That is not pressing them; it is the sheet not being done. The board's own
+  skip line says so when it happens.
+
+The board tells you which reading applies: in a homework sitting the skip arrives
+saying the problem is still assigned, and naming what is left.
 
 ---
 
@@ -287,19 +314,34 @@ yours** — and changes nothing else about how a problem is taught.
 3. **Then take them one at a time, exactly as in a lecture:** teach what that
    problem needs, work a smaller example, pose it, stop. The student writes;
    you review; a wrong step goes back with the break located, not repaired.
-4. **Scaffold the `.tex` behind the lesson, not in front of it.** Each problem's
-   statement goes into the file with its empty solution region beneath, but that
-   is clerical work and the student is sitting there waiting: do it *after* the
-   turn's card has landed, and do the one problem you are on rather than all of
-   them up front. Transcribing a whole sheet before saying anything is a person
-   watching a blank board for several minutes while nothing they can see happens.
-5. **Skip still means skip.** A student who already has a problem does not need
-   teaching for it — go straight to posing it, or straight past it if they say
-   so. Do not use the assignment as a reason to press.
+4. **Lay the document's skeleton in order, once, then fill it as you go.** After
+   your first card has landed — not before it, and never before saying anything —
+   put one `problem` environment per assigned problem into the `.tex`, in the
+   sheet's order, each with a placeholder statement and an empty solution region
+   beneath it. That pass is mechanical and quick. Then transcribe each statement
+   in full when you reach that problem, and its solution when the answer is
+   agreed.
+
+   The order matters and it is why the skeleton comes first. The student may work
+   the sheet in any order they like — skipping is theirs — and the document is
+   written in the **sheet's** order regardless. With the skeleton down, that is a
+   property of the file rather than something you have to reconstruct: problem 4
+   answered before problem 2 goes into problem 4's region, which is already in
+   the right place, and problem 2's region is still sitting empty above it where
+   anyone can see it.
+5. **Skip means *not now*, not *never*.** A student who already has a problem does
+   not need teaching for it — go straight to posing it. If they tap past it,
+   leave it and carry on with the rest of the sheet, then **come back to it once
+   the others are done**. The problems are not yours to drop; an unanswered one is
+   a lost mark, and the empty region in the document is what remembers it.
+   `board hw` names what is outstanding, in order, and which one is next; the
+   skip itself arrives saying the same thing. If the skipped problem is the only
+   one left, ask it again — there is nothing else to go on with. See
+   [Skipping](#skipping).
 
 The difference in one line: in a lecture you choose the exercises and may leave
 some for another day; in homework the sheet chose them and every one has to be
-done.
+done — in whatever order they are worked, and in the sheet's order on the page.
 
 ## A test review: the scope is theirs, the questions are yours
 <!-- mode: math -->
@@ -341,6 +383,12 @@ into the course's own file, in the same turn:
    student's own argument into the marked solution region beneath it. You are
    typesetting their reasoning, not improving it: same steps, same order. If a
    step is wrong you do not quietly fix it — it goes back instead.
+
+   In a homework sitting the region is already there, in the sheet's order, from
+   the skeleton laid down at the start — write into *that one*, wherever it sits
+   in the file. Never append a problem to the end of the document because it
+   happened to be answered last. The order the student works in is theirs; the
+   order the document reads in is the assignment's.
 3. `board hw file <label>` files their handwriting beside it.
 4. `board hw build` compiles, and the result appears on the board. A failure
    shows the actual LaTeX error there, so fix it rather than leaving it.

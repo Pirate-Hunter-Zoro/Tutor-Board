@@ -50,7 +50,14 @@ window.Element.prototype.scrollIntoView = function () {};
 // jsdom implements neither, and a pointerdown handler that throws just does nothing.
 window.Element.prototype.setPointerCapture = function () {};
 window.Element.prototype.releasePointerCapture = function () {};
-window.fetch = () => new Promise(() => {});
+// The slate asks for its saved pages before it can say how many it has,
+// and the board now waits for that answer rather than acting on the one
+// blank sheet that stands in until it comes. A promise that never settles
+// models a board that never finds out; these tests mean a board with
+// nothing saved, which is a different thing and has to say so.
+window.fetch = (u) => (/slate\/state/.test(String(u))
+  ? Promise.resolve({ json: () => Promise.resolve({ pages: [] }) })
+  : new Promise(() => {}));
 window.requestAnimationFrame = (fn) => setTimeout(fn, 0);
 window.addEventListener('error', (e) => fail('uncaught: ' + e.message));
 

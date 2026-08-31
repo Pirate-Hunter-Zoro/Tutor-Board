@@ -55,6 +55,19 @@ for phrase, why in [
     ("board finish", "the session ends by offering the push"),
     ("assignment sheet", "a homework sitting reads the sheet it was set"),
     ("not yours", "and does not choose its own problems there"),
+    # A skip means two different things and reading it the lecture way in a
+    # homework sitting quietly shortens the sheet. The problems are assigned:
+    # tapping past one chooses an order, and an unanswered one is a lost mark.
+    ("not now", "a skipped homework problem is deferred, not dropped"),
+    ("come back to it once the others are done",
+     "and is returned to when the rest of the sheet is done"),
+    ("only one left", "and comes straight back if it is the last one standing"),
+    # The student works the sheet in whatever order suits them; the document is
+    # not theirs to reorder. Answering 4 before 2 must not put 4 above 2 on the
+    # page, which is what appending as you go does.
+    ("skeleton in order", "the document's order is fixed before anything fills it"),
+    ("order regardless",
+     "so the write-up reads in the assignment's order, not the answering order"),
     # Revising for a test inverts the homework rule: the student chose the
     # scope, and inside it the questions are the tutor's. Both halves have to be
     # written down, because the failure in either direction is silent -- a tutor

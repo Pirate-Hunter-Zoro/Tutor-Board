@@ -52,7 +52,14 @@ const dom = new JSDOM(fs.readFileSync(path.join(WEB, 'home.html'), 'utf8'), {
   runScripts: 'outside-only', pretendToBeVisual: true, url: 'https://board.test/',
 });
 const { window } = dom;
-window.fetch = () => new Promise(() => {});
+// The slate asks for its saved pages before it can say how many it has,
+// and the board now waits for that answer rather than acting on the one
+// blank sheet that stands in until it comes. A promise that never settles
+// models a board that never finds out; these tests mean a board with
+// nothing saved, which is a different thing and has to say so.
+window.fetch = (u) => (/slate\/state/.test(String(u))
+  ? Promise.resolve({ json: () => Promise.resolve({ pages: [] }) })
+  : new Promise(() => {}));
 window.matchMedia = () => ({ matches: false, addEventListener() {}, addListener() {} });
 window.eval(fs.readFileSync(path.join(WEB, 'home.js'), 'utf8'));
 

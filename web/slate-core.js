@@ -230,6 +230,9 @@ function create(opts) {
 
   var api = {};
   var pages = [];
+  /* Whether `pages` is what the server has, or the one blank sheet that stands
+     in until it answers. See `settled` below. */
+  var loaded = false;
   var current = 0;
   var undoStack = [], redoStack = [], clipboard = [];
   /* `finger`: "scroll" or "write".
@@ -1547,6 +1550,7 @@ function create(opts) {
   fitPage();
 
   fetch("/slate/state").then(function (r) { return r.json(); }).then(function (d) {
+    settled();
     var saved = (d.pages || []).filter(function (p) { return p && p.w && p.h; });
     if (!saved.length) return;
     /* Only adopt saved pages if nothing has been drawn in the meantime --
@@ -1559,7 +1563,30 @@ function create(opts) {
       fitPage();
     }
     savedTag.textContent = "saved";
-  }).catch(function () { /* offline is fine; the page still works */ });
+  }).catch(function () { settled(); /* offline is fine; the page still works */ });
+
+  /* Whether the saved pages have arrived -- either they did, or the request
+     failed and this blank page is all there is going to be.
+
+     The single blank page above is what makes the surface usable before the
+     network answers, and it is a lie about how many pages there are for as long
+     as it stands. The board reads that count to decide which page a question
+     belongs on, so believing it cost a page mapping: a question recorded against
+     page 3 looks like a question recorded past the end, the board rules the page
+     gone, cuts a fresh one, and writes THAT down -- so a reload silently refiled
+     every question onto page 0 and the working of a whole evening ended up on one
+     sheet with the mapping to it destroyed. Nothing is lost that a person can
+     see, which is why it survived: the accident looked like continuity.
+
+     So: say when the count can be trusted, and let the board wait. */
+  function settled() {
+    if (loaded) return;
+    loaded = true;
+    if (typeof opts.onPages === "function") {
+      try { opts.onPages(); } catch (e) { /* the board's problem, not ours */ }
+    }
+  }
+  api.ready = function () { return loaded; };
 
   /* Re-measure the box, but keep a zoom the writer set on purpose. The board
      calls this after every render, and every server event is a render. */

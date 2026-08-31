@@ -202,6 +202,23 @@ def problems(tex):
     return [seen[label] for label in order]
 
 
+def outstanding(probs):
+    """Every problem still without a written solution, in the file's own order.
+
+    Which is the order the assignment has them, because the skeleton is laid down
+    in one pass before any of it is filled: a `problem` environment per assigned
+    label with a placeholder statement and an empty solution region. That is what
+    makes "in order" a property of the document rather than a rule the assistant
+    has to keep in its head while the student jumps about.
+
+    It is the answer to two questions at once, and they used to have none. What is
+    left to do -- and, once a student has skipped something, what has to be come
+    back to. A skipped problem is not a finished one; it is an empty region with
+    the rest of the sheet done around it, and that is exactly what this returns.
+    """
+    return [p["label"] for p in probs if not p["written"]]
+
+
 def status(root, state):
     """What the board shows: which set, and how much of it is done."""
     s = find(root, state)
@@ -223,4 +240,10 @@ def status(root, state):
         "total": len(probs),
         "written": sum(1 for p in probs if p["written"]),
         "stated": sum(1 for p in probs if p["stated"]),
+        # What is left, in order, and the one to return to. A student may work
+        # the sheet in any order they like; the document is written in the
+        # sheet's, and the first empty region is where the next agreed answer
+        # goes -- whether it was skipped an hour ago or has not been posed yet.
+        "outstanding": outstanding(probs),
+        "next": (outstanding(probs) or [None])[0],
     }

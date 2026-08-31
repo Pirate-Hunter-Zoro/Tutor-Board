@@ -355,6 +355,8 @@ def turn_revision(repo, tid):
 SIGNAL_SENSE = {
     "begin": "there is nothing on the board yet and they are waiting. "
              "Open the session and write the first card.",
+    # The lecture and test-review reading. A homework sitting means something
+    # different by the same tap and gets its own sentence -- see `skip_sense`.
     "skip": "they are not writing this one out. Do not re-ask it and do not press "
             "them on it; carry on with the lesson.",
     "done": "their work is ready for you to check.",
@@ -465,6 +467,54 @@ def review_sense(repo, st, mode):
         "Say in your first card what this review covers and which one you are "
         "starting on." % (counted, named, where)
     )
+
+
+def skip_sense(repo):
+    """What a skip means, which depends on what kind of sitting this is.
+
+    In a lecture it means *I have this already*: the concept check is pace
+    control, and re-asking a question somebody has waved away teaches nothing.
+    That reading was applied everywhere, and in a homework sitting it is wrong
+    and expensive -- the problems are not the assistant's to drop. A skipped
+    homework problem is a lost mark, and the student skipping it means *not now*,
+    not *never*. They are entitled to work the sheet in whatever order they like;
+    they are not entitled to have the assistant quietly agree the sheet is
+    shorter than it is.
+
+    So in homework the tap defers, and the sentence says what is still owed and
+    what to come back to. The list is read off the document rather than the
+    conversation, which is what makes it survive a restart, a new tutor, and the
+    two hours between the skip and the return.
+    """
+    st = repo.state()
+    if (st.get("session") or "lecture") != "homework":
+        return SIGNAL_SENSE["skip"]
+
+    line = ("they are not writing this one out NOW. This is a homework sitting, so "
+            "the problem is still assigned and still owed: leave it, carry on with "
+            "the rest, and come back to it once the others are done. Do not press "
+            "them on it in the meantime, and do not treat it as finished. ")
+    try:
+        st_hw = homework.status(repo.root, st)
+    except Exception:
+        st_hw = None
+    left = (st_hw or {}).get("outstanding") or []
+    if len(left) == 1:
+        # The degenerate case, and it is not a paradox: skipping the only thing
+        # left means it comes straight back, because there is nothing else to go
+        # on with and the sheet is not finished. Say so, or an assistant reading
+        # "come back to it once the others are done" concludes the others never
+        # will be and drops it.
+        line += ("It is also the ONLY problem left on the sheet, so there is "
+                 "nothing else to carry on with: ask it again. That is not a "
+                 "mistake and it is not pressing them -- the sheet is not done "
+                 "until it is done. ")
+    elif left:
+        line += ("Still to write up, in the sheet's order: %s. The next agreed "
+                 "answer goes in %s. " % (", ".join(left), left[0]))
+    line += ("They may work the sheet in any order; the document is written in "
+             "the sheet's order regardless.")
+    return line
 
 
 def session_sense(repo):
@@ -2082,7 +2132,8 @@ class Handler(BaseHTTPRequestHandler):
             # sentence carries its own.
             line = ("[%s] " % signal if signal else "") + text
             if signal and not text:
-                line += SIGNAL_SENSE.get(signal, "")
+                line += (skip_sense(repo) if signal == "skip"
+                         else SIGNAL_SENSE.get(signal, ""))
             if signal == "begin":
                 # Where to begin, not merely that they are waiting. Without this
                 # the assistant has a blank board, no handoff, and a signal that

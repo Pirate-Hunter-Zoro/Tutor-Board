@@ -811,6 +811,18 @@ def cmd_hw(live, args):
                 mark = "no solution region"
             print("  %-6s %s" % (p["label"], mark))
         print("  %d of %d written up" % (st["written"], st["total"]))
+        # A sheet can be worked in any order the student likes, and one that has
+        # been skipped looks exactly like one that has not been reached yet: an
+        # empty region. So say which they are, in the sheet's own order, and
+        # which one the next agreed answer belongs in. Without this "come back to
+        # the skipped ones" is a thing the assistant has to remember across a
+        # two-hour sitting and several restarts, and it did not.
+        left = st.get("outstanding") or []
+        if left:
+            print("  still to write up, in order: %s" % ", ".join(left))
+            print("  next: %s" % st["next"])
+        elif st["total"]:
+            print("  the whole set is written up")
         rec = read_hw_build(live)
         if rec:
             print("  last build: %s at %s" % ("ok" if rec["ok"] else "FAILED", rec["iso"]))

@@ -48,7 +48,14 @@ window.HTMLElement.prototype.getBoundingClientRect = function () {
   return { left: 0, top: 0, width: 900, height: 500, right: 900, bottom: 500, x: 0, y: 0 };
 };
 window.Element.prototype.scrollIntoView = function () {};
-window.fetch = () => new Promise(() => {});      // deliberately never resolves
+// The slate asks for its saved pages before it can say how many it has,
+// and the board now waits for that answer rather than acting on the one
+// blank sheet that stands in until it comes. A promise that never settles
+// models a board that never finds out; these tests mean a board with
+// nothing saved, which is a different thing and has to say so.
+window.fetch = (u) => (/slate\/state/.test(String(u))
+  ? Promise.resolve({ json: () => Promise.resolve({ pages: [] }) })
+  : new Promise(() => {}));      // deliberately never resolves
 window.EventSource = function () { return { close() {}, readyState: 1, addEventListener() {} }; };
 window.renderMathInElement = () => {};
 window.requestAnimationFrame = (fn) => setTimeout(fn, 0);

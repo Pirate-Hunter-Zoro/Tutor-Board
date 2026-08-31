@@ -55,7 +55,14 @@ window.HTMLElement.prototype.getBoundingClientRect = function () {
            right: 900, bottom: top + height, x: 0, y: top };
 };
 window.Element.prototype.scrollIntoView = function () {};
-window.fetch = () => new Promise(() => {});
+// The slate asks for its saved pages before it can say how many it has,
+// and the board now waits for that answer rather than acting on the one
+// blank sheet that stands in until it comes. A promise that never settles
+// models a board that never finds out; these tests mean a board with
+// nothing saved, which is a different thing and has to say so.
+window.fetch = (u) => (/slate\/state/.test(String(u))
+  ? Promise.resolve({ json: () => Promise.resolve({ pages: [] }) })
+  : new Promise(() => {}));
 window.renderMathInElement = () => {};
 window.requestAnimationFrame = (fn) => setTimeout(fn, 0);
 
@@ -87,6 +94,7 @@ if (realCreate) {
   window.Slate.create = function (opts) {
     const api = realCreate(opts);
     api.busy = () => !!window.__slateBusy;
+    window.__slate = api;          // the instance, for the page-mapping tests
     return api;
   };
 }
@@ -647,6 +655,73 @@ const withNew = Object.assign({}, lesson, {
 
   es.onmessage({ data: JSON.stringify(same) });
   await sleep(20);
+}
+
+// 6c6. The surface is usable before the network answers, and for that half
+// second its page count is a lie. Acting on it destroyed page mappings.
+//
+// `Slate.create` hands back ONE blank page synchronously — deliberately, so a
+// stroke made in the first half-second is not thrown away — and adopts the saved
+// pages when `/slate/state` answers. The board read that count to decide which
+// page a question belongs on. So a question recorded against page 3 looked like
+// a question recorded past the end: the board ruled its page gone, cut a fresh
+// one, and wrote THAT down. A reload therefore refiled question after question
+// onto page 0, an evening's working ended up on a single sheet, and the mapping
+// to it was gone. Nothing a person can see is lost, which is why it survived —
+// the accident looked like continuity.
+{
+  const slate = window.__slate;
+  slate
+    ? ok('the surface is reachable, so its page bookkeeping can be asserted')
+    : fail('no slate instance was captured');
+
+  if (slate) {
+    slate.ready()
+      ? ok('a surface whose saved pages have arrived says so')
+      : fail('the surface never admits to knowing its own pages');
+
+    // The damage was to the RECORD of which page a question sits on, so that is
+    // what to watch. A question filed while the count cannot be believed is a
+    // question filed against the wrong page, permanently — and it is written to
+    // storage, so it outlives the reload that caused it.
+    const KEY = 'board.pages:Galois Theory:-';
+    const filedIn = () => {
+      try { return JSON.parse(window.localStorage.getItem(KEY) || '{}'); }
+      catch (e) { return {}; }
+    };
+    const fresh41 = Object.assign({}, lesson, {
+      cards: [card('0041', 'question', 'a question never seen before', 1)],
+      turns: [],
+    });
+
+    const realReady = slate.ready;
+    slate.ready = () => false;
+    es.onmessage({ data: JSON.stringify(fresh41) });
+    await sleep(20);
+    filedIn()['0041'] === undefined
+      ? ok('a question arriving before the pages do is not filed against one')
+      : fail('the board filed a question against a page number it had been told '
+             + 'not to believe, and wrote it down — which is the whole defect');
+
+    // ...and the moment the pages land, it is filed properly.
+    slate.ready = realReady;
+    es.onmessage({ data: JSON.stringify(fresh41) });
+    await sleep(20);
+    filedIn()['0041'] !== undefined
+      ? ok('and is filed the moment the real pages arrive')
+      : fail('the question never got a page even after the surface was ready');
+
+    // The board has to be TOLD, not left to find out on a heartbeat thirty
+    // seconds later — the person is looking at a blank board in the meantime.
+    const core = fs.readFileSync(path.join(WEB, 'slate-core.js'), 'utf8');
+    /opts\.onPages/.test(core)
+      ? ok('and the surface calls the board the moment its pages land')
+      : fail('nothing tells the board the page count became trustworthy');
+    const js2 = fs.readFileSync(path.join(WEB, 'board.js'), 'utf8');
+    /onPages: function \(\)/.test(js2) && /restoreAnswer\(\);/.test(js2)
+      ? ok('and the board puts the right page under the pen when told')
+      : fail('the board is told and does nothing with it');
+  }
 }
 
 // 6d. And a picture can be handed over from the device. The file input has been

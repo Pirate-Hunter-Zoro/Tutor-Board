@@ -129,6 +129,46 @@ try:
     check("problems keep the order they appear in",
           [p["label"] for p in st["problems"]] == ["1", "2", "3"])
 
+    # --- what is still owed, which is what a skip leaves behind ---------------
+    #
+    # A student may work an assigned sheet in any order they like: skipping is
+    # theirs, and it means "not now" rather than "never". The assistant then has
+    # to come back, and "come back" has to survive two hours, a restart and a
+    # different tutor -- so it is read off the DOCUMENT, where an unanswered
+    # problem is an empty region sitting in the sheet's own order, and not off
+    # anybody's memory of the conversation.
+    check("what is still to write up is named, in the sheet's order",
+          st["outstanding"] == ["2", "3"])
+    check("and the next agreed answer has a region waiting for it",
+          st["next"] == "2")
+    check("a written-up problem is not outstanding",
+          "1" not in st["outstanding"])
+
+    # Answered out of order: problem 3 done while 2 is still empty. The document
+    # is written in the sheet's order regardless, so 2 is still the next one --
+    # its region sits above 3's and stays empty until it is filled.
+    jumbled = os.path.join(tmp, "jumbled")
+    write(os.path.join(jumbled, "tutorboard.json"), '{"name": "J", "mode": "math"}')
+    body = SET % {"a": "1", "b": "2", "c": "3"}
+    body = body.replace(
+        "% TODO(mferguson): your work goes here.\n% ===== END SOLUTION 3 =====",
+        "By Boole's inequality the union is at most the sum.\n% ===== END SOLUTION 3 =====")
+    write(os.path.join(jumbled, "homework", "hw06", "hw06.tex"), body)
+    stj = homework.status(jumbled, {"chapter": "Homework 6"})
+    check("a problem answered out of turn is written up where the sheet puts it",
+          [p["label"] for p in stj["problems"]] == ["1", "2", "3"]
+          and stj["problems"][2]["written"] is True)
+    check("and the one skipped over is still the next one owed",
+          stj["outstanding"] == ["2"] and stj["next"] == "2")
+
+    # The degenerate case the person asked about: skip the only one left and it
+    # comes straight back, because there is nothing else to carry on with.
+    last = homework.outstanding([{"label": "9", "written": False}])
+    check("skipping the last problem leaves exactly one thing owed: that problem",
+          last == ["9"])
+    check("and a finished sheet owes nothing",
+          homework.outstanding([{"label": "9", "written": True}]) == [])
+
     # The real templates use one comment marker; a doubled one is an ordinary
     # thing for a person to write and opens no less real a region.
     dbl = os.path.join(tmp, "doubled")

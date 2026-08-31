@@ -2372,6 +2372,12 @@ function makeWriter(then) {
         /* Marks on the lesson are a second thing that can be sent. Ask which,
            but only when both actually exist. */
         beforeSend: askWhatToSend,
+        /* The saved pages have arrived and the count can be believed. Everything
+           about which question sits on which page was deferred until now. */
+        onPages: function () {
+          restoreAnswer();
+          if (lastLive) render(lastLive);
+        },
       });
       window.__writerDebug = writer.debug;
       if (then) then();
@@ -2389,6 +2395,20 @@ function makeWriter(then) {
    to its page with the working still on it. */
 function restoreAnswer() {
   if (!writer) return;
+  /* Not until the surface knows what its pages actually are.
+
+     It is usable before the network answers -- one blank sheet, so a stroke made
+     in the first half-second is not thrown away -- and for that half-second the
+     page count is a lie. Acting on it did two kinds of damage, both silent.
+     A question recorded against a page past the end of that lie was ruled gone,
+     given a fresh page, and WRITTEN DOWN there: a reload refiled question after
+     question onto page 0, and an evening's working ended up on one sheet with
+     the mapping to it destroyed. And loading a sent answer onto the stand-in
+     page put strokes on it, which is exactly the condition under which the saved
+     pages are then refused adoption -- so the real working never arrived at all.
+
+     Waiting costs nothing: `onPages` calls this the moment the count is real. */
+  if (!writer.ready || !writer.ready()) return;
 
   if (answering.question && writer.fresh) {
     var want = questionPage[answering.question];

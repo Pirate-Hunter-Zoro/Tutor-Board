@@ -168,6 +168,64 @@ try:
           "not writing this one" in lines[-1].get("text", "")
           and "carry on" in lines[-1].get("text", ""))
 
+    # ...but a HOMEWORK sitting means something else by the same tap, and reading
+    # it the lecture way is expensive: the problems are assigned, an unanswered
+    # one is a lost mark, and the student tapping past it is choosing an order
+    # rather than shortening the sheet. So the skip defers, and the line says
+    # what is still owed -- read off the document, so it survives the two hours,
+    # the restart and the different tutor between the skip and the return.
+    def hw_set(pairs):
+        """A problem set where `pairs` is (label, written)."""
+        body = ["\\documentclass{article}", "\\begin{document}"]
+        for label, written in pairs:
+            body += ["\\begin{problem}{%s}" % label, "  A statement.",
+                     "\\end{problem}",
+                     "%% ===== SOLUTION %s =====" % label,
+                     ("The argument." if written
+                      else "%% TODO(mferguson): your work goes here."),
+                     "%% ===== END SOLUTION %s =====" % label]
+        body.append("\\end{document}")
+        path = os.path.join(tmp, "homework", "hw01", "hw01.tex")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(body) + "\n")
+
+    def skip_line():
+        post("/say", {"signal": "skip", "answers": "0002"})
+        with open(repo.messages_path, "r", encoding="utf-8") as fh:
+            rows = [json.loads(l) for l in fh if l.strip()]
+        return rows[-1].get("text", "")
+
+    with open(repo.state_path, "w", encoding="utf-8") as fh:
+        json.dump({"course": "Test Course", "session": "homework",
+                   "chapter": "Homework 1", "hw": "homework/hw01/hw01.tex"}, fh)
+
+    hw_set([("1", True), ("2", False), ("3", False)])
+    text = skip_line()
+    check("a skipped homework problem is deferred, not dropped",
+          "still assigned" in text and "come back to it" in text)
+    check("and the tutor is told what is still owed, in the sheet's order",
+          "2, 3" in text)
+    check("and which region the next agreed answer goes in",
+          "goes in 2" in text)
+    check("and that the document is written in the sheet's order, not theirs",
+          "any order" in text and "sheet's order regardless" in text)
+    check("and it is not the lecture reading, which would drop the problem",
+          "Do not re-ask it" not in text)
+
+    # The degenerate case the person asked about out loud: skip the only one
+    # left and it comes straight back, because there is nothing to go on with.
+    hw_set([("1", True), ("2", True), ("3", False)])
+    text = skip_line()
+    check("skipping the only problem left has it asked again, and says why",
+          "ONLY problem left" in text and "ask it again" in text)
+    check("and says plainly that this is not pressing them",
+          "not pressing them" in text)
+
+    with open(repo.state_path, "w", encoding="utf-8") as fh:
+        json.dump({"course": "Test Course", "session": "lecture",
+                   "chapter": "Ch 1 — groups, fields and vector spaces"}, fh)
+
     # The board's own view of who is attached. An interactive assistant is idle
     # for as long as the person is thinking, so judging it by a heartbeat is why
     # this indicator was never once green outside headless.
