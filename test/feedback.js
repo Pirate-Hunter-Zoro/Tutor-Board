@@ -579,6 +579,76 @@ const withNew = Object.assign({}, lesson, {
   }
 }
 
+// 6c5. The board IS the answer: a written answer is not also frozen into a
+// picture above it.
+//
+// The transcript froze every ink answer at the moment it was sent, which was
+// right when the slate was ONE surface that got written over -- the picture was
+// then the only copy of what had been handed in. It is not one surface any
+// more. Every question owns a page, nothing is ever wiped, and that page is
+// still under the board at the end of the question's run. So the picture and
+// the board were two copies of the same ink with one of them dead, and going
+// back up the lesson to an earlier answer found the dead one: "I wanted the
+// frozen submission REPLACED by a live surface."
+//
+// The rule is not new — the newest unanswered turn has always stood aside for
+// the surface below it, for exactly this reason. This is that rule, now that
+// every question can keep a board of its own.
+{
+  const turnNode = () => doc.querySelector('[data-turn="t0009"]');
+  turnNode()
+    ? ok('a written answer still appears in the transcript, in its own place')
+    : fail('the answer vanished from the transcript altogether');
+  turnNode() && !turnNode().querySelector('.slate-shot')
+    ? ok('and is not also frozen into a picture, now that a board carries it')
+    : fail('the answer is shown twice — a dead picture above, the live board '
+           + 'below, which is the whole complaint');
+  turnNode() && turnNode().querySelector('.to-board')
+    ? ok('with one line saying where the working is, and a tap to reach it')
+    : fail('the picture went and left nothing pointing at the board');
+  turnNode() && /you ·/.test(turnNode().querySelector('.when').textContent)
+    ? ok('and the transcript still records that an answer was sent, and when')
+    : fail('the turn lost its heading, so nothing says an answer happened');
+
+  // The tap goes somewhere. It scrolls to whichever of the two the board is at
+  // that moment: the picture of it, or the live surface if it is the open one.
+  {
+    let went = null;
+    const target = doc.querySelector('[data-board="0033"]') || els.writer;
+    target.scrollIntoView = function () { went = this; };
+    turnNode().querySelector('.to-board')
+      .dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    went
+      ? ok('and the tap actually goes to the board')
+      : fail('the line is there and pressing it does nothing');
+  }
+
+  // The picture is the only record there is on a lesson nobody can write on, so
+  // it comes straight back.
+  const same = Object.assign({}, lesson, {
+    cards: [card('0031', 'question', 'Problem 1', 1),
+            card('0032', 'note', 'take P of both sides', 2),
+            card('0033', 'question', 'Problem 2 — Bonferroni', 3),
+            card('0034', 'correct', 'that is the proof', 4)],
+    turns: [{ id: 't0009', rev: 4, kind: 'ink', answers: '0033', t: t0 + 450,
+              iso: '2026-08-31 10:02:00', png: '/answers/t0009-r4.png',
+              ink: '/answers/t0009-r4.json' }],
+  });
+  const filed = Object.assign({}, same, { archived: true });
+  es.onmessage({ data: JSON.stringify(filed) });
+  await sleep(20);
+  const filedTurn = doc.querySelector('[data-turn="t0009"]');
+  filedTurn && filedTurn.querySelector('.slate-shot')
+    ? ok('a filed lesson keeps the frozen picture, having no surface to offer')
+    : fail('a past lesson now shows neither the working nor a way to reach it');
+  !doc.querySelector('[data-board]')
+    ? ok('and paints no boards at all, since nothing there can be written on')
+    : fail('a filed lesson is offering a writing surface');
+
+  es.onmessage({ data: JSON.stringify(same) });
+  await sleep(20);
+}
+
 // 6d. And a picture can be handed over from the device. The file input has been
 // in the page from the beginning and nothing ever opened it -- dropping a file
 // and pasting one both worked, and neither is a gesture that exists on a tablet.

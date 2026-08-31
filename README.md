@@ -62,7 +62,18 @@ which kind of subject it is and the board adapts.
 > on the page goes with it; they are painted for the whole live lesson now, and
 > touching one still makes it the live surface on that question's own page. The
 > second was `panelKind` letting the question's history outrank the tab that was
-> just pressed. Shell version `board-shell-v56`.
+> just pressed.
+>
+> **And then the frozen submission itself went, which was the actual ask.** The
+> first fix put a live board under every question and left the frozen picture
+> where it was, so the answer appeared twice — that is not what was wanted. An
+> ink answer is now shown by its board and nothing else: the turn keeps its
+> heading and one line pointing down at the working. The picture is still written
+> per revision into `live/answers/` and still comes back wherever there is no
+> board to show it. The invariant in `AI_INSTRUCTIONS.md` was rewritten rather
+> than quietly broken — read it before restoring the old behaviour, because the
+> reasoning it used to carry has genuinely expired. Shell version
+> `board-shell-v57`.
 >
 > **What only the device can settle about it:** the writing surface is now built
 > on a lesson where nothing is owed — it has to be, because every dormant board
@@ -322,6 +333,7 @@ these tests fail, the test is right.
 | Pressing Send moved the board upwards and re-fitted the writing surface underneath it. Two causes: nothing put the page under the working, where the receipt and the tutor's "writing…" both are; and the payload the send provoked carried a turn one revision newer than the one on the surface, so `restoreAnswer` fetched the answer back off the server and handed it to `load`, which re-fits the page — throwing away the zoom the working had been written at, on every send | `revealSent` anchors to the foot of the surface; the send records the revision it just sent; `test/feedback.js` |
 | A pen stroke appeared under the nib and was gone by the time the hand moved. Pointer ids are small integers and the platform reuses them, so a palm whose lift the surface never saw stayed in the map and came back attached to the Pencil — and the lift handler, seeing a known palm, returned before committing the stroke | a pen is never a palm, whatever the id says; `isPalm` takes the event, not the number; `test/plane.js` |
 | Ink was lost to two autosaves racing to the disk: a save builds its body when it is called, so the version that lands is whichever the server writes second — regularly the older one — and any save completing cleared the dirty flag, so once a stale one landed last nothing scheduled another. `board.log` showed 111 strokes saved, then 106, then 111 | one save on the wire at a time, and `changeSeq` so a save only reports success for the page it actually carried; `test/plane.js` |
+| A written answer was shown twice: a frozen picture of the ink under the question, and the board carrying the same ink under the feedback — one of them dead, and the dead one was the one you met first scrolling back up. The freezing was right when the slate was ONE surface that got written over, because then the picture was the only copy of what had been handed in; it stopped being right when every question got a page that is never wiped | the board is the answer; the turn keeps its heading and one line pointing at it, and the picture returns wherever there is no board — a filed lesson, a past one, a browser that never held the page; `test/feedback.js`, `test/interactive.js` |
 | Getting an exercise RIGHT deleted every writing board in the lesson. The boards were painted only while an answer was *owed*, and a `correct` card owes nothing — so finishing a problem left the transcript as frozen pictures of what had been sent, with no surface under any earlier question to add a line to. A picture is a record of an answer, not a place to write one | the boards are painted for the whole live lesson; the one question that goes without a picture is the one the real surface is sitting under; `test/feedback.js` |
 | Pressing *type* did nothing on a question already answered in ink. `panelKind` read the question's history before anything else, and a sent ink turn answered "write" whatever the tabs were told — so the press set the remembered kind, repainted, and was overruled on the way back. Which is every question worth typing about: you write the proof, the tutor asks what you meant by a line of it, and the answer to that is a sentence | `pickedKind`, recorded against the question the tab was pressed on and read before the history — the same rule as `chosen.json`, that a decision outranks an inference; `test/feedback.js` |
 | The compute node never pulled the board. Every session pulled the *course*, and the always-on host had a timer for the tool, but `--tool-pull` refuses to install one on a node — so the node ran whatever it was last pulled by hand, indefinitely, while the Mac moved on. And the timer that did run bounced only the proxy on purpose, so the Mac's own boards and tutors went on serving the old code after every pull: a fix reached the disk of both machines and the lesson of neither | `tutor` and `tutor resume` pull this repository, re-exec onto it, and then `tutor restart --tutors`; `scripts/tool-pull.sh` does the same; `test/resume.py` |

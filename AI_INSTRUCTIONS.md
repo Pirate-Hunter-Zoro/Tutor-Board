@@ -86,13 +86,23 @@ preferred".
 - **A bad formula must not blank the board.** KaTeX runs with `throwOnError: false`; a broken TikZ
   fence caches an `.err` and renders as a marked box. Nothing in the render path may throw.
 - **A lesson is a transcript, and both halves of it are kept.** The student's answers are turns:
-  anchored to the card they answer, frozen at the moment they are sent (the slate is a working
-  surface and gets written over — never render a live slate page as though it were a submission),
-  and versioned, so a correction supersedes the original *in place* rather than appending another
-  copy. `live/turns.jsonl` is append-only; every revision stays, only the newest is shown.
-  Archiving takes cards, turns and the frozen answers together — a folder of the assistant's cards
-  with the student's half missing is a record of half a conversation. `test/transcript.py` guards
-  all of it.
+  anchored to the card they answer, and versioned, so a correction supersedes the original *in
+  place* rather than appending another copy. `live/turns.jsonl` is append-only; every revision
+  stays, only the newest is shown. Every send still writes a PNG frozen at that moment into
+  `live/answers/`, one per revision, and archiving takes cards, turns and those frozen answers
+  together — a folder of the assistant's cards with the student's half missing is a record of half
+  a conversation. `test/transcript.py` guards all of it, and none of that is negotiable.
+
+  **What the transcript SHOWS is a separate question, and the answer changed on 31 August 2026.**
+  It used to be the frozen picture, always, on the reasoning that the slate was one surface that got
+  written over — so the picture was the only copy of what had been handed in. That reasoning expired
+  when every question got a page of its own that is never wiped: the page is still there, under that
+  question's board, and the picture beside it is a second dead copy of the same ink. The board is
+  what is shown, and the picture is the fallback wherever there is no board to show — a filed lesson,
+  a past one, or a browser that has never held this question's page, since that mapping is local to
+  the device that made it. Decided by the person whose lesson it is, on the argument that a
+  correct answer is written up into the document and the transcript is not the archival copy.
+  `test/feedback.js` and `test/interactive.js` hold both halves of the rule.
 - **Two courses, two session boundaries.** Maths ends a session when the chapter does, which is
   what `board open` marks. Code ends it at the commit: `board push` archives and starts the next
   one, because a commit is what "we got this working" means. Do not invent a third.

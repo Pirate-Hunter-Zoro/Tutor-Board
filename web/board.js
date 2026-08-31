@@ -532,7 +532,37 @@ function render(data) {
     return (a.id || "").localeCompare(b.id || "");
   });
   var at = Object.create(null);
-  ordered.forEach(function (c, n) { at[c.id] = n; });
+  var isQuestion = Object.create(null);
+  ordered.forEach(function (c, n) {
+    at[c.id] = n;
+    if (c.kind === "question") isQuestion[c.id] = true;
+  });
+  /* A filed lesson and a past one are read-only: no surface is built for either,
+     so the frozen picture is the only record there is and it stays. */
+  var live = !data.archived && !reading;
+
+  /* Whether a written answer already has a board carrying the same ink.
+
+     The transcript froze every ink answer into a picture at the moment it was
+     sent -- which was right when the slate was one surface that got written
+     over, because then the picture was the only copy of what had been handed in.
+     It is not one surface any more: every question owns a page, nothing is ever
+     wiped, and that page is still under the board at the end of the question's
+     run. So the picture and the board are two copies of the same ink, one of
+     them dead, and going back up the lesson to an earlier answer found the dead
+     one. The board is the answer.
+
+     The rule already existed for the newest unanswered turn, a few lines below,
+     for exactly this reason. This is that rule, now that every question can keep
+     one. The picture comes back the moment there is no board to replace it:
+     a filed lesson, a past one, a browser that has never held this question's
+     page -- the mapping is local to the device that wrote it -- or a surface
+     that has not been built yet. */
+  function onABoard(m) {
+    return live && !!writer && m.kind === "ink" && !!m.png
+           && !!m.answers && !!isQuestion[m.answers]
+           && questionPage[m.answers] !== undefined;
+  }
 
   /* Feedback supersedes feedback. An answer is versioned and only its newest
      revision is rendered -- three goes at Exercise 1.3 show as one attempt --
@@ -618,8 +648,13 @@ function render(data) {
     seenIds[stamp] = true;
 
     /* The key is identity plus version: a card edited in place, or a turn
-       revised, changes its key and is rebuilt; everything else is reused. */
-    var wantKey = stamp + (item.card ? ":m" + Math.round(item.card.mtime) : "");
+       revised, changes its key and is rebuilt; everything else is reused.
+       Whether the answer is showing as a picture or standing aside for its board
+       is part of that identity -- the surface is built a frame after the first
+       payment, and without this the turn keeps the picture it was born with. */
+    var onBoard = !!item.turn && onABoard(item.turn);
+    var wantKey = stamp + (item.card ? ":m" + Math.round(item.card.mtime)
+                                     : (onBoard ? ":b" : ""));
     if (onScreen[wantKey]) {
       wanted.push({ key: wantKey, node: null });     /* keep what is there */
       return;
@@ -662,7 +697,18 @@ function render(data) {
         node.querySelector(".when").after(chip);
       }
       node.querySelector(".text").innerHTML = renderMarkdown(m.text || "");
-      if (m.png) {
+      if (m.png && onBoard) {
+        /* The working is on the board under this question's run -- below the
+           feedback, which is where a correction wants it. One line here, so the
+           transcript still says an answer was sent and when, and a tap goes to
+           it rather than making anyone hunt. */
+        var toBoard = document.createElement("button");
+        toBoard.type = "button";
+        toBoard.className = "to-board";
+        toBoard.textContent = "on the board below ↓";
+        toBoard.addEventListener("click", function () { showBoardFor(m.answers); });
+        node.appendChild(toBoard);
+      } else if (m.png) {
         /* Frozen at the moment it was sent, so it is what was handed in and
            not whatever the slate says now. The revision is in the URL, so
            there is nothing stale for the browser to hold on to. */
@@ -832,7 +878,6 @@ function render(data) {
   }
   /* A past lesson is read only: no pen, no box, nothing to send into a session
      that has already been filed. */
-  var live = !data.archived && !reading;
   placeWriter(owed && !data.archived, qNode, live);
   /* The boards do not come and go with the answer panel.
 
@@ -2094,6 +2139,14 @@ function boardSlot(qid) {
   });
   slot.querySelector(".board-send").onclick = function () { goLive(null, true); };
   return slot;
+}
+
+/* Go to the board that carries a question's working, wherever it is on the page:
+   the picture of it, or the live surface if that question is the one open. */
+function showBoardFor(qid) {
+  var n = els.cards.querySelector('[data-board="' + qid + '"]');
+  if (!n && !els.writer.hidden && answering.question === qid) n = els.writer;
+  if (n && n.scrollIntoView) n.scrollIntoView({ block: "center", behavior: "smooth" });
 }
 
 /* A stroke that landed on a picture, given to the canvas that replaced it.

@@ -458,6 +458,20 @@ body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180de
   width: 100%; border-radius: .4rem;
   border: 1px solid var(--rule); background: #fff;
 }
+/* What stands where the frozen picture used to, when the working is on a board
+   further down. Deliberately a line and not a thumbnail: a second small copy of
+   the ink is the very thing this replaced. Sized like the timestamp above it,
+   because it is the same kind of remark about the answer rather than part of
+   it -- and given a real target size, since it is tapped with a thumb. */
+.to-board {
+  display: inline-block; margin-top: .35rem;
+  font-family: var(--ui); font-size: .74rem;
+  color: var(--ink-3); background: none;
+  border: 1px solid var(--rule); border-radius: .35rem;
+  padding: .3rem .55rem; min-height: 1.9rem;
+  cursor: pointer;
+}
+.to-board:hover { color: var(--ink); border-color: var(--ink-3); }
 
 /* ---------- end of session ---------- */
 .finish, .pushed, .linkbad, .hwbar {

@@ -292,9 +292,21 @@ setTimeout(() => setTimeout(() => {
     mine && q && q.nextElementSibling && q.nextElementSibling.dataset.turn === 't0001'
       ? ok('the answer sits directly under its question')
       : fail('the answer is not under the question it answers');
-    mine && mine.querySelector('.slate-shot img')
-      ? ok('the ink that was sent is shown in place')
-      : fail('the sent ink is not rendered in the lesson');
+    // ...and the ink itself is reachable from there. It used to be frozen into
+    // a picture here, which was right while the slate was ONE surface that got
+    // written over. Every question keeps its own page now, so the board under
+    // this question's run holds that same ink, live — and a dead copy of it a
+    // few lines above is the thing that was asked to go. Either way the answer
+    // has to be reachable from its own place in the transcript, and that is what
+    // this asserts: the picture, or a way to the board that replaced it.
+    const holds = mine && (mine.querySelector('.slate-shot img')
+                           || mine.querySelector('.to-board'));
+    holds
+      ? ok('and the ink that was sent is reachable from it')
+      : fail('the sent ink is neither shown in the lesson nor pointed at');
+    mine && !(mine.querySelector('.slate-shot img') && mine.querySelector('.to-board'))
+      ? ok('and shown exactly once, never as a picture beside a pointer')
+      : fail('the answer is offered twice over in the same turn');
 
     // A revision supersedes in place rather than piling up at the end.
     window.__render({
