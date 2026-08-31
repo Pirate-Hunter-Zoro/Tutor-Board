@@ -45,6 +45,23 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 31 August 2026
 >
+> **A finished homework sheet can now be compiled by the tutor that wrote it**, which
+> it could not be on the machine that mattered. Reported from the board at the end of a
+> sitting: six problems written up, agreed and pushed, and a `.tex` nobody holding an iPad
+> could turn into a PDF. The tutor's own account was that it lacked permission, and it was
+> half right — the course's `.claude/settings.local.json` is written the first time its
+> board starts and, until today, never touched again, so a course created before a grant
+> existed was never going to get it. The other half was quieter: `board hw build` ran the
+> course's `scripts/build.sh` with whatever `PATH` the board process had, and that script
+> looks for TinyTeX's *Linux* directory, which the Mac does not have. Both are in the
+> defect table. The grant now covers `pdflatex`, `latexmk` and the course's build script;
+> `install_permissions` tops an existing file up rather than skipping it, appending only
+> what is missing so a course's own list survives; and the build runs under
+> `boardlib.tex_env()`, which already knew where every TeX on either machine lives.
+> A failed build also stops saying `FAILED` and nothing else. `TEACHING.md` now says
+> plainly that compiling is the tutor's job and that it is allowed to do it, because one
+> refused command had been enough to convince it otherwise.
+>
 > **Test review shipped today.** A third kind of sitting, beside lecture and homework, for revising
 > for a paper: the badge offers *test review*, that opens a picker of every chapter the course has,
 > and starting one wakes the tutor over exactly the chapters ticked. It teaches in the homework
@@ -385,6 +402,9 @@ these tests fail, the test is right.
 | The compute node never pulled the board. Every session pulled the *course*, and the always-on host had a timer for the tool, but `--tool-pull` refuses to install one on a node — so the node ran whatever it was last pulled by hand, indefinitely, while the Mac moved on. And the timer that did run bounced only the proxy on purpose, so the Mac's own boards and tutors went on serving the old code after every pull: a fix reached the disk of both machines and the lesson of neither | `tutor` and `tutor resume` pull this repository, re-exec onto it, and then `tutor restart --tutors`; `scripts/tool-pull.sh` does the same; `test/resume.py` |
 | ...and the first version of that fix could not say it had happened: `execve` throws away whatever is sitting in the process's buffers, and stdout is a pipe or a log file every time this runs for real — so the one line explaining why the board changed under somebody's lesson was dropped on the way out | a flush before the exec; `test/resume.py` drives a real clone and reads what it printed |
 | A deploy dropped somebody mid-proof into a different course: starting a board claimed the tailnet name unconditionally, and `tutor restart` restarts every board on the machine one after another — so the address ended up wherever the course list happened to end. The installed app has one URL baked into it and no way to say which lesson it wanted | `ts_repoint` will not take a name from a board that is still answering; `board vpn serve` is the one command that does, because that is a person asking; `test/address.py` |
+| An evening's homework was written up and could not be typeset. Two causes wearing one face. A course's `.claude/settings.local.json` was written the first time its board started and never touched again, so a course created before the LaTeX grant existed was never going to get it — and the tutor, refused the compiler, reasonably concluded the machine was the problem. Underneath that, `board hw build` handed the course's own `scripts/build.sh` whatever `PATH` the board process happened to have: that script prepends TinyTeX's *Linux* directory, and on the Mac, started by a login agent with `/usr/bin:/bin` and nothing else, there was no `pdflatex` to find. The sheet was complete and correct the whole time | the grant covers `pdflatex`, `latexmk`, the course's build script and the rest of the toolchain, and `install_permissions` now tops an existing file up instead of skipping it — appending only what is missing, so a course's own list survives intact; the build runs under `boardlib.tex_env()`, which already knew every place a TeX gets installed on either machine; `test/agents.py`, `test/homework.py` |
+| **The pattern this repository keeps relearning, again: a rule with no way to expire.** "Only ever created, never edited" was written to protect a course's own permission list, and it did — while quietly guaranteeing that no course would ever receive a grant added after its first board start. A file that is only ever created is a file frozen at the moment the project understood the least about what it needed | anything that installs a file into a course has to have an answer to "and then what, in six weeks"; here it is a merge that only appends |
+| `board hw build` printed the single word `FAILED` for an entire sitting while knowing more than that. The course's build script discards its own output by design, so on the one failure it could not explain — no compiler at all — it had nothing to pass on, and "failed" with no reason reads as a broken proof to the person who just wrote it | a failed build with nothing to say is given a reason: the missing compiler is named when that is what it is, and a silent script is named when it is not; the board shows it the way it shows a LaTeX error; `test/homework.py` |
 
 The pattern in most of them: a stub that returns a plausible object for everything will report that
 a broken page loads fine. `test/interactive.js` and `test/sizing.js` use a real DOM for that

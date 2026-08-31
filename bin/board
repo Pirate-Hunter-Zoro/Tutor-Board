@@ -252,18 +252,39 @@ def for_mode(text, mode):
 
 
 # What an unattended tutor has to be allowed to do. Narrow on purpose: write into
-# its own course, drive this tool, and read a PDF. Nothing here grants a network,
-# a package manager, or a shell in general.
+# its own course, drive this tool, typeset what it has written, and read a PDF.
+# Nothing here grants a network, a package manager, or a shell in general.
+TUTOR_GRANTS = [
+    "Bash(board:*)", "Bash(board *)",
+    "Bash(pdftotext:*)", "Bash(pdftotext *)",
+    "Bash(pdfinfo:*)", "Bash(pdfinfo *)",
+    # Typesetting the write-up. A homework sitting is producing a document and
+    # the document is the point of the evening, so the tutor that wrote the
+    # LaTeX has to be able to compile it -- through `board hw build`, through
+    # the course's own build script, or by driving the compiler directly when
+    # it is chasing an error. Withhold any one of those and the tutor reaches
+    # the end of the sheet, writes the last solution, and hands back a `.tex`
+    # nobody on an iPad can turn into a PDF.
+    "Bash(scripts/build.sh:*)", "Bash(scripts/build.sh *)",
+    "Bash(./scripts/build.sh:*)", "Bash(./scripts/build.sh *)",
+    "Bash(bash scripts/build.sh *)", "Bash(bash ./scripts/build.sh *)",
+    "Bash(pdflatex:*)", "Bash(pdflatex *)",
+    "Bash(xelatex:*)", "Bash(xelatex *)",
+    "Bash(lualatex:*)", "Bash(lualatex *)",
+    "Bash(latex:*)", "Bash(latex *)",
+    "Bash(latexmk:*)", "Bash(latexmk *)",
+    "Bash(bibtex:*)", "Bash(bibtex *)",
+    "Bash(biber:*)", "Bash(biber *)",
+    "Bash(makeindex:*)", "Bash(makeindex *)",
+    "Bash(dvisvgm:*)", "Bash(dvisvgm *)",
+]
+
 TUTOR_PERMISSIONS = {
     "permissions": {
         # File edits are the whole job -- a tutor that cannot write a card cannot
         # teach. Everything else still has to be listed.
         "defaultMode": "acceptEdits",
-        "allow": [
-            "Bash(board:*)", "Bash(board *)",
-            "Bash(pdftotext:*)", "Bash(pdftotext *)",
-            "Bash(pdfinfo:*)", "Bash(pdfinfo *)",
-        ],
+        "allow": list(TUTOR_GRANTS),
     }
 }
 
@@ -277,17 +298,55 @@ def install_permissions(live):
     and ended having written nothing, because the course had no permissions file
     and every write was refused.
 
-    Only ever created, never edited: a course that has built up its own list keeps
-    it, and this is a committed file the owner can read and change.
+    Created when absent, and topped up when present. It used to be created and
+    never touched again, which is a rule with no way to expire -- the second
+    failure was the same shape as the first, a whole evening's homework written
+    up and then not compiled, because the file laid down weeks earlier predated
+    the grant that would have allowed it and nothing was ever going to add it.
+    A course that has built up its own list keeps every line of it: this only
+    ever appends the grants that are missing, never removes or rewrites one, so
+    an owner's edits and their ordering survive.
     """
     d = os.path.join(live.root, ".claude")
     path = os.path.join(d, "settings.local.json")
-    if os.path.exists(path):
-        return None
     try:
         os.makedirs(d, exist_ok=True)
+    except OSError:
+        return None
+
+    if not os.path.exists(path):
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(TUTOR_PERMISSIONS, fh, indent=2)
+                fh.write("\n")
+        except OSError:
+            return None
+        return path
+
+    # Top up. A malformed file is left alone rather than overwritten -- it is
+    # the owner's, and losing their list to repair ours is the worse trade.
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+        if not isinstance(doc, dict):
+            return None
+    except (OSError, ValueError):
+        return None
+
+    perms = doc.setdefault("permissions", {})
+    if not isinstance(perms, dict):
+        return None
+    allow = perms.setdefault("allow", [])
+    if not isinstance(allow, list):
+        return None
+
+    missing = [g for g in TUTOR_GRANTS if g not in allow]
+    if not missing:
+        return None
+    allow.extend(missing)
+    try:
         with open(path, "w", encoding="utf-8") as fh:
-            json.dump(TUTOR_PERMISSIONS, fh, indent=2)
+            json.dump(doc, fh, indent=2)
             fh.write("\n")
     except OSError:
         return None
@@ -328,7 +387,7 @@ def cmd_start(live, args):
     install_teaching(live)
     granted = install_permissions(live)
     if granted:
-        print("wrote %s so a headless tutor can write cards here"
+        print("updated %s so a headless tutor can write cards and typeset them here"
               % os.path.relpath(granted, live.root))
 
     port, port_error = free_port(live.root)
@@ -701,14 +760,39 @@ def hw_build(live, st):
     """
     tex = os.path.join(live.root, st["rel"])
     script = os.path.join(live.root, "scripts", "build.sh")
+    # The same environment the built-in compile gets. A course's own build.sh
+    # knows where TeX lives on the machine it was written on and nowhere else --
+    # Probability's prepends TinyTeX's Linux directory, which on the Mac does
+    # not exist, so a board started by a login agent (a PATH of /usr/bin:/bin
+    # and nothing more) ran a script that could not find pdflatex and reported
+    # the failure as the document's. `tex_bin_dirs` already knows every place a
+    # TeX lives on either machine; there is no reason only half of this file
+    # should get to use it.
+    env = boardlib.tex_env([os.path.join(live.root, "latex"),
+                            os.path.join(TOOL, "tex")])
     if os.path.exists(script):
-        p = subprocess.run(["bash", script, tex], cwd=live.root,
+        p = subprocess.run(["bash", script, tex], cwd=live.root, env=env,
                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         out = p.stdout.decode("utf-8", "replace").strip()
         code = p.returncode
     else:
         out = compile_tex(live, tex)
         code = 0 if os.path.exists(os.path.splitext(tex)[0] + ".pdf") else 1
+
+    # A failure that names nothing is the one that wastes an evening: the tutor
+    # reported "FAILED" all session and the student reasonably read it as a
+    # broken proof. A build script that hides its own output has nothing to say
+    # when the compiler is simply absent, so say it here -- once, and only when
+    # it is actually true.
+    if code != 0 and not shutil.which("pdflatex", path=env.get("PATH", "")):
+        out = (out + "\n\n" if out else "") + (
+            "No LaTeX on this machine: pdflatex is in none of the places a TeX "
+            "gets installed (`board doctor` lists them). Nothing is wrong with "
+            "the document -- the source is written and safe, and it will "
+            "typeset on a machine that has one.")
+    elif code != 0 and not out:
+        out = ("FAILED: scripts/build.sh exited %d and printed nothing. It "
+               "discards its own output; run it directly to see why." % code)
     pdf = os.path.splitext(tex)[0] + ".pdf"
     if not os.path.exists(pdf):
         found = glob.glob(os.path.join(os.path.dirname(tex), "build", "*.pdf"))

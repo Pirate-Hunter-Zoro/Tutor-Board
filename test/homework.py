@@ -25,6 +25,7 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+import boardlib  # noqa: E402
 import homework  # noqa: E402
 
 fails = []
@@ -284,6 +285,41 @@ try:
           code == 0 and "pushed:" in out)
     check("and says so loudly rather than shipping a stale PDF in silence",
           "BUILD FAILED" in out)
+
+    # ---- the compiler has to be findable, wherever it is installed --------
+    #
+    # A course's build.sh knows where TeX lives on the machine it was written on
+    # and nowhere else -- Probability's prepends TinyTeX's Linux directory,
+    # which on the Mac does not exist. So a board started by a login agent, with
+    # a PATH of /usr/bin:/bin and nothing more, ran that script, could not find
+    # pdflatex, and reported the failure as the document's. An evening's
+    # homework was written up and could not be typeset, and the source was
+    # fine the whole time.
+    with open(os.path.join(scripts, "build.sh"), "w", encoding="utf-8") as fh:
+        fh.write('#!/usr/bin/env bash\n'
+                 'printf %s "$PATH" > "$(dirname "$0")/../seen-path"\n'
+                 'printf %s "${TEXINPUTS:-}" > "$(dirname "$0")/../seen-inputs"\n'
+                 'printf %%s "%%PDF-1.4" > "${1%%.tex}.pdf"\n')
+    code, out = run(prob, "hw", "build")
+    seen_path = open(os.path.join(prob, "seen-path"), encoding="utf-8").read()
+    seen_inputs = open(os.path.join(prob, "seen-inputs"), encoding="utf-8").read()
+    check("the course's build script runs with TeX on its PATH",
+          all(d in seen_path.split(os.pathsep) for d in boardlib.tex_bin_dirs()))
+    check("and with the board's own macros where LaTeX will look for them",
+          os.path.join(ROOT, "tex") in seen_inputs.split(os.pathsep))
+
+    # "FAILED" on its own is what sends somebody to a laptop to discover that
+    # nothing was wrong with their mathematics. Whatever the reason -- no
+    # compiler on this machine, or a script that discards its own output -- the
+    # board has to carry one.
+    with open(os.path.join(scripts, "build.sh"), "w", encoding="utf-8") as fh:
+        fh.write('#!/usr/bin/env bash\nexit 1\n')
+    code, out = run(prob, "hw", "build")
+    check("a build that fails silently is still given a reason",
+          code != 0 and len(out.strip()) > 40)
+    rec = json.load(open(os.path.join(prob, "live", "hw.json"), encoding="utf-8"))
+    check("and the reason is recorded for the board to show",
+          rec["ok"] is False and len(rec["detail"].strip()) > 40)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
