@@ -42,6 +42,7 @@ var els = {
   hwBuild: document.getElementById("hw-build"),
   jump: document.getElementById("jump"),
   panic: document.getElementById("panic"),
+  findink: document.getElementById("findink"),
   reopen: document.getElementById("reopen"),
   addFile: document.getElementById("btn-add-file"),
   scratch: document.getElementById("scratch"),
@@ -2096,6 +2097,23 @@ function loadPages() {
   catch (e) { questionPage = {}; }
 }
 
+/* Does any OTHER question already own this page?
+
+   One question per page is the rule and nothing enforced it. The slate hands
+   back a trailing blank page rather than cutting a new one every time -- right,
+   or every question leaves an empty sheet behind it -- but two questions in a
+   row that reach it before either is written on both get the same index. From
+   then on they are the same sheet: writing on the earlier board changes the
+   later one, which is what it looks like from the outside and is exactly what it
+   is. The slate cannot know; it deals in ink, not in questions. */
+function pageOwnedByOther(n, q) {
+  if (n === undefined || n < 0) return false;
+  for (var k in questionPage) {
+    if (k !== q && questionPage[k] === n) return true;
+  }
+  return false;
+}
+
 function savePages() {
   try { localStorage.setItem(pagesKey(), JSON.stringify(questionPage)); } catch (e) {}
 }
@@ -2350,6 +2368,14 @@ function tickBusy() {
 
 function placeWriter(owed, questionNode, live) {
   els.writer.hidden = !owed;
+  /* The surface's re-centre exists while the surface does, and not otherwise:
+     a button offering to find writing on a board that is not on screen is a
+     button that does nothing, which is worse than no button. */
+  if (els.findink) {
+    var wasHidden = els.findink.hidden;
+    els.findink.hidden = !owed;
+    if (wasHidden !== els.findink.hidden) { findSize = null; panicSoon(); }
+  }
   /* The tool bar is fixed to the bottom of the window, so the page has to give
      up the height it occupies or the last card sits underneath it. */
   document.body.classList.toggle("tools-out", !!owed);
@@ -2449,14 +2475,28 @@ function restoreAnswer() {
   if (!writer.ready || !writer.ready()) return;
 
   if (answering.question && writer.fresh) {
-    var want = questionPage[answering.question];
+    var q = answering.question;
+    var want = questionPage[q];
     if (want === undefined || want >= writer.pages()) {
       /* First time on this question. A blank page at the end, unless the page in
          hand is still blank -- in which case it is already the right one, and
-         adding another would leave an empty page behind on every question. */
-      want = writer.fresh();
-      questionPage[answering.question] = want;
+         adding another would leave an empty page behind on every question. That
+         reuse is right only while the blank page belongs to nobody: hand it to a
+         second question and the two share a sheet, which is one board changing
+         when you write on another. */
+      want = writer.fresh(pageOwnedByOther(writer.pages() - 1, q));
+      questionPage[q] = want;
       savePages();
+    } else if (pageOwnedByOther(want, q)) {
+      /* Already sharing. Give this one its own copy: the working stays where it
+         is on screen -- nothing disappears out from under anybody -- and from
+         here the two boards go their own ways. Repaired when the question is
+         opened rather than in a sweep, because that is when the copy becomes the
+         page in hand and the ordinary save carries it to disk. */
+      want = writer.clone(want);
+      questionPage[q] = want;
+      savePages();
+      loadedTurn = null;
     } else if (want !== writer.at()) {
       writer.go(want);
       /* A different page is a different answer: whatever was loaded is not on
@@ -2957,6 +2997,7 @@ var panicHold = null;
    everything else moves smoothly reads as the whole screen misbehaving. */
 var panicFrame = 0;
 var panicSize = null;
+var findSize = null;
 
 function panicSoon() {
   if (panicFrame) return;
@@ -2988,6 +3029,26 @@ function panicPlace() {
   y = Math.min(Math.max(y, oy + pad), oy + h - bh - pad);
   els.panic.style.transform =
     "translate(" + x + "px," + y + "px) scale(" + (1 / k) + ")";
+
+  /* The surface's own re-centre rides directly under it: one thing to move, one
+     place to look. Placed here rather than by CSS for the same reason the first
+     one is -- `position: fixed` is fixed to the layout viewport, and a control
+     that pans off the glass when you pinch is missing at precisely the moment
+     being lost makes you want it. */
+  if (els.findink && !els.findink.hidden) {
+    if (!findSize || !findSize.w) {
+      findSize = { w: els.findink.offsetWidth || 108,
+                   h: els.findink.offsetHeight || 32 };
+    }
+    var fw = findSize.w / k;
+    var fh = findSize.h / k;
+    var fx = ox + panicAt.x * w - fw / 2;
+    var fy = y + bh + 8 / k;
+    fx = Math.min(Math.max(fx, ox + pad), ox + w - fw - pad);
+    fy = Math.min(Math.max(fy, oy + pad), oy + h - fh - pad);
+    els.findink.style.transform =
+      "translate(" + fx + "px," + fy + "px) scale(" + (1 / k) + ")";
+  }
 }
 
 /* There is no way to set the page's magnification directly -- it is the user's,
@@ -3090,6 +3151,17 @@ if (els.panic) {
   };
   els.panic.addEventListener("pointerup", panicRelease);
   els.panic.addEventListener("pointercancel", panicRelease);
+
+  /* No press-and-hold of its own: it is parked against the button above it, so
+     moving that one moves this one. A tap is all it does. */
+  if (els.findink) {
+    els.findink.addEventListener("click", function () {
+      if (!writer || !writer.fitInk) return;
+      writer.fitInk();
+      els.findink.classList.add("hit");
+      setTimeout(function () { els.findink.classList.remove("hit"); }, 420);
+    });
+  }
 
   ["resize", "scroll"].forEach(function (ev) {
     if (window.visualViewport) window.visualViewport.addEventListener(ev, panicSoon);

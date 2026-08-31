@@ -388,7 +388,7 @@ const withNew = Object.assign({}, lesson, {
     ? ok('arriving at a new question never wipes the surface')
     : fail('the surface is still cleared when a new question arrives — that is a '
            + 'page of working, deleted, because the tutor asked something else');
-  /writer\.fresh\(\)/.test(restore) && /questionPage\[/.test(restore)
+  /writer\.fresh\(/.test(restore) && /questionPage\[/.test(restore)
     ? ok('each question gets a page of its own instead')
     : fail('there is no page per question, so answers still share one surface');
   /inkOn\(\)\s*>\s*0/.test(restore)
@@ -814,6 +814,113 @@ const withNew = Object.assign({}, lesson, {
       ? ok('and touching it gives that question the real surface')
       : fail('a blank board cannot be written on, which makes it decoration');
   }
+}
+
+// 6c8. One question, one page — and nothing enforced it.
+//
+// Reported: "if I write on an earlier board, that change also takes effect on a
+// later board". They were not two boards showing similar things; they were the
+// same sheet. `fresh()` hands back a trailing BLANK page rather than cutting a
+// new one every time — right, or every question leaves an empty sheet behind
+// it — but two questions that reach it before either is written on both get
+// that index, and from then on they are one page with two boards over it.
+//
+// The slate cannot see the collision: it deals in ink, not in questions. Only
+// the board knows who owns what, so the board is what has to say.
+{
+  const two = Object.assign({}, lesson, {
+    cards: [card('0071', 'question', 'the first', 1)],
+    turns: [],
+  });
+  es.onmessage({ data: JSON.stringify(two) });
+  await sleep(20);
+
+  const KEY2 = 'board.pages:Galois Theory:-';
+  const filed = () => {
+    try { return JSON.parse(window.localStorage.getItem(KEY2) || '{}'); }
+    catch (e) { return {}; }
+  };
+  const first = filed()['0071'];
+  first !== undefined
+    ? ok('the first question is given a page')
+    : fail('no page was filed for the first question');
+
+  // A second question, before anything is written on the first one's page.
+  es.onmessage({ data: JSON.stringify(Object.assign({}, two, {
+    cards: two.cards.concat([card('0072', 'question', 'the second', 2)]),
+  })) });
+  await sleep(20);
+  const second = filed()['0072'];
+  second !== undefined
+    ? ok('and so is the second')
+    : fail('no page was filed for the second question');
+  second !== first
+    ? ok('and it is NOT the same page, blank though the first one was')
+    : fail('two questions were handed one sheet, so writing on either board '
+           + 'changes both — which is exactly what was reported');
+
+  // The repair for a pair already sharing: the later one takes a copy, so what
+  // is on screen does not vanish out from under anybody, and from there the two
+  // go their own ways. Forced by filing them onto one page by hand, which is
+  // the state the old code left behind.
+  {
+    const map = filed();
+    map['0072'] = map['0071'];
+    window.localStorage.setItem(KEY2, JSON.stringify(map));
+    // The board keeps its own copy in memory; drive the collision through the
+    // path that repairs it by making 0072 the question in hand.
+    const slate = window.__slate;
+    const before = slate.pages();
+    es.onmessage({ data: JSON.stringify(Object.assign({}, two, {
+      cards: two.cards.concat([card('0072', 'question', 'the second', 2),
+                               card('0073', 'question', 'a third', 3)]),
+    })) });
+    await sleep(20);
+    slate.pages() >= before
+      ? ok('a question sharing a sheet is given one of its own')
+      : fail('pages went backwards, which loses working');
+  }
+
+  const core = fs.readFileSync(path.join(WEB, 'slate-core.js'), 'utf8');
+  /api\.clone = function/.test(core) && /markDirty\(\);/.test(core)
+    ? ok('and the copy is marked dirty, so it reaches disk rather than living '
+         + 'in memory until a reload throws it away')
+    : fail('a cloned page is never saved');
+}
+
+// 6c9. Two zooms on this page, and only one had a way back.
+//
+// `#panic` puts the PAGE's magnification back. The writing surface has a zoom
+// of its own that it knows nothing about, and being lost in that one left the
+// toolbar's ⤢ — which lives in the page chrome, which is what pinching pans off
+// the glass.
+{
+  const find = doc.getElementById('findink');
+  !find.hidden
+    ? ok('with a surface open, the writing re-centre is offered')
+    : fail('there is no way back from a zoom into the writing');
+
+  const slate = window.__slate;
+  slate.load({ w: 1000, h: 1400, strokes: [
+    { c: '#eee', w: 2, pts: [[300, 1000], [500, 1050], [520, 1200]] },
+  ] });
+  // Get thoroughly lost: zoom in hard, somewhere with nothing on it.
+  slate.zoom ? slate.zoom(6) : null;
+  const before = slate.view();
+  find.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  const after = slate.view();
+  const box = slate.inkBox();
+  const top = -after.oy / after.k;
+  const left = -after.ox / after.k;
+  box && top <= box.y0 && top + 500 / after.k > box.y0
+    ? ok('and pressing it puts the writing back on screen vertically')
+    : fail('the writing is still off screen after the re-centre');
+  box && left <= box.x0 + 1
+    ? ok('and horizontally')
+    : fail('the re-centre left the writing off to one side');
+  after.k !== before.k || after.oy !== before.oy
+    ? ok('so the view actually moved')
+    : fail('the button did nothing at all');
 }
 
 // 6d. And a picture can be handed over from the device. The file input has been

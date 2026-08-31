@@ -1697,9 +1697,15 @@ function create(opts) {
     return current;
   };
   /* A new blank page at the end, and go to it. Returns its index, which is what
-     the host records against the question it belongs to. */
-  api.fresh = function () {
-    if (pages.length && !pages[pages.length - 1].strokes.length) {
+     the host records against the question it belongs to.
+
+     `force` insists on a genuinely new one. Reusing a trailing blank page is
+     right when it belongs to nobody and wrong when another question already
+     owns it -- two questions handed the same sheet is not a tidiness problem,
+     it is writing on one board and watching the other change. Only the host
+     knows who owns what, so only the host can say. */
+  api.fresh = function (force) {
+    if (!force && pages.length && !pages[pages.length - 1].strokes.length) {
       goTo(pages.length - 1);
       return current;
     }
@@ -1707,6 +1713,36 @@ function create(opts) {
     goTo(pages.length - 1);
     return current;
   };
+
+  /* The same page again, as a page of its own, and go to it.
+
+     For a question that has been sharing a sheet with another one: it keeps
+     what is on it -- the working does not vanish out from under anybody -- and
+     from here the two go their own ways. Marked dirty so the copy reaches disk;
+     a page that exists only in memory is a page that a reload turns back into
+     nothing. */
+  api.clone = function (n) {
+    var src = pages[n];
+    if (!src) return current;
+    var copy = blankPage();
+    copy.w = src.w;
+    copy.h = src.h;
+    copy.strokes = src.strokes.map(function (st) {
+      var c = {};
+      for (var k in st) { if (k !== "dense") c[k] = st[k]; }
+      c.pts = st.pts.map(function (q) { return q.slice(); });
+      return c;
+    });
+    pages.push(copy);
+    goTo(pages.length - 1);
+    markDirty();
+    return current;
+  };
+
+  /* Put the writing back on screen. The toolbar's ⤢ does this; so does the
+     board's own re-centre for the surface, which is the one that cannot be
+     pinched off the glass. */
+  api.fitInk = function () { fitContent(); };
   api.inkOn = function (n) {
     var p = pages[n === undefined ? current : n];
     return p ? p.strokes.length : 0;

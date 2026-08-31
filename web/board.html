@@ -231,6 +231,23 @@
   <span>re-centre</span>
 </button>
 
+<!-- The same idea, for the writing surface, which has a zoom of its own that
+     `#panic` knows nothing about: that one puts the PAGE's magnification back,
+     this one puts the view back over the writing. Two zooms, two ways to get
+     lost, two ways back. It rides directly under `#panic` so there is one thing
+     to move and one place to look, and it is only there while there is a
+     surface to be lost on. The toolbar's ⤢ does the same job and lives in the
+     page chrome, which pinching pans off the glass -- this cannot be. -->
+<button id="findink" type="button" hidden
+        title="put the view back over your writing">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M3.5 7.5v-4h4M16.5 3.5h4v4M20.5 16.5v4h-4M7.5 20.5h-4v-4"/>
+    <path d="M8 14.5c1.6-3.4 2.6-5.2 3.4-5.2.9 0 .3 3.1 1.2 3.1.7 0 1.4-1.4 3.4-2.6"/>
+  </svg>
+  <span>my writing</span>
+</button>
+
 <!-- Past lessons. A chapter you come back to should still have your own working
      in it; a transcript that only survives until the next lesson opens is not a
      transcript. -->

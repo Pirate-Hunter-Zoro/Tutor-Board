@@ -692,7 +692,7 @@ body.tools-out .jump { bottom: calc(6.5rem + env(safe-area-inset-bottom)); }
    neither visible nor self-explanatory: it read as a smudge and said nothing
    about what pressing it would do. It carries its own name and the board's
    accent, like every other control that acts rather than describes. */
-#panic {
+#panic, #findink {
   position: fixed; left: 0; top: 0; z-index: 62;
   transform-origin: 0 0;
   display: flex; align-items: center; gap: .35rem;
@@ -711,18 +711,26 @@ body.tools-out .jump { bottom: calc(6.5rem + env(safe-area-inset-bottom)); }
   -webkit-tap-highlight-color: transparent;
   transition: box-shadow .18s, filter .18s;
 }
-#panic svg { width: .95rem; height: .95rem; display: block; flex: none; }
-#panic:hover { filter: brightness(1.1); }
+#panic svg, #findink svg { width: .95rem; height: .95rem; display: block; flex: none; }
+/* The quieter of the pair: `#panic` is the way out of a zoom there is no
+   other way out of, this is a convenience while writing. Same shape, less
+   shout, so the one that matters most stays the one the eye finds. */
+#findink {
+  background: color-mix(in srgb, var(--accent) 22%, var(--paper));
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--rule));
+}
+#panic:hover, #findink:hover { filter: brightness(1.1); }
 /* Held down: it has become a thing being moved, and must look like one before
    the finger travels, or the first drag reads as a tap that did nothing. */
-#panic.holding {
+#panic.holding, #findink.holding {
   cursor: grabbing;
   box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 32%, transparent),
               0 4px 14px rgba(0,0,0,.3);
 }
 /* Tapped: acknowledge it, because what the tap does is a change of scale and
    not a change of content, which is easy to miss on a page you were lost in. */
-#panic.hit { filter: brightness(1.25); }
+#panic.hit, #findink.hit { filter: brightness(1.25); }
 
 /* ---------- what the student said, in the lesson ---------- */
 .mine .signal {

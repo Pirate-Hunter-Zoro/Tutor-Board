@@ -193,10 +193,36 @@ const press = (type, x, y) => btn.dispatchEvent(
       ? ok('the button says what it does')
       : fail('the button is unlabelled: ' + JSON.stringify(btn.textContent));
     const css = fs.readFileSync(path.join(WEB, 'board.css'), 'utf8');
-    const rule = (css.match(/#panic\s*\{[^}]*\}/) || [''])[0];
+    // The rule is shared with the surface's own re-centre, which is the same
+    // control for the other zoom on this page.
+    const rule = (css.match(/#panic(?:,\s*#findink)?\s*\{[^}]*\}/) || [''])[0];
     /background:\s*var\(--accent\)/.test(rule)
       ? ok('and is painted in the accent, not in the page it sits on')
       : fail('the button has no contrasting fill; it reads as a smudge');
+
+    // 5b. There are two zooms on this page and only one of them had a way back.
+    //     `#panic` puts the PAGE's magnification back; the writing surface has a
+    //     zoom of its own that it knows nothing about, and getting lost in that
+    //     one left the toolbar's ⤢ as the only way out — in the page chrome,
+    //     which is exactly what pinching pans off the glass.
+    const find = doc.getElementById('findink');
+    find
+      ? ok('the writing surface has a re-centre of its own')
+      : fail('there is no way back from a zoom into the writing');
+    find && /writing/i.test(find.textContent)
+      ? ok('and it says which of the two it is')
+      : fail('the two re-centres are not tellable apart');
+    find && find.hidden
+      ? ok('and is absent while there is no surface to be lost on')
+      : fail('a button offering to find writing on a board that is not there');
+    /#panic,\s*#findink\s*\{[^}]*position:\s*fixed/.test(css)
+      ? ok('and is placed by script against the visible window, as the other is')
+      : fail('the second button is laid out by CSS alone, so a pinch takes it '
+             + 'off the glass at the moment it is wanted');
+    const js = fs.readFileSync(path.join(WEB, 'board.js'), 'utf8');
+    /els\.findink\.style\.transform/.test(js)
+      ? ok('and rides under the first, so there is one thing to move')
+      : fail('nothing ever positions it');
     !/opacity:\s*0?\.[0-8]/.test(rule)
       ? ok('and is not dimmed away')
       : fail('the button is still faded out at rest');
