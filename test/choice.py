@@ -511,6 +511,22 @@ check("the walk covers every course, because the other machine is running the "
 check("and an ordinary tick is one request, because whoever answered last is "
       "asked first",
       "if _ASKED[0] and _ASKED[1]:" in follow_src)
+
+# The follower does not decide from its own filesystem alone.
+#
+# It reads the record off disk, and it is not always reading the same disk view a
+# board is: this process is started by launchd with whatever environment launchd
+# gives it, the boards are started from a session, and when those disagree the
+# follower is deciding from a file nobody writes to. Found the hard way -- the
+# address served Probability for ten minutes while every board on both machines
+# published `chosen: Galois-Theory`.
+check("the choice is also taken from a board on this machine, which is the same "
+      "record read by something that definitely wrote it",
+      "def local_choice(" in follow_src
+      and "want = wanted_course(remote_choice, local_choice(cands))" in follow_src)
+check("and the newest of the three wins, whoever is reporting it",
+      "for rec in (boardlib.chosen_course(), local_published, remote_choice):"
+      in follow_src)
 check("and phones are not knocked on at all",
       '"ios", "android"' in open(os.path.join(ROOT, "boardlib.py"), encoding="utf-8").read())
 

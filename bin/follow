@@ -287,26 +287,56 @@ def node_choice(node, cands):
     return None
 
 
-def wanted_course(remote_choice):
+# The board on this machine that last answered "what was chosen".
+_ASKED_LOCAL = [None]
+
+
+def local_choice(cands):
+    """What a board ON THIS MACHINE says was chosen.
+
+    The follower reads that record off the filesystem, and it is not always the
+    same filesystem view a board has: this process is started by launchd with
+    whatever environment launchd hands it, and the boards are started from a
+    session. When those disagree the follower is deciding from a file nobody is
+    writing to, which looks exactly like a tap that does nothing -- the address
+    stayed on Probability for ten minutes while every board on both machines
+    published `chosen: Galois-Theory`, which is how this was found.
+
+    So ask a board instead of only reading a file. They publish the record they
+    actually wrote.
+    """
+    ports = ([_ASKED_LOCAL[0]] if _ASKED_LOCAL[0] else []) + \
+            [default_port(c["root"]) for c in cands]
+    for port in ports:
+        health = probe("127.0.0.1", port, timeout=1.0)
+        if not health:
+            continue
+        _ASKED_LOCAL[0] = port
+        ch = health.get("chosen") or {}
+        return ch if ch.get("dir") else None
+    return None
+
+
+def wanted_course(remote_choice, local_published=None):
     """Which COURSE the address opens, deciding across both machines.
 
-    The newest decision wins, wherever it was made. Without this the follower
-    reads only its own record, and a course tapped in a hub served from the other
-    machine was recorded over there and never seen here -- so the tap did every
-    correct thing and the address did not move, which is the whole defect this
-    file exists to prevent, one machine further out.
+    The newest decision wins, wherever it was made and whoever is reporting it.
+    Three sources, because each one covers a way the others fail: this process's
+    own copy of the record; what a board on this machine publishes, which is the
+    same record read by a process that definitely wrote it; and what a board on
+    the other machine publishes, since a course tapped in a hub served from over
+    there is recorded over there and would otherwise never be seen here.
     """
     best = (0.0, None)
-    rec = boardlib.chosen_course()
-    if rec.get("dir"):
-        best = (float(rec.get("at") or 0), rec["dir"])
-    if remote_choice and remote_choice.get("dir"):
+    for rec in (boardlib.chosen_course(), local_published, remote_choice):
+        if not rec or not rec.get("dir"):
+            continue
         try:
-            at = float(remote_choice.get("at") or 0)
+            at = float(rec.get("at") or 0)
         except (TypeError, ValueError):
             at = 0.0
-        if at > best[0]:
-            best = (at, remote_choice["dir"])
+        if at >= best[0]:
+            best = (at, rec["dir"])
     return best[1]
 
 
@@ -444,8 +474,8 @@ def choose_target(node, cands, prefer="local"):
     Returns ((host, port), phrase); the exactness flag is spent here and does not
     leave, because the follower's only question is whether the address moved.
     """
-    remote_choice = node_choice(node, cands) if node else None
-    want = wanted_course(remote_choice)
+    remote_choice = node_choice(node, cands)
+    want = wanted_course(remote_choice, local_choice(cands))
 
     local = local_target(cands, want) if cands else None
     remote = remote_target(node, cands, want, (remote_choice or {}).get("port"))

@@ -46,6 +46,15 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 1 September 2026
 >
+> **And then the follower was deciding from a file nobody writes to.** With everything above in
+> place the address still would not move: both machines' boards published `chosen: Galois-Theory`,
+> the Mac's own Galois board was up with a tutor listening, and the address served Probability for
+> ten minutes. The follower reads that record off disk, and it is not always the same disk view a
+> board has — it is started by launchd with whatever environment launchd hands it, and the boards
+> are started from a session. It now takes the newest of three: its own copy, what a board **on
+> this machine** publishes, and what a board on the other one publishes. Asking something that
+> definitely wrote the record beats reading a file and hoping.
+>
 > **And the half that made the rest of it useless.** With both walls down the follower found the
 > other machine's *board* through the peer walk — and then asked the **configured hostname** what
 > had been chosen, because that is a different function and I had only fixed one of them. So a tap
