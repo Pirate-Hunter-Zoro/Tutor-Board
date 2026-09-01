@@ -587,6 +587,16 @@ body.tools-out { padding-bottom: 5.5rem; }
   letter-spacing: .06em; text-transform: uppercase;
 }
 #writer-hint, .board-hint { font-size: .74rem; color: #8b8f98; }
+/* One rule for both, like every other pair in this header: the live board and a
+   dormant one must not drift apart. */
+#carry, .board-carry {
+  flex: none; cursor: pointer;
+  font: inherit; font-family: var(--ui); font-size: .72rem;
+  padding: .3rem .6rem; border-radius: .35rem;
+  border: 1px solid #3a3e47; background: transparent; color: #b9bcc4;
+  white-space: nowrap;
+}
+#carry:hover, .board-carry:hover { background: #2c2f37; color: #e9e7e2; }
 #skip {
   margin-left: auto; flex: none; cursor: pointer;
   font: inherit; font-family: var(--ui); font-size: .74rem;

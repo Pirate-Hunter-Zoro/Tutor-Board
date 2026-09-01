@@ -82,6 +82,7 @@ var els = {
   pushed: document.getElementById("pushed"),
   pushedIcon: document.getElementById("pushed-icon"),
   pushedText: document.getElementById("pushed-text"),
+  carry: document.getElementById("carry"),
   busy: document.getElementById("busy"),
   busyText: document.getElementById("busy-text"),
   busySince: document.getElementById("busy-since"),
@@ -851,6 +852,10 @@ function render(data) {
   lastTurns = data.turns || [];
   syncSlots(qids, runEndOf, lastTurns);
   repairPages();
+  slotOrder = [];
+  qids.forEach(function (q) {
+    slotsOf(q).forEach(function (k) { slotOrder.push(k); });
+  });
 
   /* Which BOARD is being written on. Usually the attempt in hand on the newest
      question; whichever they picked, if they went back to an earlier one. A
@@ -2220,6 +2225,60 @@ function slotN(key) {
   return isNaN(n) ? 0 : n;
 }
 
+/* Every board in the lesson, in reading order, as of the last render. What
+   "the board before this one" means, which is the whole of the carry-over. */
+var slotOrder = [];
+
+/* The last board before this one that somebody has actually written on.
+
+   A follow-up question is a new question, so it gets a board of its own and that
+   board is blank -- right for a new exercise, wrong three cards into one, where
+   the proof being asked about is on the board above and the answer belongs with
+   it. The board cannot tell those two apart (a question card is a question card)
+   and guessing would be worse than asking: a new exercise opened on a copy of
+   the last one is somebody else's proof under your pen, and every board after it
+   carries every stroke of the evening. So the working is brought forward by the
+   person who knows, in one tap. */
+function prevInkSlot(key) {
+  if (!writer || !writer.inkOn) return null;
+  var i = slotOrder.indexOf(key);
+  if (i < 0) i = slotOrder.length;
+  for (var n = i - 1; n >= 0; n--) {
+    var p = pageOf(slotOrder[n]);
+    if (p !== undefined && writer.inkOn(p) > 0) return slotOrder[n];
+  }
+  return null;
+}
+
+/* Bring that working onto this board, as a copy of it.
+
+   A copy, not the same sheet: from here the two go their own ways, which is the
+   rule every board on this page follows. Never over ink -- a board with anything
+   on it is somebody's work, and this would replace it. */
+function carryOver(key) {
+  if (!writer || !writer.clone) return;
+  var rec = boardPage[key];
+  if (!rec || (rec.p !== undefined && writer.inkOn(rec.p) > 0)) return;
+  var from = prevInkSlot(key);
+  var src = pageOf(from);
+  if (src === undefined) return;
+  rec.p = writer.clone(src);
+  savePages();
+  loadedTurn = null;
+  if (lastLive) render(lastLive);
+}
+
+/* Come back to this in a moment, when the hand is off the glass. A payload is
+   not due for thirty seconds and the board must not wait that long to catch up
+   with itself. */
+var soonTimer = null;
+function renderSoon(ms) {
+  clearTimeout(soonTimer);
+  soonTimer = setTimeout(function () {
+    if (lastLive) render(lastLive);
+  }, ms || 1200);
+}
+
 /* Every board a question has, oldest attempt first. */
 function slotsOf(q) {
   var out = [];
@@ -2291,6 +2350,11 @@ function syncSlots(qids, runEndOf, turns) {
       /* Handed in, and answered underneath. This attempt is finished with:
          freeze it here and open the next one on a copy of it. */
       if (!ready) return;             /* the pages are not knowable yet; next render */
+      /* But never under a pen that is down. Cutting the next attempt moves the
+         page, and a page that moves mid-word takes the rest of the word with
+         it. There is nothing about this that has to happen in this particular
+         second. */
+      if (writer.writing && writer.writing()) { renderSoon(); return; }
       boardPage[slotKey(q, slotN(key) + 1)] = { p: writer.clone(rec.p), a: end };
       changed = true;
     } else if (!sent || !rec.a) {
@@ -2397,6 +2461,7 @@ function boardSlot(key, qid) {
     '<div class="board-head">'
     + '<span class="board-label">Your answer</span>'
     + '<span class="board-hint"></span>'
+    + '<button type="button" class="board-carry" hidden></button>'
     + '<button type="button" class="board-send">Send</button>'
     + "</div>"
     + '<img class="board-shot" alt="what you have written here"'
@@ -2422,10 +2487,18 @@ function boardSlot(key, qid) {
   };
 
   slot.addEventListener("pointerdown", function (ev) {
-    if (ev.target.closest && ev.target.closest(".board-send")) return;
+    if (ev.target.closest
+        && ev.target.closest(".board-send, .board-carry")) return;
     goLive(ev, false);
   });
   slot.querySelector(".board-send").onclick = function () { goLive(null, true); };
+  slot.querySelector(".board-carry").onclick = function (ev) {
+    ev.stopPropagation();
+    carryOver(key);
+    workingOn = key;                 /* carrying it over is asking to write here */
+    workingOnAt = lastNewestQ;
+    if (lastLive) render(lastLive);
+  };
   return slot;
 }
 
@@ -2460,6 +2533,22 @@ function handOnStroke(ev, sheet) {
 
 /* Every board this lesson has, each under the card it was written beneath, and
    the live surface swapped in for whichever one is being written on. */
+/* Offered on a board with nothing on it, when there is working behind it, and
+   never anywhere else. Named with the question it would come from, because
+   "carry it over" means nothing without saying over from where. */
+function paintCarry(btn, key) {
+  if (!btn) return;
+  var rec = key && boardPage[key];
+  var blank = !!rec && (rec.p === undefined
+                        || !writer || !writer.inkOn || writer.inkOn(rec.p) === 0);
+  var from = blank ? prevInkSlot(key) : null;
+  btn.hidden = !from;
+  if (from) {
+    btn.textContent = "↴ carry over from question " + slotQ(from);
+    btn.title = "copy that board's working onto this one, to carry on with it";
+  }
+}
+
 function paintBoards(qids, liveKey, off) {
   /* Every board in the lesson, in reading order, with which attempt of its
      question it is. */
@@ -2521,8 +2610,10 @@ function paintBoards(qids, liveKey, off) {
         blank.alt = "";                   /* no broken-image text on a blank sheet */
         slot.dataset.shot = "blank";
       }
+      paintCarry(slot.querySelector(".board-carry"), it.key);
       return;
     }
+    paintCarry(slot.querySelector(".board-carry"), it.key);
     /* Redrawn only when the page it is a picture of has actually changed. */
     var mark = page + ":" + (writer.inkOn ? writer.inkOn(page) : 0);
     if (slot.dataset.shot === mark) return;
@@ -2932,6 +3023,10 @@ function pickKind(kind) {
    remembered kind. */
 function paintPanel() {
   var open = !els.writer.hidden;
+  /* The live board gets the same offer the dormant ones get, in the same words:
+     this is where the person actually is when a follow-up question lands them on
+     a blank sheet. */
+  paintCarry(els.carry, open ? liveSlot : null);
   var typing = open && panelKind() === "type";
   els.typebox.hidden = !typing;
   var slate = document.getElementById("slate");
@@ -3178,6 +3273,9 @@ document.getElementById("linkbad-retry").onclick = function () { connect(); };
    four opening cards. */
 /* Declining the prompt is still a turn: it is in the transcript, and it wakes the
    tutor the same way an answer does, because the tutor has to carry on. */
+if (els.carry) {
+  els.carry.onclick = function () { carryOver(liveSlot); };
+}
 els.skip.onclick = function () {
   els.skip.disabled = true;
   say("skip").then(function () {

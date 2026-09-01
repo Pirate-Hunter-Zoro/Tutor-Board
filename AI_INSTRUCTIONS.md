@@ -177,7 +177,11 @@ preferred".
   conversation is the thing this must never drift into.
 - **The slate never loses ink.** Strokes are saved as vectors on an idle timer and again on page
   change and unload. A change that can drop a stroke is a change that must not ship — the student
-  is writing a proof, not doodling.
+  is writing a proof, not doodling. **A save is addressed to a page by number**, and `dirtyPages`
+  is the queue: "save the current page" is a lie the moment anything can change the page on its
+  own, and the board does — an attempt freezing and its successor opening is a page switch that
+  arrives on a payload. Never reintroduce a save that reads `current` when the wire frees up. And
+  never move the page under a pen that is down; `api.writing()` is how the board asks.
 - **The PNG is for reading, not for looking pretty.** It is always dark ink on white with the
   paper rules dropped almost to invisible, whatever the screen is showing, because its only job is
   to be legible to whatever agent opens it.

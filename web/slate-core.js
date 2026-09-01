@@ -249,6 +249,17 @@ function create(opts) {
                finger: remembered(STORE_KEY, "scroll") === "write" ? "write" : "scroll" };
   var drawing = null, lasso = null, sel = null, dragging = null;
   var dirty = false, lastLiveSend = 0;
+  /* Which pages have ink that is not on disk yet, and how many times each has
+     changed. Not a single flag, because the page under the pen can change
+     without anybody touching the page controls: a board freezing and its
+     successor opening is a page switch that happens on a payload, in the middle
+     of somebody writing. A save built its body from `current` at the moment the
+     request went out, so a switch while one was in flight left the outgoing
+     page's last strokes with nothing to carry them -- the queued save that
+     followed carried the NEW page instead, and the old one kept whatever it had
+     the time before. */
+  var dirtyPages = Object.create(null);
+  var pageSeq = Object.create(null);
   /* When the pen last reported anything. A palm resting on the glass is a touch
      like any other, and with a finger set to scroll it would drag the canvas out
      from under the nib. Touch panning is therefore ignored for a moment after
@@ -1328,6 +1339,8 @@ function create(opts) {
   /* ---------------------------------------------------------------- save */
   function markDirty() {
     dirty = true;
+    dirtyPages[current] = true;
+    pageSeq[current] = (pageSeq[current] || 0) + 1;
     changeSeq++;
     dropInk();          /* the writing moved, so its extent did */
     savedTag.textContent = "…";
@@ -1358,21 +1371,32 @@ function create(opts) {
      So: never two in flight, and `dirty` is only cleared if the page has not
      changed since the body went out. */
   var saving = null;
-  var pendingSave = false;
   var changeSeq = 0;
 
-  function save(send, quiet) {
+  /* A page that still owes the disk something. The one in hand first, because
+     that is the one being written on. */
+  function nextDirty() {
+    if (dirtyPages[current]) return current;
+    for (var k in dirtyPages) return Number(k);
+    return null;
+  }
+
+  function save(send, quiet, which) {
+    var idx = (which === undefined || which === null) ? current : which;
     if (saving) {
-      /* An autosave can simply wait its turn: the next one carries everything
-         this one would have. A send is a person pressing a button and has to
-         actually happen, so it queues behind what is already going. */
-      if (!send) { pendingSave = true; return saving; }
-      return saving.then(function () { return save(send, quiet); });
+      /* An autosave can simply wait its turn -- `dirtyPages` is the queue, and
+         it remembers WHICH pages are owed rather than assuming it is whichever
+         one happens to be in hand when the wire is free again. A send is a
+         person pressing a button and has to actually happen, so it queues
+         behind what is already going, on the page it was pressed for. */
+      if (!send) return saving;
+      return saving.then(function () { return save(send, quiet, idx); });
     }
-    var p = page();
-    var at = changeSeq;
+    var p = pages[idx];
+    if (!p) return Promise.resolve();
+    var at = pageSeq[idx] || 0;
     savedTag.classList.add("busy");
-    var body = { page: current + 1, w: p.w, h: p.h,
+    var body = { page: idx + 1, w: p.w, h: p.h,
                  strokes: p.strokes.map(stripDense),
                  png: toPNG(p), send: !!send, pages: pages.length };
     /* Which turn this is, and which question it answers. The host decides --
@@ -1390,10 +1414,13 @@ function create(opts) {
       /* Only if nothing was written while this was in the air. Otherwise the
          page on disk is already behind the page in hand, and saying "saved" is
          a lie that stops the next save from happening. */
-      if (changeSeq === at) {
-        dirty = false;
-        savedTag.classList.remove("busy");
-        savedTag.textContent = send ? "sent" : "saved";
+      if ((pageSeq[idx] || 0) === at) {
+        delete dirtyPages[idx];
+        if (idx === current) {
+          dirty = false;
+          savedTag.classList.remove("busy");
+          savedTag.textContent = send ? "sent" : "saved";
+        }
       }
       if (send) {
         lastLiveSend = Date.now();
@@ -1406,10 +1433,8 @@ function create(opts) {
     });
     saving = done.then(function () {
       saving = null;
-      if (pendingSave || changeSeq !== at) {
-        pendingSave = false;
-        save(false, true);
-      }
+      var next = nextDirty();
+      if (next !== null) save(false, true, next);
     });
     return saving;
   }
@@ -1537,7 +1562,11 @@ function create(opts) {
 
   function goTo(n) {
     if (n < 0 || n >= pages.length) return;
-    if (dirty) save(false);
+    /* The page being left keeps its own claim on the disk. Naming it matters:
+       if a save is already in flight this one is queued, and the queue used to
+       carry "whatever is current when the wire frees up", which by then is the
+       page being moved TO. */
+    if (dirtyPages[current]) save(false, true, current);
     current = n;
     dropInk();
     undoStack.length = 0; redoStack.length = 0;
@@ -1556,7 +1585,10 @@ function create(opts) {
   }) : null;
   if (ro) ro.observe(wrap);
   window.addEventListener("resize", function () { layout(); fitPage(); });
-  window.addEventListener("beforeunload", function () { if (dirty) save(false); });
+  window.addEventListener("beforeunload", function () {
+    var owed = nextDirty();
+    if (owed !== null) save(false, true, owed);
+  });
 
   /* Usable immediately. The old order was to wait for /slate/state before
      creating the first page, which meant that until the network answered there
@@ -1627,6 +1659,13 @@ function create(opts) {
     if (view.held) { clampView(); invalidate(); } else { fitPage(); }
   };
   api.bar = barHost || bar;
+  /* Is a hand on the glass right now?
+
+     The board asks before it moves the page under somebody -- a board freezing
+     and its successor opening is a page switch, and one that arrives mid-word
+     takes the rest of the word with it. Nothing about the lesson has to happen
+     in that particular second; the switch waits for the pen to come up. */
+  api.writing = function () { return !!drawing || penDown; };
   /* Enough of the innards for a test to prove that a stroke actually landed.
      Everything about this component is invisible to assertions otherwise. */
   api.debug = function () {

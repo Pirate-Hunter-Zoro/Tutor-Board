@@ -440,9 +440,83 @@ const heelSwipe = (id, x, y, dx, dy) => {
       ? ok('only one save is ever on the wire')
       : fail('overlapping autosaves can still land out of order, and the older '
              + 'one wins');
-    /if \(changeSeq === at\)/.test(js)
-      ? ok('and a save only clears the dirty flag if nothing changed while it flew')
+    /\(pageSeq\[idx\] \|\| 0\) === at/.test(js)
+      ? ok('and a save only clears a page if THAT page did not change while it flew')
       : fail('a stale save can report "saved" and stop the next one happening');
+  }
+
+  // And a save is for a PAGE, not for "whichever page is in hand when the wire
+  // frees up".
+  //
+  // Reported as "my writing didn't get saved when a new board came up". The
+  // board moves the page on its own now -- an attempt freezing and its successor
+  // opening is a page switch that arrives on a payload, in the middle of
+  // somebody writing -- and a switch while a save was in flight left the page
+  // being LEFT with nothing to carry its last strokes: the queued save that
+  // followed built its body from the new current page, and the old one kept
+  // whatever it had the time before.
+  //
+  // A surface of its own, because the one above has a save in the air already
+  // (this file's fetch never resolves, which is exactly a board on a dead link).
+  {
+    const sent = [];
+    let release = null;
+    const realFetch = window.fetch;
+    window.fetch = (u, opts) => {
+      if (/slate\/save/.test(String(u))) {
+        sent.push(JSON.parse(opts.body));
+        return new Promise((res) => {
+          release = () => res({ json: () => Promise.resolve({ ok: true }) });
+        });
+      }
+      return new Promise(() => {});
+    };
+    const root2 = doc.createElement('div');
+    doc.body.appendChild(root2);
+    const s2 = window.Slate.create({ root: root2, compact: false });
+    const sheet2 = root2.querySelector('canvas.sl-sheet');
+    const pen2 = (type, x, y, id) => {
+      const ev = new window.Event(type, { bubbles: true, cancelable: true });
+      Object.assign(ev, { pointerId: id, pointerType: 'pen', pressure: 0.6,
+                          clientX: x, clientY: y, isPrimary: true });
+      ev.getCoalescedEvents = () => [ev];
+      sheet2.dispatchEvent(ev);
+    };
+    const draw = (id, y) => {
+      pen2('pointerdown', 120, y, id);
+      for (let i = 0; i < 8; i++) pen2('pointermove', 120 + i * 7, y + i * 5, id);
+      pen2('pointerup', 190, y + 45, id);
+    };
+
+    draw(41, 120);
+    s2.save(false);                          // one on the wire, unresolved
+    draw(42, 300);                           // and more ink while it is up there
+
+    const before = sent.length;
+    s2.fresh(true);                          // the page moves under them
+    s2.at() === 1
+      ? ok('a new page can open while a save is still in the air')
+      : fail('the page did not move (at ' + s2.at() + ')');
+
+    await new Promise((r) => setTimeout(r, 5));
+    sent.length === before
+      ? ok('and nothing else goes on the wire while one is on it')
+      : fail('two saves are in flight at once again');
+
+    release();
+    await new Promise((r) => setTimeout(r, 30));
+
+    const followed = sent[sent.length - 1];
+    followed && followed.page === 1
+      ? ok('the save that follows is for the page that was LEFT, by number')
+      : fail('the queued save carried page ' + (followed && followed.page)
+             + ' — the page moved to — so the page written on kept an older '
+             + 'version of itself, which is ink lost');
+    followed && followed.strokes.length === 2
+      ? ok('and it carries everything written on it, the late strokes included')
+      : fail('the strokes made while a save was in flight never reached disk ('
+             + (followed && followed.strokes.length) + ')');
+    window.fetch = realFetch;
   }
 
   // The board asks the surface whether a hand is mid-answer before it moves the

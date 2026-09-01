@@ -337,6 +337,13 @@
       <button id="tab-type" type="button" class="tab">⌨ type</button>
     </span>
     <span id="writer-hint"></span>
+    <!-- A follow-up question is a new board, and a new board is a blank sheet.
+         That is right for a new exercise and wrong in the middle of one: the
+         proof is three cards up and the answer to "is this contrapositive or
+         contradiction?" is written on top of it. So the working can be brought
+         forward, in one tap, by the person who knows whether it belongs here --
+         and only when this board is blank and there is working behind it. -->
+    <button id="carry" type="button" hidden></button>
     <!-- Not every prompt is worth answering, and a prompt that cannot be
          declined is a prompt that gets answered badly to make it go away. It
          lives in this header so it dies with the block it belongs to. -->

@@ -239,6 +239,56 @@ await sleep(40);
     : fail('opening one board disturbed the others (' + boards().length + ')');
 }
 
+// -------------------------------------- a follow-up question is a blank board
+{
+  // What was reported the evening the chain shipped: "my writing didn't get
+  // saved when a new board came up - same question". Nothing was lost -- the
+  // working was on the board above, 180 strokes of it, and still is. But the
+  // tutor's follow-up was a QUESTION card, and a question card is a new
+  // question, and a new question gets a board of its own, which is blank.
+  //
+  // That is right for a new exercise and wrong three cards into one. The board
+  // cannot tell those apart, and guessing would be worse than asking: a new
+  // exercise opened on a copy is somebody else's proof under your pen, and every
+  // board after it carries every stroke of the evening. So the offer is made and
+  // the person decides.
+  const followUp = card('0002', 'question', 'contrapositive or contradiction?', 6);
+  es.onmessage({ data: lesson(run3.concat([followUp]), sent2) });
+  await sleep(40);
+
+  const carry = doc.getElementById('carry');
+  !carry.hidden
+    ? ok('a blank board with working behind it offers to carry it over')
+    : fail('a follow-up question lands on a blank sheet with no way back to the '
+           + 'proof it is asking about');
+  /question 0001/.test(carry.textContent)
+    ? ok('and says which board it would come from')
+    : fail('"carry over" with no "from where": ' + carry.textContent);
+
+  const before = slate.pages();
+  const ink = slate.inkOn(slate.at());
+  ink === 0
+    ? ok('the new board really is blank until it is asked for')
+    : fail('the follow-up board came up with ' + ink + ' strokes on it already');
+
+  carry.onclick();
+  await sleep(40);
+  slate.pages() === before + 1
+    ? ok('carrying it over makes a copy rather than reopening the same sheet')
+    : fail('the working was moved, not copied (' + before + ' -> '
+           + slate.pages() + ' pages)');
+  slate.inkOn(slate.at()) === 2
+    ? ok('and the working is under the pen')
+    : fail('the carried board is empty (' + slate.inkOn(slate.at()) + ' strokes)');
+  slate.inkOn(2) === 2
+    ? ok('while the board it came from is untouched')
+    : fail('carrying the working over took it away from where it was');
+  doc.getElementById('carry').hidden
+    ? ok('and the offer goes once there is something on the board')
+    : fail('the offer is still standing over somebody\'s working, where taking '
+           + 'it would replace it');
+}
+
 // ------------------------------------------------- and the record survives it
 {
   const KEY = 'board.pages:Galois Theory:-';

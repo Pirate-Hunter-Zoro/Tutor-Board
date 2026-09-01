@@ -46,6 +46,36 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 1 September 2026
 >
+> **"My writing didn't get saved when a new board came up."** Two things were behind that, and
+> only one of them was a bug.
+>
+> The bug is in the slate and it is the important one. A save built its body from `current` at the
+> moment the request went out, and the queue behind it carried *whichever page was in hand when
+> the wire freed up*. That was harmless while the only way to change page was somebody tapping the
+> page controls — and it stopped being harmless the moment the board started moving the page **by
+> itself**, which is exactly what an attempt freezing and its successor opening is. Switch pages
+> while a save is in flight and the page being left had nothing to carry its last strokes: the
+> queued save wrote the new page instead, and the old one kept whatever it had the time before.
+> Saves are addressed to a page by number now, `dirtyPages` is the queue and remembers *which*
+> pages are owed, and a page is only marked clean if that page did not change while its save was
+> in the air. `test/plane.js` drives it against a save held open on the wire — page left, page
+> written, save released — and the old code fails it by writing page 2 with nothing on it. The
+> board also refuses to cut a new attempt while a pen is on the glass: a page that moves mid-word
+> takes the rest of the word with it.
+>
+> The second thing is not a bug and is the one that was actually reported. The tutor's follow-up
+> was a **question** card — "contrapositive or contradiction, which is this?" — and a question
+> card is a new question, so it got a board of its own, blank. Right for a new exercise, wrong
+> three cards into one, where the proof being asked about is on the board above. The board cannot
+> tell those two apart, and guessing is worse than asking: a new exercise opened on a copy of the
+> last one is somebody else's proof under your pen, and every board after it carries every stroke
+> of the evening. So a blank board with working behind it offers **↴ carry over from question
+> NNNN**, on the live surface and on the dormant ones alike; one tap copies that page here and the
+> two go their own ways from there. Nothing was lost either way — the 180 strokes were on the
+> board above the whole time. `test/chain.js`.
+>
+> Shell version `board-shell-v65`.
+>
 > **The tutor's thinking reached the board again, and this time there was nothing to strip.**
 > Reported from the same Galois sitting five days after the first one: a card that was eight
 > hundred tokens of *"I need to read the student's response... Hmm, wait. Let me re-read the
@@ -575,6 +605,8 @@ these tests fail, the test is right.
 | Only one board per question ever existed, so within an exercise the earlier attempts did not persist: you write, hand it in, the tutor replies, and the board that "appeared" under the reply was the same board slid down the run. Reported as "the previous board for this same question that I have not yet completed doesn't persist... I want ALL boards to persist and to operate independently of each other" | a question is a chain, one board per attempt: frozen where it was written as soon as what it holds has been handed in AND the tutor has answered since — both halves, or Send forks the page under your hand and a second hint cuts a board about nothing — and the next attempt opens on a COPY, which is the only way the working carries forward and the two are still independent; `test/chain.js` |
 | `board export` wrote the tutor's cards and nothing else, named with the second it happened, into `live/export/` -- which a course's `.gitignore` throws away. Half a conversation, unfindable, unkept. Asked for instead: the whole thing as one PDF to show a professor | `document.py` interleaves every card and every page handed in, in the board's own reading order and labelled by attempt; it lands in `transcripts/<lesson>-vN.pdf`, is staged in git, and `--all` makes one document of the whole course; `test/document.py` |
 | A card arrived that was the model thinking out loud, with no tag anywhere in it -- the whole reply was the thought, so every strip in `boardlib` passed it through and `bin/free` wrote it after two attempts came back the same way. Eight hundred tokens of deliberation, cut off mid-sentence, as the lesson | `reads_as_reasoning` judges voice rather than syntax -- a card is addressed to somebody, deliberation is about them -- and every caller refuses rather than edits: the chain tries the next model, `board write` writes nothing, and the board, the recap and the export show a notice in place of a card that got to disk another way; `test/reasoning.py` |
+| A save was addressed to "the current page", not to a page. A queued save therefore carried whichever page was in hand when the wire freed up — so switching page while one was in flight left the page being LEFT with an older version of itself on disk. Invisible until the board began switching pages on its own, and then it was ink lost | saves carry a page number, `dirtyPages` remembers which pages are owed, and a page is cleaned only if it did not change while its save was in the air; `test/plane.js` holds a save open on the wire and checks what the queue does with it |
+| A follow-up question landed on a blank board while the working it was asking about sat on the board above. Not a defect -- a question card is a new question and a new question gets a blank sheet -- but wrong in the middle of an exercise, and unguessable from a card kind | a blank board with working behind it offers to carry it over, one tap, as a copy; the person decides, because a new exercise opened on the last one's proof is worse than a blank sheet; `test/chain.js` |
 | A skipped homework problem was dropped. One sentence told the tutor what a skip meant — "do not re-ask it, carry on" — which is right for a concept check and expensive for an assigned problem, where a skip is a lost mark and the student means *not now* | `skip_sense` reads the sitting: in homework the skip defers and names what is still owed, off the document rather than off anyone's memory; `homework.outstanding`, `board hw`, `test/begin.py`, `test/homework.py` |
 | A written answer was shown twice: a frozen picture of the ink under the question, and the board carrying the same ink under the feedback — one of them dead, and the dead one was the one you met first scrolling back up. The freezing was right when the slate was ONE surface that got written over, because then the picture was the only copy of what had been handed in; it stopped being right when every question got a page that is never wiped | the board is the answer; the turn keeps its heading and one line pointing at it, and the picture returns wherever there is no board — a filed lesson, a past one, a browser that never held the page; `test/feedback.js`, `test/interactive.js` |
 | Getting an exercise RIGHT deleted every writing board in the lesson. The boards were painted only while an answer was *owed*, and a `correct` card owes nothing — so finishing a problem left the transcript as frozen pictures of what had been sent, with no surface under any earlier question to add a line to. A picture is a record of an answer, not a place to write one | the boards are painted for the whole live lesson; the one question that goes without a picture is the one the real surface is sitting under; `test/feedback.js` |
