@@ -181,6 +181,13 @@ src_serve = open(os.path.join(ROOT, "serve.py"), encoding="utf-8").read()
     "a board listens on this machine's tailnet address as well as loopback")
 (ok if "for a in tailnet]" in src_serve else fail)(
     "and says so in its record, so the far side knows where to knock")
+(ok if "boardlib.publish_board(port)" in src_serve else fail)(
+    "and where binding is impossible -- userspace tailscaled, which is every "
+    "machine without administrator rights -- tailscaled forwards for it instead")
+src_board = open(os.path.join(ROOT, "bin", "board"), encoding="utf-8").read()
+(ok if "boardlib.unpublish_board(" in src_board else fail)(
+    "and a stopped board takes its forwarding rule with it, rather than leaving "
+    "one that points at a port nothing answers on")
 (ok if 'if host == "0.0.0.0"' in src_serve else fail)(
     "but not on the LAN unless somebody asked for that")
 

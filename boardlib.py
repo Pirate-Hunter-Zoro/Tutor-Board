@@ -489,6 +489,51 @@ def tailnet_addresses():
     return [a for a in out if a.count(".") == 3]
 
 
+def publish_board(port, timeout=20):
+    """Let the other machines on this tailnet reach this board.
+
+    Binding the tailnet address directly is the obvious way and it does not work
+    where it is most needed: a machine with no administrator rights runs
+    tailscaled in USERSPACE mode, where the address exists but no interface
+    carries it, and `bind()` returns "cannot assign requested address". Measured
+    on the compute node, which is exactly the machine the always-on host has to
+    be able to see.
+
+    `tailscale serve --tcp` is the mechanism that works in both modes: tailscaled
+    itself accepts the connection on the tailnet and forwards it to loopback. One
+    per board, on the board's own port, so a course is reachable from the other
+    machine at the same number it uses here -- which is what makes
+    `locate_course` work without anything being published anywhere.
+    """
+    prefix, _ = tailscale_cli()
+    if not prefix:
+        return False
+    import subprocess
+    try:
+        p = subprocess.run(prefix + ["serve", "--bg", "--tcp", str(port),
+                                     "tcp://127.0.0.1:%d" % port],
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           timeout=timeout)
+        return p.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def unpublish_board(port, timeout=20):
+    """Take it off the tailnet again, so a stopped board leaves nothing behind."""
+    prefix, _ = tailscale_cli()
+    if not prefix:
+        return False
+    import subprocess
+    try:
+        p = subprocess.run(prefix + ["serve", "--tcp=%d" % port, "off"],
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           timeout=timeout)
+        return p.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def tailnet_peers(status=None):
     """Every machine on this tailnet that is online, as something to knock on.
 

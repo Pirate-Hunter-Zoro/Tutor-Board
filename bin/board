@@ -452,6 +452,11 @@ def cmd_stop(live, args):
             os.kill(info["pid"], signal.SIGTERM)
         except OSError:
             pass
+    # Take it off the tailnet too, or a stopped board leaves a forwarding rule
+    # pointing at a port nothing answers on -- which the other machine then finds
+    # and believes.
+    if info.get("port"):
+        boardlib.unpublish_board(info["port"])
     try:
         os.remove(live.path(".board.json"))
     except OSError:

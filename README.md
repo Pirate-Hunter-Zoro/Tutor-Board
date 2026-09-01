@@ -46,6 +46,16 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 1 September 2026
 >
+> **The measurement that settled it, and the mechanism that actually works.** Binding the tailnet
+> address is the obvious fix and it fails on the one machine that matters: a compute node without
+> administrator rights runs tailscaled in *userspace* mode, where the address exists and no
+> interface carries it — `bind()` returns "cannot assign requested address". `tailscale serve
+> --tcp <porttcp://127.0.0.1:<port>` is the mechanism that works in both modes: tailscaled accepts
+> the connection on the tailnet itself and forwards it to loopback. Every board publishes itself
+> that way on start and takes it down on stop, on its own port, so a course is reachable from the
+> other machine at the same number it uses here and nothing has to be published anywhere for
+> `locate_course` to find it.
+>
 > **And the reason switching could never have worked, which was underneath all of it: a board only
 > ever listened on loopback.** Deliberately -- there is no authentication here and the university
 > LAN is not somewhere to put an unauthenticated page -- and the consequence went unseen for a

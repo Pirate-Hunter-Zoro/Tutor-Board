@@ -2434,6 +2434,13 @@ def main(argv):
         second.hub = hub
         threading.Thread(target=second.serve_forever, daemon=True).start()
         tailnet.append(addr)
+    # And the way that works where binding does not: on a machine running
+    # tailscaled in userspace mode the address exists but no interface carries
+    # it, so `bind()` fails and the board would be invisible to the other machine
+    # -- which is the machine that decides where the address points. tailscaled
+    # accepts the connection itself and forwards it to loopback.
+    if not tailnet and boardlib.publish_board(port):
+        tailnet.append(boardlib.node_name())
 
     info = {
         "pid": os.getpid(),
