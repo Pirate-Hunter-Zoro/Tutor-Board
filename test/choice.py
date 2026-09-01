@@ -505,9 +505,12 @@ check("the choice is read from whoever answers, not from a configured hostname",
 check("and one probe implementation for both machines, so the machine that needs "
       "the SOCKS proxy is not the one asking without it",
       "return boardlib.board_health(host, port, timeout=timeout)" in follow_src)
-check("the walk is bounded, because a tick that takes a minute is a tick that "
-      "never finishes before the next one starts",
-      "for c in cands[:4]:" in follow_src and "_ASKED[0] = host" in follow_src)
+check("the walk covers every course, because the other machine is running the "
+      "ones it is running and not the four this one lists first",
+      "for c in cands:" in follow_src and "cands[:4]" not in follow_src)
+check("and an ordinary tick is one request, because whoever answered last is "
+      "asked first",
+      "if _ASKED[0] and _ASKED[1]:" in follow_src)
 check("and phones are not knocked on at all",
       '"ios", "android"' in open(os.path.join(ROOT, "boardlib.py"), encoding="utf-8").read())
 

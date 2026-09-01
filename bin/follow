@@ -230,9 +230,9 @@ def find_course(node, c, timeout=2.0):
     return None
 
 
-# The machine that last answered "what was chosen". Tried first next time, so a
-# tick costs one request rather than a walk.
-_ASKED = [None]
+# The board that last answered "what was chosen", as (host, port). Tried first
+# next time, so an ordinary tick costs one request rather than a walk.
+_ASKED = [None, None]
 
 
 def node_choice(node, cands):
@@ -259,16 +259,29 @@ def node_choice(node, cands):
     # address stayed where it was while `/health` on both machines said plainly
     # that somebody had asked for the other course.
     hosts += [h for h in boardlib.tailnet_peers() if h != node]
-    # Bounded on purpose: every course tried against every machine is a timeout
-    # each when nobody is home, and this runs on a tick. One board is enough --
-    # they all publish the same record -- so try a few courses per machine and
-    # move on. `_ASKED` remembers whoever answered last, and asks them first.
-    for host in ([_ASKED[0]] if _ASKED[0] in hosts else []) + hosts:
-        for c in cands[:4]:
-            health = probe(host, default_port(c["root"]), timeout=1.0)
+    # Whoever answered last, first: an ordinary tick is then one request.
+    if _ASKED[0] and _ASKED[1]:
+        health = probe(_ASKED[0], _ASKED[1], timeout=1.5)
+        if health:
+            ch = health.get("chosen") or {}
+            return ch if ch.get("dir") else None
+
+    # Otherwise walk, and walk EVERY course rather than the first few. The other
+    # machine is running whichever courses it is running, and the ones this
+    # machine happens to list first are not them: the Mac probed Algo-Solutions,
+    # Galois-Theory, Lean-Theorem-Proving and Mathematical-Modeling on a node
+    # that was serving Probability, found nothing, and concluded that nobody had
+    # chosen anything. A bound that looks harmless is how this failed twice.
+    #
+    # One board is enough -- every board on a machine publishes the same record
+    # -- so it stops at the first answer and remembers where it came from.
+    for host in hosts:
+        for c in cands:
+            port = default_port(c["root"])
+            health = probe(host, port, timeout=1.0)
             if not health:
                 continue
-            _ASKED[0] = host
+            _ASKED[0], _ASKED[1] = host, port
             ch = health.get("chosen") or {}
             return ch if ch.get("dir") else None
     return None
