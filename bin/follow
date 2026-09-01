@@ -317,6 +317,28 @@ def local_choice(cands):
     return None
 
 
+def wanted_host(*records):
+    """The MACHINE the person picked, if they picked one, from the newest record.
+
+    Which courses exist is a property of a machine, so a course name is not
+    always enough to say where a lesson is: both machines may have a clone. The
+    hub offers the host now, and this is how that choice reaches the address.
+    Empty means nobody said, which is the ordinary case and means "wherever it
+    is" -- exactly the behaviour before any of this existed.
+    """
+    best = (0.0, "")
+    for rec in records:
+        if not rec or not rec.get("dir"):
+            continue
+        try:
+            at = float(rec.get("at") or 0)
+        except (TypeError, ValueError):
+            at = 0.0
+        if at >= best[0]:
+            best = (at, (rec.get("host") or "").strip())
+    return best[1]
+
+
 def wanted_course(remote_choice, local_published=None):
     """Which COURSE the address opens, deciding across both machines.
 
@@ -475,7 +497,10 @@ def choose_target(node, cands, prefer="local"):
     leave, because the follower's only question is whether the address moved.
     """
     remote_choice = node_choice(node, cands)
-    want = wanted_course(remote_choice, local_choice(cands))
+    published = local_choice(cands)
+    mine = boardlib.chosen_course()
+    want = wanted_course(remote_choice, published)
+    want_host = wanted_host(mine, published, remote_choice)
 
     local = local_target(cands, want) if cands else None
     remote = remote_target(node, cands, want, (remote_choice or {}).get("port"))
@@ -483,6 +508,21 @@ def choose_target(node, cands, prefer="local"):
     order = [(remote, "the compute node"), (local, "here")] if prefer == "node" \
         else [(local, "here"), (remote, "the compute node")]
     order = [(t, w) for t, w in order if t]
+
+    # Rule 0: if the person picked a MACHINE in the hub, that is not a preference
+    # to be weighed, it is the answer. Only among boards that are serving the
+    # course they also chose -- a named host does not entitle a board that is up
+    # over there to take the address off the lesson somebody is in.
+    if want_host:
+        here = (boardlib.tailnet_self() or "")
+        named = []
+        for t, w in order:
+            on = here if w == "here" else (node or "")
+            if t[2] and (on == want_host or w == "here" and here == want_host
+                         or on.split(".")[0] == want_host.split(".")[0]):
+                named.append((t, w))
+        if named:
+            order = named + [x for x in order if x not in named]
 
     # Rule 1, as a stable partition: preference still decides between two boards
     # with the same claim, and never overrides the claim itself.

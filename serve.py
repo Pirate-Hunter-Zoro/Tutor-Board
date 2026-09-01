@@ -1135,6 +1135,69 @@ def held_nodes():
     return _SLURM["nodes"]
 
 
+# What the other machines are running, and when we last asked. Rebuilt in the
+# background rather than while somebody is waiting: it is a walk over the tailnet
+# and the hub must open now, with whatever is known, and fill in.
+_HOSTS = {"at": 0.0, "value": [], "busy": False}
+HOSTS_FRESH = 25.0
+
+
+def this_host_entry(repo):
+    """This machine, as the hub sees it."""
+    return {
+        "host": "",                     # empty means "wherever you are"
+        "name": boardlib.tailnet_self() or boardlib.node_name(),
+        "here": True,
+        "reachable": True,
+        "courses": sibling_courses(repo),
+    }
+
+
+def peer_hosts(repo):
+    """Every other machine on the tailnet that is running a board, and its courses.
+
+    A board serves `/courses.json` for its own machine, so one board is enough to
+    learn what a machine has -- the walk exists only to find somebody to ask, and
+    it knocks on the ports of the courses we know because the two machines are
+    clones of the same list far more often than not.
+    """
+    out = []
+    ours = [c["repo"] for c in sibling_courses(repo)]
+    for host in boardlib.tailnet_peers():
+        found = None
+        for name in ours:
+            port = boardlib.default_port(name)
+            if boardlib.board_health(host, port, timeout=1.0):
+                found = port
+                break
+        if not found:
+            continue
+        doc = boardlib.board_json(host, found, "/courses.json", timeout=2.0) or {}
+        courses = doc.get("courses") or []
+        for c in courses:
+            c["current"] = False        # "current" is about the board you asked
+        out.append({"host": host, "name": host.split(".")[0], "here": False,
+                    "reachable": True, "port": found, "courses": courses})
+    return out
+
+
+def known_hosts(repo):
+    """This machine first, then whatever else answered when we last looked."""
+    now = time.time()
+    if now - _HOSTS["at"] > HOSTS_FRESH and not _HOSTS["busy"]:
+        _HOSTS["busy"] = True
+
+        def refresh():
+            try:
+                _HOSTS["value"] = peer_hosts(repo)
+                _HOSTS["at"] = time.time()
+            finally:
+                _HOSTS["busy"] = False
+        threading.Thread(target=refresh, daemon=True).start()
+    return {"hosts": [this_host_entry(repo)] + list(_HOSTS["value"]),
+            "node": boardlib.node_name()}
+
+
 def sibling_courses(repo):
     """Course repositories sitting alongside this one.
 
@@ -1689,6 +1752,17 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_file(os.path.join(WEB, "home.html"))
         if path in ("/board", "/board/"):
             return self.send_file(os.path.join(WEB, "board.html"))
+        if path == "/hosts.json":
+            # Every machine that can teach, and what each one has.
+            #
+            # Which courses exist is a property of the MACHINE -- it is whatever
+            # is cloned next to the board -- so "pick a course" was always really
+            # "pick a course on whichever machine happens to be serving you". The
+            # iPad could not see the other machine's courses at all, let alone
+            # choose one. Asked for in those words: "I want to be able to control
+            # this at all times on the iPad - whatever hosts are available".
+            return self.send_json(known_hosts(repo))
+
         if path == "/courses.json":
             info = {}
             try:
@@ -1837,12 +1911,75 @@ class Handler(BaseHTTPRequestHandler):
             self.server.hub.worker.dirty.set()
             return self.send_json({"ok": True})
 
+        if path == "/start":
+            # Bring a course up ON THIS MACHINE, asked by a hub somewhere else.
+            #
+            # The hub can now offer the courses of every machine that is up, and
+            # a course that is only cloned over there has to be startable from
+            # over here or the offer is a lie. Same guard as `/switch`: only a
+            # sibling directory this server already discovered, so no path from a
+            # request ever reaches the filesystem.
+            try:
+                payload = json.loads(self.read_body().decode("utf-8") or "{}")
+            except Exception:
+                payload = {}
+            want = payload.get("repo") or ""
+            match = None
+            for c in sibling_courses(repo):
+                if c["repo"] == want:
+                    match = c
+                    break
+            if not match:
+                return self.send_json({"ok": False, "error": "unknown course"}, status=404)
+            target = os.path.join(os.path.dirname(repo.root), match["repo"])
+            code, out = board_cli(target, ["start"])
+            if code != 0:
+                return self.send_json({"ok": False, "error": out.strip()[-300:]},
+                                      status=500)
+            # The choice belongs to the machine the person is looking at, and it
+            # has already been recorded there; this records it here as well, so
+            # whichever machine the follower asks gets the same answer.
+            boardlib.remember_chosen(match["repo"], target,
+                                     host=payload.get("host") or "")
+            tutor_cli(["agent", "start", match["repo"]])
+            return self.send_json({"ok": True, "repo": match["repo"],
+                                   "port": boardlib.default_port(match["repo"]),
+                                   "detail": out.strip()[-300:]})
+
         if path == "/switch":
             try:
                 payload = json.loads(self.read_body().decode("utf-8"))
             except Exception:
                 return self.send_json({"ok": False, "error": "bad json"}, status=400)
             want = payload.get("repo") or ""
+            on_host = (payload.get("host") or "").strip()
+
+            # A course on another machine. The person picked the host in the hub,
+            # so this is not a guess to be made here: record the pair, ask that
+            # machine to bring the course up, and let the follower point the
+            # address at it. Nothing is started here -- starting a second clone of
+            # somebody else's course is the thing that made a mess of an evening.
+            if on_host and on_host != (boardlib.tailnet_self() or ""):
+                boardlib.remember_chosen(want, "", host=on_host)
+                port = None
+                for h in known_hosts(repo)["hosts"]:
+                    if h.get("host") == on_host:
+                        port = h.get("port")
+                        break
+                started = None
+                if port:
+                    started = boardlib.board_post(on_host, port, "/start",
+                                                  {"repo": want, "host": on_host},
+                                                  timeout=60)
+                self.server.hub.worker.dirty.set()
+                return self.send_json({
+                    "ok": True, "repo": want, "host": on_host,
+                    "detail": ("%s is bringing %s up; the address follows"
+                               % (on_host.split(".")[0], want))
+                    if started and started.get("ok")
+                    else ("asked for %s on %s" % (want, on_host.split(".")[0])),
+                })
+
             # Only a sibling directory this server already discovered. No paths
             # from the request ever reach the filesystem.
             match = None
@@ -1858,7 +1995,8 @@ class Handler(BaseHTTPRequestHandler):
             # that -- the RECORD -- is the whole of what moves the address. It is
             # written first and unconditionally, because on a pair of machines it
             # is the only thing both of them can read.
-            boardlib.remember_chosen(match["repo"], target)
+            boardlib.remember_chosen(match["repo"], target,
+                                     host=boardlib.tailnet_self() or "")
 
             # What this machine does about it depends on whether this machine is
             # the one that decides.

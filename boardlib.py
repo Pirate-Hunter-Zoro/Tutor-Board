@@ -71,13 +71,22 @@ def chosen_course():
         return {}
 
 
-def remember_chosen(name, root):
-    """Record that this course was asked for. A note, never a requirement."""
+def remember_chosen(name, root, host=None):
+    """Record that this course was asked for. A note, never a requirement.
+
+    `host` is the machine it was asked for ON, when the person picked one. Which
+    courses exist is a property of a machine -- they are whatever is cloned next
+    to the board -- so "Probability" can mean two different clones, and until the
+    hub could offer the choice the answer was whichever machine won an argument.
+    Empty means "wherever it is", which is the old behaviour and the right one
+    when nobody has said.
+    """
     try:
         os.makedirs(CONFIG_DIR, exist_ok=True)
         tmp = CHOSEN + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump({"dir": name, "root": root, "at": time.time()}, fh)
+            json.dump({"dir": name, "root": root, "at": time.time(),
+                       "host": host or ""}, fh)
         os.replace(tmp, CHOSEN)
         return True
     except OSError:
@@ -740,6 +749,74 @@ def board_is(health, name):
         return False
     who = health.get("dir") or os.path.basename(health.get("root") or "")
     return who == name
+
+
+def board_json(host, port, path, timeout=2.0):
+    """Any JSON document off a board, by the same two routes `board_health` uses."""
+    import urllib.request
+    url = "http://%s:%d%s" % (host, port, path)
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            if resp.status != 200:
+                return None
+            return json.loads(resp.read(1 << 20).decode("utf-8", "replace"))
+    except Exception:                                            # noqa: BLE001
+        pass
+    if host in ("127.0.0.1", "::1", "localhost"):
+        return None
+    proxy = socks_proxy()
+    if not proxy:
+        return None
+    sock = _socks_open(host, port, proxy, timeout)
+    if not sock:
+        return None
+    return _http_get_json(sock, path, timeout)
+
+
+def board_post(host, port, path, payload, timeout=20.0):
+    """POST JSON to a board, over whichever route this machine has."""
+    import urllib.request
+    body = json.dumps(payload or {}).encode()
+    url = "http://%s:%d%s" % (host, port, path)
+    req = urllib.request.Request(url, data=body, method="POST",
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read(1 << 20).decode("utf-8", "replace"))
+    except Exception:                                            # noqa: BLE001
+        pass
+    if host in ("127.0.0.1", "::1", "localhost"):
+        return None
+    proxy = socks_proxy()
+    if not proxy:
+        return None
+    sock = _socks_open(host, port, proxy, timeout)
+    if not sock:
+        return None
+    try:
+        sock.settimeout(timeout)
+        head = ("POST %s HTTP/1.0\r\nHost: board\r\nContent-Type: application/json\r\n"
+                "Content-Length: %d\r\nConnection: close\r\n\r\n" % (path, len(body)))
+        sock.sendall(head.encode() + body)
+        buf = b""
+        while len(buf) < (1 << 20):
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            buf += chunk
+    except OSError:
+        return None
+    finally:
+        try:
+            sock.close()
+        except OSError:
+            pass
+    if b"\r\n\r\n" not in buf:
+        return None
+    try:
+        return json.loads(buf.partition(b"\r\n\r\n")[2].decode("utf-8", "replace"))
+    except ValueError:
+        return None
 
 
 def find_board(host, name, timeout=2.0):

@@ -74,12 +74,33 @@ const list = [
     running: false, current: false },
 ];
 
-window.fetch = (url) => Promise.resolve({
-  json: () => Promise.resolve(
-    url === '/courses.json'
-      ? { courses: list, where: 'compute305' }
+// Two machines, each with its own courses -- which is the point of the row:
+// what a machine can teach is whatever is cloned next to its board.
+const MAC = [
+  { repo: 'Galois-Theory', course: 'Galois Theory', chapter: 'Ch 3 — Rings',
+    cards: 9, running: true, node: 'board', current: false },
+];
+const hostsDoc = {
+  hosts: [
+    { host: '', name: 'compute-node.tail0c6c62.ts.net', here: true,
+      reachable: true, courses: list },
+    { host: 'board.tail0c6c62.ts.net', name: 'board.tail0c6c62.ts.net',
+      here: false, reachable: true, port: 9098, courses: MAC },
+  ],
+};
+const posted = [];
+window.fetch = (url, opts) => {
+  if (url === '/switch') {
+    posted.push(JSON.parse(opts.body));
+    return Promise.resolve({ json: () => Promise.resolve({ ok: true }) });
+  }
+  return Promise.resolve({
+    json: () => Promise.resolve(
+      url === '/courses.json' ? { courses: list, where: 'compute305' }
+      : url === '/hosts.json' ? hostsDoc
       : { state: { course: 'Galois Theory' }, cards: [], messages: [], slate: [] }),
-});
+  });
+};
 
 // Kick a refresh and let the two promises settle.
 window.dispatchEvent(new window.Event('focus'));
@@ -109,6 +130,35 @@ setTimeout(() => {
   const bare = idle[idle.length - 1];
   check('a course nobody has opened is drawn with no second line at all',
         !!bare && !bare.querySelector('.meta'));
+
+  // ------------------------------------------------------------- the hosts
+  //
+  // Which courses exist is a property of the MACHINE, so a course list without
+  // a way to say which machine is half a choice with the other half made for
+  // you. Asked for from the device: "I want to be able to control this at all
+  // times on the iPad - whatever hosts are available".
+  const hostBtns = window.document.querySelectorAll('#hosts button');
+  check('every machine that is up is offered', hostBtns.length === 2);
+  check('and the row is shown at all once there are two',
+        !window.document.getElementById('hosts-wrap').hidden);
+  check('the machine serving this page says so',
+        /serving you/.test(hostBtns[0].textContent));
+  check('and each says how many courses it can teach',
+        /2 courses/.test(hostBtns[0].textContent)
+        && /1 course/.test(hostBtns[1].textContent));
+
+  // Picking the other machine shows ITS courses, without moving anything yet.
+  hostBtns[1].onclick();
+  const after = window.document.querySelectorAll('#others li button, #past li button');
+  check('picking a machine lists the courses that machine has',
+        after.length === 1 && /Galois Theory/.test(after[0].textContent));
+  check('and picking a machine on its own moves nothing',
+        posted.length === 0);
+
+  after[0].onclick();
+  check('tapping a course there sends the machine as well as the course',
+        posted.length === 1 && posted[0].repo === 'Galois-Theory'
+        && posted[0].host === 'board.tail0c6c62.ts.net');
 
   console.log(errors.length ? '\n' + errors.length + ' FAILURES'
                             : '\nthe course list stays inside its card');

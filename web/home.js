@@ -14,6 +14,8 @@
 
 var els = {
   dot: document.getElementById("dot"),
+  hosts: document.getElementById("hosts"),
+  hostsWrap: document.getElementById("hosts-wrap"),
   eyebrow: document.getElementById("hero-eyebrow"),
   course: document.getElementById("hero-course"),
   chapter: document.getElementById("hero-chapter"),
@@ -96,8 +98,67 @@ function paintBoard(d) {
     : "the slate";
 }
 
+/* -------------------------------------------------------------- the hosts */
+/* Which machine's courses the list below is showing.
+ 
+   Which courses exist is a property of a MACHINE: they are whatever is cloned
+   next to the board. So a course list has always been "the courses of whichever
+   machine happens to be serving you", and the other machine's were not merely
+   hard to reach, they were invisible. Asked for from the device: "I want to be
+   able to control this at all times on the iPad - whatever hosts are available".
+ 
+   The selection is local to this page. It picks which list you are looking at;
+   tapping a course is still what moves anything. */
+var hosts = [];
+var onHost = null;          /* null = the machine serving this page */
+
+function hostKey(h) { return h && h.host ? h.host : ""; }
+
+function paintHosts(doc) {
+  hosts = (doc && doc.hosts) || [];
+  els.hosts.innerHTML = "";
+  /* One machine is not a choice, and a row of one button is furniture. */
+  if (hosts.length < 2) {
+    els.hostsWrap.hidden = true;
+    onHost = null;
+    return;
+  }
+  els.hostsWrap.hidden = false;
+  if (onHost !== null && !hosts.some(function (h) { return hostKey(h) === onHost; })) {
+    onHost = null;          /* it went away while we were looking at it */
+  }
+  hosts.forEach(function (h) {
+    var b = document.createElement("button");
+    b.type = "button";
+    var key = hostKey(h);
+    var here = !!h.here;
+    b.className = (key === (onHost || "") ? "on" : "") + (h.reachable ? "" : " off");
+    var name = document.createElement("span");
+    name.textContent = (h.name || key || "this machine").split(".")[0];
+    var sub = document.createElement("span");
+    sub.className = "n";
+    var n = (h.courses || []).length;
+    sub.textContent = (here ? "serving you · " : "") + n + (n === 1 ? " course" : " courses");
+    b.appendChild(name);
+    b.appendChild(sub);
+    b.onclick = function () {
+      onHost = key;
+      paintHosts({ hosts: hosts });
+      paintCourses(coursesOf(onHost), onHost);
+    };
+    els.hosts.appendChild(b);
+  });
+}
+
+function coursesOf(key) {
+  for (var i = 0; i < hosts.length; i++) {
+    if (hostKey(hosts[i]) === (key || "")) return hosts[i].courses || [];
+  }
+  return [];
+}
+
 /* ------------------------------------------------------------ the others */
-function paintCourses(list) {
+function paintCourses(list, host) {
   var others = [];
   var past = [];
   (list || []).forEach(function (c) {
@@ -136,7 +197,7 @@ function paintCourses(list) {
     /* A course nobody has opened yet has nothing to say on the second line, and
        an empty one only spends the gap above it. */
     if (meta.childNodes.length) b.appendChild(meta);
-    b.onclick = function () { switchTo(c.repo); };
+    b.onclick = function () { switchTo(c.repo, host); };
     li.appendChild(b);
     into.appendChild(li);
   }
@@ -149,12 +210,14 @@ function paintCourses(list) {
   els.pastWrap.hidden = !past.length;
 }
 
-function switchTo(repo) {
+function switchTo(repo, host) {
   els.busy.hidden = false;
   fetch("/switch", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ repo: repo })
+    /* The machine as well as the course, when the person picked one. A course
+       name can mean two clones and the board must not have to guess which. */
+    body: JSON.stringify({ repo: repo, host: host || "" })
   }).then(function (r) { return r.json(); }).then(function (res) {
     if (!res.ok) throw new Error(res.error || "switch failed");
     /* The proxy now points somewhere else; give it a moment, then come back to
@@ -170,12 +233,16 @@ function switchTo(repo) {
 function refresh() {
   return Promise.all([
     fetch("/board.json").then(function (r) { return r.json(); }),
-    fetch("/courses.json").then(function (r) { return r.json(); }).catch(function () { return {}; })
-  ]).then(function (both) {
+    fetch("/courses.json").then(function (r) { return r.json(); }).catch(function () { return {}; }),
+    fetch("/hosts.json").then(function (r) { return r.json(); }).catch(function () { return {}; })
+  ]).then(function (all) {
     els.dot.className = "dot live";
-    paintBoard(both[0] || {});
-    paintCourses((both[1] || {}).courses);
-    var w = (both[1] || {}).where;
+    paintBoard(all[0] || {});
+    paintHosts(all[2] || {});
+    /* The machine serving this page answers for itself; another machine's list
+       came back with its own board. */
+    paintCourses(onHost ? coursesOf(onHost) : ((all[1] || {}).courses), onHost);
+    var w = (all[1] || {}).where;
     els.where.textContent = w || "";
   }).catch(function () {
     els.dot.className = "dot dead";

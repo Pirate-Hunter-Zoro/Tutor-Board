@@ -474,7 +474,7 @@ serve_src = open(os.path.join(ROOT, "serve.py"), encoding="utf-8").read()
 follow_src = open(os.path.join(ROOT, "bin", "follow"), encoding="utf-8").read()
 
 check("the choice is recorded whatever else the tap does",
-      'boardlib.remember_chosen(match["repo"], target)' in serve_src)
+      'boardlib.remember_chosen(match["repo"], target,' in serve_src)
 check("but a second board is only started when nothing else is serving that "
       "course -- asked over the tailnet, not assumed from the machine's role",
       "elsewhere = None if mine else boardlib.locate_course(" in serve_src
@@ -484,7 +484,7 @@ check("the tailnet name is only taken by a machine that owns it -- otherwise the
       'if shape == "standalone":' in serve_src)
 check("and a tutor is started only where the course is actually served, so one "
       "lesson never gets two",
-      serve_src.count('tutor_cli(["agent", "start", match["repo"]])') == 1
+      serve_src.count('tutor_cli(["agent", "start", match["repo"]])') == 2
       and "is serving this course; the address follows" in serve_src)
 
 check("a board listens on the tailnet as well as loopback, or the other machine "
@@ -523,12 +523,39 @@ check("and an ordinary tick is one request, because whoever answered last is "
 check("the choice is also taken from a board on this machine, which is the same "
       "record read by something that definitely wrote it",
       "def local_choice(" in follow_src
-      and "want = wanted_course(remote_choice, local_choice(cands))" in follow_src)
+      and "published = local_choice(cands)" in follow_src
+      and "want = wanted_course(remote_choice, published)" in follow_src)
 check("and the newest of the three wins, whoever is reporting it",
       "for rec in (boardlib.chosen_course(), local_published, remote_choice):"
       in follow_src)
 check("and phones are not knocked on at all",
       '"ios", "android"' in open(os.path.join(ROOT, "boardlib.py"), encoding="utf-8").read())
+
+# The host is a choice, and it is the person's.
+#
+# Which courses exist is a property of a MACHINE -- they are whatever is cloned
+# next to the board -- so a course name can mean two different clones and the
+# hub was only ever showing one machine's list. Measured on the pair: the Mac
+# has five course repositories, the compute node has nine. "Galois Theory is the
+# only option" was that, exactly.
+check("the hub can ask what machines are up and what each of them has",
+      'if path == "/hosts.json":' in serve_src and "def peer_hosts(" in serve_src)
+check("a machine's list comes from a board on that machine, which is the only "
+      "thing that knows what is cloned there",
+      '"/courses.json", timeout=2.0' in serve_src)
+check("the walk happens off the request, so the hub opens now and fills in",
+      "_HOSTS" in serve_src and "threading.Thread(target=refresh, daemon=True)" in serve_src)
+check("a course can be started on the machine that has it, from a hub on the "
+      "other one",
+      'if path == "/start":' in serve_src)
+check("and choosing a course on a named machine records both",
+      "boardlib.remember_chosen(want, \"\", host=on_host)" in serve_src)
+check("the record carries the host",
+      "def remember_chosen(name, root, host=None):"
+      in open(os.path.join(ROOT, "boardlib.py"), encoding="utf-8").read())
+check("and a named machine decides the address, above every preference, but "
+      "only among boards serving the course that was chosen too",
+      "def wanted_host(" in follow_src and "if want_host:" in follow_src)
 
 check("a board publishes whether it has a tutor at all",
       '"tutor": agent.get("state") or None' in serve_src)

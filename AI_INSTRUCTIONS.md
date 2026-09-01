@@ -203,6 +203,14 @@ preferred".
   that cannot work however correct the arbitration above it is. It went unseen for a week because
   every test of the arbitration passed. And never look for the far side at a hostname out of the
   config alone: a compute node's name is an allocation. `boardlib.locate_course` asks the tailnet.
+- **The machine is the person's choice, not an inference.** Which courses exist is a property of a
+  machine — they are whatever is cloned beside the board — so a course name can mean two clones and
+  the hub must be able to say which. `/hosts.json` lists every machine on the tailnet running a
+  board and what each has; the record carries the host beside the course; the follower treats a
+  named machine as the answer, above preference, but only among boards serving the chosen course.
+  Never let a named host promote a board that is not serving what was chosen: a machine is a
+  qualifier on the lesson, never a reason to take the address off one. `test/hub.js`,
+  `test/choice.py`.
 - **A course runs in ONE place, and a tap in the hub does not move it.** The tap records the
   choice — that record is the only thing two machines can both read — and nothing else, unless this
   machine owns its own name or already serves that course. It must never start a board, take the

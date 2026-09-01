@@ -46,6 +46,28 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 1 September 2026
 >
+> **The machine is now a choice, and it is yours.** Asked for in these words: *"I want to be able
+> to control this at all times on the iPad - whatever hosts are available"*. The hub has a
+> **Where** row listing every machine on the tailnet that is running a board, with how many
+> courses each can teach; picking one lists that machine's courses, and tapping a course there
+> records the pair and asks that machine to bring it up.
+>
+> This was never cosmetic. Which courses exist is a property of a MACHINE — they are whatever is
+> cloned next to the board — so a course list has always been "the courses of whichever machine
+> happens to be serving you", and the other machine's were not merely hard to reach, they were
+> invisible. Measured on this pair while building it: the Mac has five course repositories, the
+> compute node has nine. *"Galois Theory is the only option"* was exactly that.
+>
+> A machine's list comes from a board on that machine — `/courses.json` is already the answer to
+> "what is cloned here", so one board is enough to learn what a machine has — and the walk runs
+> off the request, so the hub opens now and fills in. `/start` lets a hub on one machine bring a
+> course up on another, guarded the way `/switch` is: only a sibling directory that server already
+> discovered, so no path from a request reaches the filesystem. The record carries the host beside
+> the course, and the follower treats a named machine as **rule 0** — above every preference, but
+> only among boards serving the course that was chosen too, because a named host must not let a
+> board that is merely up over there take the address off a lesson somebody is in. `test/hub.js`
+> drives the row and the tap; `test/choice.py` holds the rest. Shell version `board-shell-v66`.
+>
 > **And then the follower was deciding from a file nobody writes to.** With everything above in
 > place the address still would not move: both machines' boards published `chosen: Galois-Theory`,
 > the Mac's own Galois board was up with a tutor listening, and the address served Probability for

@@ -189,3 +189,18 @@ h2 {
 }
 .pushline.ok  { color: #2f7d4f; }
 .pushline.bad { color: var(--accent); overflow-wrap: anywhere; }
+
+/* ------------------------------------------------------------------ hosts */
+/* One row of machines. Small, because it is a qualifier on the list below it
+   rather than a thing to admire -- but always visible, because a course list
+   with no way to say WHERE is the thing that had somebody stuck on one machine
+   for an evening. */
+.hosts { display: flex; flex-wrap: wrap; gap: .5rem; }
+.hosts button {
+  cursor: pointer; font: inherit; font-family: var(--ui); font-size: .8rem;
+  padding: .4rem .8rem; border-radius: .5rem;
+  border: 1px solid var(--rule); background: transparent; color: var(--ink);
+}
+.hosts button .n { display: block; font-size: .7rem; color: var(--ink-3); }
+.hosts button.on { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+.hosts button.off { opacity: .55; }
