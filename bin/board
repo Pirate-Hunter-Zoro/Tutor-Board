@@ -658,6 +658,19 @@ def cmd_write(live, args):
     rest = args[1:] if args[0] in KINDS else args
     title = " ".join(rest)
     body = sys.stdin.read()
+    # The last gate before a card becomes the lesson. A reasoning model that was
+    # given a card to write and handed back its own deliberation first -- "the
+    # student is asking about the Galois correspondence, let me recall..." -- is
+    # a leak with no undo: the card is written, pushed to every device, and
+    # committed to the transcript. The tutor is expected to have caught this on
+    # the wire; this catches the agent that is not ours, and it only strips a
+    # block the card OPENS with, because the body of a lesson is not ours to edit.
+    clean = boardlib.strip_reasoning(body, leading_only=True)
+    if clean.strip():
+        if clean != body:
+            print("board write: dropped a block of model reasoning from the top "
+                  "of this card", file=sys.stderr)
+        body = clean
     name = "%04d-%s.md" % (live.next_index(), slugify(title or kind))
     path = os.path.join(live.cards, name)
     head = "---\nkind: %s\n" % kind

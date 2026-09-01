@@ -25,21 +25,35 @@ import urllib.error
 import urllib.request
 
 TOOL = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, TOOL)
+import boardlib  # noqa: E402  -- after the path insert, which is what finds it
+
 BOARD = os.path.join(TOOL, "bin", "board")
 KEYS = os.path.join(os.path.expanduser("~"), ".config", "api-keys")
 
 # Free providers, tried in order. A provider is enabled by having its key present.
 # OpenRouter's :free tier leads, Groq's free tier is the independent fallback, so
 # a daily cap on one shared pool does not starve the tutor.
+# The last field is what this provider is asked in order NOT to send back the
+# model's thinking. Every model on this chain reasons before it answers, and an
+# endpoint that forwards that reasoning inside `message.content` puts it on the
+# board. Asking is the cheap half of the defence and it is only half: the reply
+# goes through `boardlib.strip_reasoning` regardless, because a free endpoint
+# ignoring a parameter it does not implement is exactly the shape of this bug.
+#
+# A parameter a provider has never heard of is a 400, so `post_json` drops these
+# and retries once bare -- see `chat`.
 PROVIDERS = (
     ("openrouter", "https://openrouter.ai/api/v1/chat/completions", "openrouter_key",
      ("nvidia/nemotron-3-super-120b-a12b:free",
       "minimax/minimax-m3:free",
       "minimax/minimax-m2.7:free",
       "dots-studio/dots-3-note-preview:free",
-      "cohere/north-mini-code:free")),
+      "cohere/north-mini-code:free"),
+     {"reasoning": {"exclude": True}}),
     ("groq", "https://api.groq.com/openai/v1/chat/completions", "groq_key",
-     ("openai/gpt-oss-120b", "openai/gpt-oss-20b")),
+     ("openai/gpt-oss-120b", "openai/gpt-oss-20b"),
+     {"reasoning_format": "hidden"}),
 )
 
 VISION_MODEL = "qwen/qwen2.5-vl-72b-instruct"
@@ -69,25 +83,46 @@ def post_json(url, key, payload, timeout=180):
 
 def chat(messages, max_tokens=2048):
     """One plain completion over the free chain; moves to the next provider on any
-    failure, exactly the fleet's pattern. Raises when every provider failed."""
+    failure, exactly the fleet's pattern. Raises when every provider failed.
+
+    What comes back is the answer with the model's thinking taken out of it. That
+    is not tidying: every model on this chain deliberates first, and a reply whose
+    reasoning was forwarded into `content` becomes a card, and a card is the
+    lesson. A reply that was ALL thinking counts as empty and the chain moves on,
+    which is right -- the next model is a better answer than the last one's
+    private notes.
+    """
     last = "no free provider answered"
-    for name, url, keyfile, models in PROVIDERS:
+    for name, url, keyfile, models, quiet in PROVIDERS:
         key = read_key(keyfile)
         if not key:
             continue
         for model in models:
+            body = {"model": model, "messages": messages,
+                    "max_tokens": max_tokens, "temperature": 0.3}
             try:
-                data = post_json(url, key, {"model": model, "messages": messages,
-                                            "max_tokens": max_tokens,
-                                            "temperature": 0.3})
-            except (urllib.error.HTTPError, urllib.error.URLError, OSError) as exc:
+                data = post_json(url, key, dict(body, **quiet))
+            except urllib.error.HTTPError as exc:
+                if exc.code != 400:
+                    last = "%s/%s: %s" % (name, model, exc)
+                    continue
+                # It does not know the parameter. Ask again without it; the
+                # stripping below is what actually holds the line.
+                try:
+                    data = post_json(url, key, body)
+                except (urllib.error.HTTPError, urllib.error.URLError, OSError) as exc2:
+                    last = "%s/%s: %s" % (name, model, exc2)
+                    continue
+            except (urllib.error.URLError, OSError) as exc:
                 last = "%s/%s: %s" % (name, model, exc)
                 continue
             text = ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "")
-            text = (text or "").strip()
+            said = (text or "").strip()
+            text = boardlib.strip_reasoning(text)
             if text:
                 return text
-            last = "%s/%s returned empty" % (name, model)
+            last = ("%s/%s answered with nothing but its own thinking" % (name, model)
+                    if said else "%s/%s returned empty" % (name, model))
     raise RuntimeError(last)
 
 
@@ -118,7 +153,9 @@ def ocr_image(path):
     except (urllib.error.HTTPError, urllib.error.URLError, OSError) as exc:
         return "(vision failed: %s)" % exc
     text = ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "")
-    return (text or "").strip()
+    # The vision model reasons as well, and this text is handed to the tutor as
+    # the student's own working -- thinking left in it is read as handwriting.
+    return boardlib.strip_reasoning(text)
 
 
 def ocr(path):
@@ -163,28 +200,43 @@ def find_paths(text):
     return out
 
 
+KINDS = ("lesson", "question", "correct", "wrong", "review", "note", "recap")
+
+
+# The front matter, wherever in the reply it starts. Anchoring this at position
+# zero was the second half of a leak worth remembering: a model that put anything
+# at all in front of the opening `---` -- a stripped-out thought, a "here is the
+# card:" -- did not just lose its title, it fell through to the branch that makes
+# the WHOLE reply the body. The card then carried the preamble, and the preamble
+# was the tutor talking to itself.
+#
+# The meta has to name a `kind` or a `title` to count, so a horizontal rule in
+# the middle of a lesson is not mistaken for front matter.
+FRONT_MATTER = re.compile(r"(?:\A|\n)[ \t]*---[ \t]*\n(.*?)\n[ \t]*---[ \t]*(?:\n|\Z)",
+                          re.DOTALL)
+
+
 def card_markdown(text):
     """The model replies with one card. Recover kind, title and body from the
     front-matter shape; fall back to a plain lesson card when it ignored it."""
     kind, title, body = "lesson", "", (text or "").strip()
-    m = re.match(r"\s*---\s*\n(.*?)\n---\s*\n?(.*)", text or "", re.DOTALL)
-    if m:
-        meta, rest = m.group(1), m.group(2).strip()
+    for m in FRONT_MATTER.finditer(text or ""):
+        meta, rest = m.group(1), (text or "")[m.end():].strip()
+        found = False
         for line in meta.splitlines():
             if ":" in line:
                 k, v = line.split(":", 1)
                 k = k.strip().lower()
                 v = v.strip()
-                if k == "kind" and v in ("lesson", "question", "correct", "wrong",
-                                         "review", "note", "recap"):
-                    kind = v
+                if k == "kind" and v in KINDS:
+                    kind, found = v, True
                 elif k == "title":
-                    title = v
-        body = rest
+                    title, found = v, True
+        if found:
+            body = rest
+            break
     return kind, title, body
 
-
-KINDS = ("lesson", "question", "correct", "wrong", "review", "note", "recap")
 
 # A reply that plans the card rather than being the card opens with a lead-in and
 # then says what the card "should" do. These markers catch that failure mode.
@@ -286,7 +338,18 @@ def load_brief(root):
     path = os.path.join(root, "live", ".brief")
     try:
         if os.path.getmtime(path) >= newest_mtime(brief_sources(root)):
-            return read(path)
+            cached = read(path)
+            # A brief written before this file learned to strip thinking is a
+            # cache that goes on poisoning every turn until one of its sources
+            # happens to change, which could be weeks. Repair it in place.
+            clean = boardlib.strip_reasoning(cached)
+            if clean != cached:
+                try:
+                    with open(path, "w", encoding="utf-8") as fh:
+                        fh.write(clean)
+                except OSError:
+                    pass
+            return clean
     except OSError:
         pass
     brief = build_brief(root)

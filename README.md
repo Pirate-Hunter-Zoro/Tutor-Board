@@ -45,6 +45,28 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 31 August 2026
 >
+> **The tutor's own thinking was on the board, and it was the whole card.** Reported from a Galois
+> sitting on the Mac mini: a turn came back as the model's private deliberation rather than a lesson.
+> The Mac is the one machine that can produce it — it holds the address, so when its allowance runs
+> out and no compute node takes the lesson over within `takeover_grace`, it falls back to `free`, and
+> every model on that free chain reasons before it answers. `bin/free` took `message.content` and used
+> it whole. Two gates now: the chain is asked not to send reasoning at all (OpenRouter's exclude,
+> Groq's hidden format, dropped and retried bare on a 400), and every reply goes through
+> `boardlib.strip_reasoning` regardless, because a free endpoint ignoring a parameter it does not
+> implement is the exact shape of this bug. `board write` strips again on the way in — only a block
+> the card *opens* with, since a lesson about reasoning models may say the word in earnest — so an
+> agent this repository has never heard of is covered too.
+>
+> **The second half is the one worth reading.** The thought was not merely *in front of* the card, it
+> *was* the card, and that was a separate defect: `card_markdown`'s front-matter regex was anchored at
+> position zero, so a reply with anything before the opening `---` missed the parse entirely and fell
+> through to the branch that makes the whole reply the body. **The pattern this repository keeps
+> relearning, in a new coat: a fallback whose failure mode is wider than the case it was written for.**
+> A missing title was what that branch was for; an entire leaked monologue is what it delivered.
+> The OCR reply and the cached `live/.brief` go through the same strip — the brief because a poisoned
+> cache outlives the turn that wrote it and would have gone on feeding thinking to every later turn
+> until a source file happened to change. `test/reasoning.py`.
+>
 > **A finished homework sheet can now be compiled by the tutor that wrote it**, which
 > it could not be on the machine that mattered. Reported from the board at the end of a
 > sitting: six problems written up, agreed and pushed, and a `.tex` nobody holding an iPad
@@ -358,6 +380,8 @@ these tests fail, the test is right.
 | Annotation ink was faceted and jagged next to the slate's: the layer joined raw pointer samples with straight lines, redrew every stroke inside the pointer handler, and never asked for the samples the Pencil actually took | `test/link.js` |
 | A `begin` signal sent while no tutor was attached was invisible for ever: `board wait` took the unread count at start as a baseline and returned only when it grew, so the first tap did nothing and the second one woke it | `test/begin.py` |
 | A resumed turn was told to re-read the contract, the method, the handoff and every card — about fourteen thousand tokens it was already carrying, plus a round trip per card | `test/tokens.py` |
+| The tutor's own thinking was written onto the board as the lesson: the free chain's models reason in the first person about the student, and the reply was taken from `message.content` and used whole | `test/reasoning.py`, and `boardlib.strip_reasoning` on the wire and again at `board write` |
+| And it was the whole card rather than a preamble to it, because the front-matter parser was anchored at position zero — anything in front of the opening `---` sent the reply down the branch that makes the entire text the body | `test/reasoning.py` |
 | The "is a tutor attached" dot could never go green outside headless: only the daemon ever wrote `agent.json`, and a heartbeat is the wrong test for a session that is idle whenever its person is thinking | `test/agents.py`, `test/begin.py` |
 | Pressing Send did nothing: with marks anywhere on the lesson the handler raised the *Send what?* chooser and issued no request, so an evening's working sat unsent for two days. Every existing assertion about Send checked that the button was in the right column and had not scrolled off the edge; none pressed it. The old chooser test called `askWhatToSend` directly and asserted the deferral, so the suite endorsed the bug | `test/interactive.js` presses the real button and watches the wire; `test/link.js` |
 | Sending re-delivered every mark on the board, and marks autosaved in a previous sitting counted as "there are marks" for ever — because the only thing tracked was whether ink had reached *disk*, which the autosave clears about a second after the pen lifts | `sent` in `live/annotations/<card>.json`, `notes_sent` on the payload, `test/annotate.py`, `test/link.js` |

@@ -12,6 +12,7 @@ Standard library only, like everything else.
 import glob
 import json
 import os
+import re
 import shutil
 import time
 
@@ -741,6 +742,109 @@ def clear_limited():
         return True
     except OSError:
         return False
+
+
+# ---------------------------------------------------------------------------
+# What a model thought, and what it said
+# ---------------------------------------------------------------------------
+# A reasoning model answers in two registers. There is the answer, and there is
+# the working it did to reach the answer -- "the user is asking about Galois
+# correspondence, let me first recall...", several hundred words of it, in the
+# first person, addressed to nobody. Providers are supposed to keep the second
+# out of `message.content` and hand it back separately. Many do not: some wrap it
+# in `<think>` tags inside the content, some emit the OpenAI harmony channel
+# markers, and some free endpoints simply forward whatever the model produced.
+#
+# On a board that is the worst possible leak, because the card IS the lesson.
+# A student reading a tutor's private deliberation about them is not reading a
+# lesson at all, and there is no undo: the card is written to disk, pushed to
+# every device, and committed to the transcript.
+#
+# So the rule is that nothing anywhere trusts a model to have kept its thinking
+# to itself. This is the one place that knows what thinking looks like; the
+# tutor strips it as it comes off the wire, and `board write` strips it again on
+# the way in, because the second gate catches an agent this repository has never
+# heard of.
+REASONING_TAGS = ("think", "thinking", "thought", "thoughts", "reason",
+                  "reasoning", "reflection", "scratchpad", "analysis",
+                  "internal", "monologue")
+
+_TAGS = "|".join(REASONING_TAGS)
+
+# A whole block, opened and closed. The backreference matters: `<think>...</see>`
+# is not a reasoning block and must not swallow the card behind it.
+_PAIRED = re.compile(r"<\s*(%s)\b[^>]*>.*?<\s*/\s*\1\s*>" % _TAGS,
+                     re.DOTALL | re.IGNORECASE)
+# An opening tag with no close: the thinking ran into the token ceiling and there
+# is no answer after it, so everything from the tag on is thought.
+_UNCLOSED = re.compile(r"<\s*(?:%s)\b[^>]*>.*\Z" % _TAGS, re.DOTALL | re.IGNORECASE)
+# A close with no open, which is what a provider that strips the opening tag and
+# nothing else leaves behind. Everything before it was the thinking.
+_ORPHAN_CLOSE = re.compile(r"^.*<\s*/\s*(?:%s)\s*>" % _TAGS, re.DOTALL | re.IGNORECASE)
+# The bracket form, for the models that write markers rather than tags.
+_BRACKETED = re.compile(r"\[\s*(%s)\s*\].*?\[\s*/\s*\1\s*\]" % _TAGS,
+                        re.DOTALL | re.IGNORECASE)
+
+# OpenAI's harmony format, which gpt-oss speaks: the reply is a sequence of
+# channels and only the `final` one is for the reader.
+_HARMONY_FINAL = re.compile(r"<\|channel\|>\s*final\s*<\|message\|>", re.IGNORECASE)
+_HARMONY_OTHER = re.compile(
+    r"<\|channel\|>\s*(?:analysis|commentary|critic)[^<]*<\|message\|>"
+    r".*?(?=<\|(?:start|end|return|channel)\|>|\Z)", re.DOTALL | re.IGNORECASE)
+_HARMONY_TOKEN = re.compile(r"<\|[a-z_]+\|>", re.IGNORECASE)
+
+
+def _starts_with_reasoning(text):
+    """Does this reply OPEN with thinking? Cheap, and the only question the
+    second gate is allowed to ask -- a card about reasoning models may say the
+    word `<think>` in the middle of a sentence, and a lesson is not ours to edit."""
+    head = (text or "").lstrip()
+    if not head:
+        return False
+    for rx in (_PAIRED, _UNCLOSED, _BRACKETED):
+        m = rx.match(head)
+        if m:
+            return True
+    return bool(_HARMONY_FINAL.match(head) or _HARMONY_OTHER.match(head)
+                or head.startswith("<|"))
+
+
+def strip_reasoning(text, leading_only=False):
+    """The answer, with the model's private working taken out of it.
+
+    `leading_only` strips a block the reply OPENS with and leaves the rest of the
+    text exactly as written. That is the right setting anywhere the text might be
+    a lesson somebody wrote on purpose; the wire is the place for the thorough
+    pass.
+
+    Returns "" when the reply was nothing but thinking, which is a real outcome
+    -- the model spent its whole budget deliberating -- and the caller's job is
+    to retry rather than to write an empty card.
+    """
+    t = text or ""
+    if not t.strip():
+        return ""
+    if leading_only and not _starts_with_reasoning(t):
+        return t
+
+    if _HARMONY_FINAL.search(t):
+        t = t[_HARMONY_FINAL.search(t).end():]
+        for stop in ("<|return|>", "<|end|>"):
+            if stop in t:
+                t = t.split(stop)[0]
+    else:
+        t = _HARMONY_OTHER.sub("", t)
+    t = _HARMONY_TOKEN.sub("", t)
+
+    t = _PAIRED.sub("", t)
+    t = _BRACKETED.sub("", t)
+    # Order matters: an orphan close is only orphaned once the paired blocks are
+    # gone, and an unclosed open is only unclosed once we have looked for a close
+    # after it.
+    if _ORPHAN_CLOSE.search(t):
+        t = _ORPHAN_CLOSE.sub("", t, count=1)
+    t = _UNCLOSED.sub("", t)
+    return t.strip()
 
 
 def tailscale_cli():

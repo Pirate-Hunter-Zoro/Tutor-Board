@@ -75,6 +75,17 @@ preferred".
   matching the course being looked for — a port is derived from a name and derivation is not proof.
 - **Cards are append-only files.** The assistant writes `live/cards/NNNN-slug.md` and never edits
   a card the student has already read, except to fix a genuine error — the board is a transcript.
+- **A card carries what the tutor SAID, never what it thought.** Every model worth teaching with
+  reasons before it answers, and the reasoning is written in the first person about the student —
+  "they are confusing the fixed field with the subgroup, so I should probably". Providers are meant
+  to keep that out of the content they return; several of the free ones do not. A card is the
+  lesson, is pushed to every device the moment it is written, and is committed to the transcript, so
+  there is no undo — which is why nothing here trusts a model to have kept its thinking to itself.
+  `boardlib.strip_reasoning` is the one place that knows what thinking looks like: the tutor strips
+  as it comes off the wire, and `board write` strips again on the way in, so an agent this
+  repository has never heard of is covered as well. The second gate takes only a block the card
+  *opens* with — a lesson may be *about* reasoning models and say the word in earnest, and the body
+  of a lesson is not ours to edit. `test/reasoning.py`.
 - **The macro vocabulary is shared.** `web/macros.js` mirrors each course's
   `latex/coursemacros.sty`. A command that works on the board must work in the `.tex` file, and
   the reverse. When a course adds a macro, add it here too and add a formula using it to
