@@ -491,6 +491,26 @@ check("a board listens on the tailnet as well as loopback, or the other machine 
       "can never see it and the address can only ever point at home",
       "boardlib.tailnet_addresses()" in serve_src
       and "second.serve_forever" in serve_src)
+# The half that was missed the first time, and missing it made the rest useless.
+#
+# The follower found the other machine's BOARD through the peer walk and then
+# asked the CONFIGURED hostname what had been chosen -- so a tap on the far
+# machine was recorded, published in its `/health`, correct in every way, and
+# invisible. The address stayed where it was while both machines said plainly
+# that somebody had asked for the other course. Reproduced by hand: `chosen` read
+# `Galois-Theory` on both sides for a full minute while the address served
+# Probability.
+check("the choice is read from whoever answers, not from a configured hostname",
+      "hosts += [h for h in boardlib.tailnet_peers() if h != node]" in follow_src)
+check("and one probe implementation for both machines, so the machine that needs "
+      "the SOCKS proxy is not the one asking without it",
+      "return boardlib.board_health(host, port, timeout=timeout)" in follow_src)
+check("the walk is bounded, because a tick that takes a minute is a tick that "
+      "never finishes before the next one starts",
+      "for c in cands[:4]:" in follow_src and "_ASKED[0] = host" in follow_src)
+check("and phones are not knocked on at all",
+      '"ios", "android"' in open(os.path.join(ROOT, "boardlib.py"), encoding="utf-8").read())
+
 check("a board publishes whether it has a tutor at all",
       '"tutor": agent.get("state") or None' in serve_src)
 check("and the follower prefers a board with one over an empty room",

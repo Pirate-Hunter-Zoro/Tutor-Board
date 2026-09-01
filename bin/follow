@@ -160,15 +160,13 @@ def probe(host, port, timeout=2.0):
     things this proxy has to decide are in it: which course this board is (`dir`),
     and which course the person actually asked for (`chosen`).
     """
-    try:
-        with urllib.request.urlopen("http://%s:%d/health" % (host, port),
-                                    timeout=timeout) as resp:
-            if resp.status != 200:
-                return None
-            doc = json.loads(resp.read(4096).decode("utf-8", "replace"))
-            return doc if isinstance(doc, dict) and doc.get("ok") else None
-    except (OSError, urllib.error.URLError, ValueError):
-        return None
+    # One implementation, in boardlib, because there are two ways to ask and
+    # which one works depends on the machine: an ordinary socket where tailscale
+    # has a real interface, and the SOCKS proxy on a machine running tailscaled
+    # in userspace mode, which cannot open a tailnet connection any other way.
+    # This file used to do it the first way only, so on such a machine every
+    # question about the other side answered "nobody is there".
+    return boardlib.board_health(host, port, timeout=timeout)
 
 
 def identifies_as(health, name):
@@ -232,6 +230,11 @@ def find_course(node, c, timeout=2.0):
     return None
 
 
+# The machine that last answered "what was chosen". Tried first next time, so a
+# tick costs one request rather than a walk.
+_ASKED = [None]
+
+
 def node_choice(node, cands):
     """What the compute node says a PERSON chose over there, or None.
 
@@ -246,11 +249,26 @@ def node_choice(node, cands):
     as ancient, which is the right way round: this machine's own record wins by
     default and nothing gets dragged off a lesson by a stale name.
     """
-    if not node:
-        return None
-    for c in cands:
-        health = probe(node, default_port(c["root"]))
-        if health:
+    hosts = [node] if node else []
+    # And every machine that is actually up, for the same reason `remote_target`
+    # asks them: `node` is a hostname out of a config file and a compute node's
+    # hostname is an allocation. This is the half that was missed the first time,
+    # and missing it is worse than useless -- the follower found the other
+    # machine's BOARD through the peer walk and then never asked it what had been
+    # chosen, so a tap over there was published, correct, and invisible. The
+    # address stayed where it was while `/health` on both machines said plainly
+    # that somebody had asked for the other course.
+    hosts += [h for h in boardlib.tailnet_peers() if h != node]
+    # Bounded on purpose: every course tried against every machine is a timeout
+    # each when nobody is home, and this runs on a tick. One board is enough --
+    # they all publish the same record -- so try a few courses per machine and
+    # move on. `_ASKED` remembers whoever answered last, and asks them first.
+    for host in ([_ASKED[0]] if _ASKED[0] in hosts else []) + hosts:
+        for c in cands[:4]:
+            health = probe(host, default_port(c["root"]), timeout=1.0)
+            if not health:
+                continue
+            _ASKED[0] = host
             ch = health.get("chosen") or {}
             return ch if ch.get("dir") else None
     return None

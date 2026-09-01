@@ -569,6 +569,11 @@ def tailnet_peers(status=None):
     for peer in (st.get("Peer") or {}).values():
         if not peer.get("Online"):
             continue
+        # A phone is not a machine that runs boards, and knocking on one costs a
+        # timeout per port: three iPads on this tailnet turned a follower tick
+        # into a minute of waiting. Ask the ones that could plausibly answer.
+        if (peer.get("OS") or "").lower() in ("ios", "android", "tvos", "watchos"):
+            continue
         name = (peer.get("DNSName") or "").rstrip(".")
         if not name:
             ips = peer.get("TailscaleIPs") or []

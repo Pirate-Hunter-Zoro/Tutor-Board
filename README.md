@@ -46,6 +46,16 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 1 September 2026
 >
+> **And the half that made the rest of it useless.** With both walls down the follower found the
+> other machine's *board* through the peer walk — and then asked the **configured hostname** what
+> had been chosen, because that is a different function and I had only fixed one of them. So a tap
+> on the far machine was recorded, published in its `/health`, correct in every way, and
+> invisible: the address stayed put while both machines said plainly that somebody had asked for
+> the other course. Reproduced by driving the real `/switch` and watching for thirty seconds. The
+> choice is now read from whoever answers, the walk is bounded (four courses a machine, the last
+> one that answered asked first, phones skipped entirely — three iPads on this tailnet would have
+> made a tick take a minute), and both machines probe through one implementation instead of two.
+>
 > **And reaching, which is the same wall from the other side.** A machine in userspace mode cannot
 > open a tailnet connection either: from the compute node, the address does not resolve and the
 > Mac's IP has no route — both measured. The launcher has always started tailscaled with
