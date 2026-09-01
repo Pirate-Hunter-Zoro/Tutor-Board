@@ -144,7 +144,7 @@ def active_course(cands):
     best = None
     rec = boardlib.chosen_course()
     for c in cands:
-        if c["root"] == rec.get("root") or c["dir"] == rec.get("dir"):
+        if boardlib.same_dir(c["root"], rec.get("root")) or c["dir"] == rec.get("dir"):
             best = (rec.get("at") or 0, c)
     for c in cands:
         when = last_used(c["root"])

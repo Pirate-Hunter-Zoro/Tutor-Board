@@ -1516,7 +1516,7 @@ def chosen_course(cfg):
     if not rec:
         return None
     for c in courses(cfg):
-        if c["root"] == rec.get("root") or c["dir"] == rec.get("dir"):
+        if boardlib.same_dir(c["root"], rec.get("root")) or c["dir"] == rec.get("dir"):
             return (rec.get("at") or 0, c)
     return None                   # named once, since deleted or renamed
 

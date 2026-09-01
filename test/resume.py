@@ -591,6 +591,36 @@ src_t = open(os.path.join(ROOT, "bin", "tutor"), encoding="utf-8").read()
 check("a restart skips a record with no pid rather than dying on it",
       "if not was:" in src_t and '"%s (no pid in its record)"' in src_t)
 
+# One command to put a machine right.
+#
+# The Mac mini cannot be reached from the compute node's session, so every fix
+# shipped from over there sits on its disk until something restarts the processes
+# holding the old code -- three kinds of process and two kinds of repository, and
+# remembering that list is not somebody's job.
+script = os.path.join(ROOT, "scripts", "catch-up.sh")
+check("there is a script that catches a machine up in one command",
+      os.path.isfile(script))
+src_c = open(script, encoding="utf-8").read()
+check("it pulls the tool first and re-runs itself on what arrived, since "
+      "everything below it reads this repository",
+      "git -C \"$HERE\" pull --ff-only" in src_c and "exec bash" in src_c)
+check("it never treats the tool as a course, whatever the path is spelled like "
+      "-- this one holds an AI_INSTRUCTIONS.md like every course does",
+      'pwd -P' in src_c and "continue" in src_c)
+check("a course whose history diverged is TAGGED before it is reset, so nothing "
+      "is destroyed that was not already pushed",
+      'tag -f "$tag"' in src_c and 'reset --hard "origin/$branch"' in src_c)
+check("and only the board's own scratch is cleaned, never a person's untracked "
+      "work elsewhere in a course",
+      "clean -fdq -- live" in src_c)
+check("it restarts the boards, the tutors and the follower",
+      'restart --tutors' in src_c)
+check("and then says what is actually true: what is running, how to reach each "
+      "board directly, and what the hub will offer",
+      "/hosts.json" in src_c and "how to reach each of them" in src_c)
+check("with a --report mode that changes nothing",
+      "--report) REPORT=1" in src_c)
+
 print("%d FAILURES" % len(fails) if fails
       else "a new node takes the board over, and leaves a live one alone")
 sys.exit(1 if fails else 0)

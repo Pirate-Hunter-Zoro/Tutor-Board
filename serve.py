@@ -1230,7 +1230,9 @@ def sibling_courses(repo):
         cfg = read_config(root)
         entry = {
             "repo": name,
-            "current": os.path.abspath(root) == repo.root,
+            # By the directory it is, not by the name this caller spells it
+            # with: the same home is reachable under two paths here.
+            "current": boardlib.same_dir(root, repo.root),
             "course": cfg["name"],
             "mode": cfg["mode"],
             "chapter": "",

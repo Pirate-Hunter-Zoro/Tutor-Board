@@ -46,6 +46,30 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 1 September 2026
 >
+> **One command on the Mac.** `bash scripts/catch-up.sh` pulls the tool and re-runs itself on what
+> arrived, brings every course repository up to what was pushed, restarts the boards, the tutors
+> and the follower, and then *says what is actually true*: what is running, the direct tailnet URL
+> for each board, and what the hub will offer on both machines. `--tidy` also stops boards for
+> courses with nothing in them; `--report` changes nothing and just tells you where everything is.
+> It is machine-agnostic — run it on either host.
+>
+> Two things it is careful about, both learned the hard way in the writing of it. It never treats
+> the tool as a course: this repository holds an `AI_INSTRUCTIONS.md` like every course does, so
+> the obvious test would have reset it over the top of whatever was being worked on. And a course
+> whose history has diverged is **tagged** before it is reset, so nothing that was not already
+> pushed is destroyed — `git reset --hard <tag>` is the way back — while `git clean` is restricted
+> to `live/`, because a course may hold untracked work of the person's and this is not the command
+> that gets to decide about that.
+>
+> **And a path-aliasing bug it turned up on the way.** This home is reachable as both
+> `/home/<user>/…` and `/mnt/dell_storage/homefolders/<user>/…`, and a board records the path it
+> was started with. `board_is_running` compared those as strings, so a command arriving by the
+> other spelling concluded the board was not running: the hub showed every course idle while one
+> was answering on its port, and `board start` would happily have begun a second board for a
+> course that already had one. Compared by `realpath` now, in `boardlib.same_dir`, and used
+> everywhere a root is matched — the hub's *current* flag and both launchers' "you were working
+> here" included.
+>
 > **The machine is now a choice, and it is yours.** Asked for in these words: *"I want to be able
 > to control this at all times on the iPad - whatever hosts are available"*. The hub has a
 > **Where** row listing every machine on the tailnet that is running a board, with how many
@@ -573,6 +597,7 @@ repository and it carries the invariants that were learned the hard way. Then:
 ```
 board doctor          # is this machine equipped
 tutor where           # what is running, and where
+bash scripts/catch-up.sh   # put this machine right, and say what is true
 bash test/all.sh      # every suite; fetches jsdom itself the first time
 ```
 

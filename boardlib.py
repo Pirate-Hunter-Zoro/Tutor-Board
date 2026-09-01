@@ -161,12 +161,33 @@ def slurm_nodes():
         return None
 
 
+def same_dir(a, b):
+    """Are these two paths the same directory, whatever they are spelled like?
+
+    They are, far more often than anything here assumed. This home directory is
+    reachable as both `/home/<user>/…` and `/mnt/dell_storage/homefolders/<user>/…`,
+    and which one you get depends on how you arrived: a board records the path it
+    was started with, and a command run from the other spelling then compares
+    strings, finds no match, and concludes the board is not running. The hub
+    showed every course as idle while one was answering on its port, and
+    `board start` would happily have begun a second board for a course that
+    already had one.
+    """
+    if not a or not b:
+        return False
+    try:
+        return os.path.realpath(a) == os.path.realpath(b)
+    except OSError:
+        return os.path.abspath(a) == os.path.abspath(b)
+
+
 def board_is_running(pid, root):
     """Is this pid genuinely our board for this repository?
 
     A pid alone proves nothing: it may have been recycled, and on a shared
     filesystem the record may have been written by a different machine
-    altogether. Check that the process is actually serving this directory.
+    altogether. Check that the process is actually serving this directory --
+    by the directory it IS, not by the name this caller happens to use for it.
     """
     if not pid:
         return False
@@ -177,7 +198,13 @@ def board_is_running(pid, root):
     args = _cmdline(pid)
     if args is None:
         return True          # cannot tell; the pid is alive, so believe it
-    return "serve.py" in args and os.path.abspath(root) in args
+    if "serve.py" not in args:
+        return False
+    parts = args.split()
+    for n, word in enumerate(parts):
+        if word == "--root" and n + 1 < len(parts):
+            return same_dir(parts[n + 1], root)
+    return os.path.abspath(root) in args
 
 
 def pid_alive(pid, needle=None):
