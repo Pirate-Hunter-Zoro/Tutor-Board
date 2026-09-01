@@ -81,7 +81,7 @@ def post_json(url, key, payload, timeout=180):
         return json.loads(resp.read().decode("utf-8", "replace"))
 
 
-def chat(messages, max_tokens=2048):
+def chat(messages, max_tokens=2048, reject=None):
     """One plain completion over the free chain; moves to the next provider on any
     failure, exactly the fleet's pattern. Raises when every provider failed.
 
@@ -91,6 +91,12 @@ def chat(messages, max_tokens=2048):
     lesson. A reply that was ALL thinking counts as empty and the chain moves on,
     which is right -- the next model is a better answer than the last one's
     private notes.
+
+    `reject` is the same idea for thinking that carries no tag at all, which no
+    strip can remove because there is nothing in it to remove. The caller says
+    what an unusable reply looks like for ITS purpose -- a card is written to the
+    student, a handoff is written about them, so this cannot be one rule here --
+    and a model that hands back deliberation is passed over for the next one.
     """
     last = "no free provider answered"
     for name, url, keyfile, models, quiet in PROVIDERS:
@@ -119,6 +125,9 @@ def chat(messages, max_tokens=2048):
             text = ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "")
             said = (text or "").strip()
             text = boardlib.strip_reasoning(text)
+            if text and reject and reject(text):
+                last = "%s/%s deliberated instead of answering" % (name, model)
+                continue
             if text:
                 return text
             last = ("%s/%s answered with nothing but its own thinking" % (name, model)
@@ -424,17 +433,33 @@ def main(argv):
         "order 3.\n\n"
         "Which of the three intermediate fields is $\\Fix(H)$, and why can it not be "
         "$\\QQ(\\sqrt[3]{2})$?\n\n"
+        "Write the card and nothing else. Do not think out loud, do not narrate what you "
+        "are about to do, and do not talk ABOUT the student -- the card is addressed TO "
+        "them. If you need to work something out, do it silently.\n\n"
         "Teach only what this step needs, then pose at most ONE question and stop. A wrong "
         "answer gets its break located, not repaired; never re-explain what they already "
         "got right.\n\n"
         + (("The session brief (your compact guide):\n\n%s" % brief) if brief else "")
     )
 
+    def unusable(reply):
+        """A reply is no good as a card if it is the model thinking out loud.
+
+        Checked on the whole reply rather than on the parsed body, because the
+        shape this catches has no front matter at all -- `card_markdown` then
+        hands the entire monologue back as the body, which is precisely how one
+        reached the board on 1 September 2026.
+        """
+        kind_, title_, body_ = parse_card(reply)
+        return (not body_.strip()) or looks_meta(body_) \
+            or boardlib.reads_as_reasoning(body_)
+
     kind, title, body = "lesson", "", ""
     for attempt in range(2):
         try:
             reply = chat([{"role": "system", "content": system},
-                          {"role": "user", "content": user}], max_tokens=800)
+                          {"role": "user", "content": user}], max_tokens=800,
+                         reject=unusable)
         except RuntimeError as exc:
             if attempt:
                 sys.stderr.write("free tutor: %s\n" % exc)
@@ -442,15 +467,28 @@ def main(argv):
             sys.stderr.write("free tutor: %s (retrying)\n" % exc)
             continue
         kind, title, body = parse_card(reply)
-        if body and not looks_meta(body):
+        if not unusable(reply):
             break
-        sys.stderr.write("free tutor: got a plan instead of a card; correcting\n")
+        sys.stderr.write("free tutor: got thinking or a plan instead of a card; "
+                         "correcting\n")
         user += ("\n\n(Your previous reply was not the card itself. Output ONLY the card "
                  "again, as markdown front matter plus body, with the body being the actual "
-                 "teaching prose — state the mathematics directly.)")
+                 "teaching prose — state the mathematics directly, addressed to the student. "
+                 "Do not narrate what you are doing or reason out loud.)")
 
     if not body:
         sys.stderr.write("free tutor produced an empty card\n")
+        return 1
+    # And if it is STILL deliberation after the correction, write nothing.
+    #
+    # The old shape of this loop tried twice and then wrote whatever it had,
+    # which on 1 September put eight hundred tokens of "Hmm, wait. Let me
+    # re-read the question" on the board as the lesson, cut off mid-sentence.
+    # A turn that produces no card is a turn somebody waits through; a monologue
+    # that becomes a card is the lesson, and there is no undo.
+    if looks_meta(body) or boardlib.reads_as_reasoning(body):
+        sys.stderr.write("free tutor: every model on the chain deliberated instead of "
+                         "writing a card; nothing written\n")
         return 1
     args = [sys.executable, BOARD, "write", kind] + ([title] if title else [])
     p = subprocess.run(args, cwd=root, input=body.encode("utf-8"),

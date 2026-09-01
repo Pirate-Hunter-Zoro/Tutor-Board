@@ -105,6 +105,19 @@ preferred".
   repository has never heard of is covered as well. The second gate takes only a block the card
   *opens* with — a lesson may be *about* reasoning models and say the word in earnest, and the body
   of a lesson is not ours to edit. `test/reasoning.py`.
+- **And thinking with no tag on it is REFUSED, not stripped.** On 1 September 2026 the same course
+  got a card that was eight hundred tokens of *"I need to read the student's response… Hmm, wait.
+  Let me re-read"*, cut off mid-sentence, with no tag, channel or bracket anywhere in it. There is
+  nothing in that to strip: the whole reply is the thought. `boardlib.reads_as_reasoning` asks a
+  different question — is this addressed **to** the student or **about** them — and the answer is
+  acted on by refusing: the free chain passes over a model that deliberates and tries the next one,
+  `board write` writes nothing and says why (`--force` for somebody who means it), and the readers
+  (the board, `board recap`, the export) put a one-line notice in place of a card that reached disk
+  some other way, because the brief tells an interactive tutor to write the file itself and that
+  door has no gate on it. **A card that never appears is a wait; a monologue that appears is the
+  lesson.** The discriminator is that a card always has somebody it is talking to — keep it, or a
+  lesson *about* reasoning models will be refused. Calibrated against every card in every course on
+  the machine: one leak caught, no lesson touched. `test/reasoning.py`.
 - **The macro vocabulary is shared.** `web/macros.js` mirrors each course's
   `latex/coursemacros.sty`. A command that works on the board must work in the `.tex` file, and
   the reverse. When a course adds a macro, add it here too and add a formula using it to

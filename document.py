@@ -331,6 +331,9 @@ def read_cards(folder):
         except OSError:
             continue
         meta, text = front_matter(raw)
+        # The same gate the board reads through: a document is not the place to
+        # preserve a model's private working either.
+        text = boardlib.card_body(text)
         out.append({"id": CARD_RE.match(n).group(1),
                     "kind": (meta.get("kind") or "lesson").lower(),
                     "title": meta.get("title", ""),

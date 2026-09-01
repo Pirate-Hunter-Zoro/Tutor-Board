@@ -46,6 +46,36 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 1 September 2026
 >
+> **The tutor's thinking reached the board again, and this time there was nothing to strip.**
+> Reported from the same Galois sitting five days after the first one: a card that was eight
+> hundred tokens of *"I need to read the student's response... Hmm, wait. Let me re-read the
+> question... Actually, I think"*, cut off mid-sentence at the token ceiling. No `<think>`, no
+> harmony channel, no brackets — a model deliberating in plain prose in `content`. Every
+> tag-shaped gate in `boardlib` looked straight through it, `bin/free` tried twice, got the same
+> shape twice, and then wrote whatever it had.
+>
+> So the second question is asked of **voice** rather than syntax: is this text addressed *to* the
+> student, or *about* them? A card speaks to somebody — "take $G = S_4$", "tell me which is
+> which". Deliberation talks about the student in the third person, argues with itself, and
+> addresses nobody at all. `boardlib.reads_as_reasoning` is that test, and what everything does
+> with it is **refuse**, because there is nothing to remove when the whole reply is the thought:
+> the free chain passes over a model that deliberates and tries the next one, `board write` writes
+> nothing and says why, and the readers — the board, the recap the tutor reads its own lesson back
+> through, and the export — put one line in place of a card that reached disk some other way. **A
+> card that never appears is a wait; a monologue that appears is the lesson.**
+>
+> **The part worth keeping when you change it:** the discriminator is that a card has somebody it
+> is talking to. Without it, a lesson *about* how reasoning models work — which will say "the
+> student", and "wait", and "actually" — gets refused, and refusing a real card mid-lesson is its
+> own kind of damage. It is calibrated against every card in every course on this machine —
+> eighty-nine of them, the leak caught, none of the rest touched — and `test/reasoning.py` carries
+> the real card and four real lessons as fixtures.
+>
+> **And the third gate is new for a reason:** `board write` was never the only door. The session
+> brief tells an interactive tutor to write its card into `live/cards/` itself, so an agent with
+> file tools bypasses both writing gates entirely. That one is closed at the reading end, where it
+> cannot be bypassed by whoever wrote the file.
+>
 > **And the lesson can now leave the board as a document.** Asked for in the same sitting: the
 > whole tutor-and-student conversation as one PDF to show a professor, tracked in git, and
 > numbered rather than stamped with the time -- "that'll be an eyesore". `board export`, and **⋯ →
@@ -544,6 +574,7 @@ these tests fail, the test is right.
 | And then that fix was defeated by its own ordering, which cost the whole sitting rather than one mapping. `settled()` — the call whose entire job is to say *the page count can be believed now* — ran as the FIRST statement of the `/slate/state` handler, before the saved pages were adopted. So the board was told to believe a count of one, judged the question it was on to be recorded past the end, cut a fresh page for it, and by cutting it pushed the length to two. The adoption guard was `pages.length === 1`. It no longer held, so an evening on disk was refused in silence: every past board a blank photograph, and the next stroke saved a blank sheet over a real page under its new number. **The pattern, in a new coat: a guard written against the only thing that could break it at the time it was written** | the board is told last, once the pages are actually in; adoption asks whether any page has INK rather than how many sheets there are, so nothing blank can refuse a sitting; and the mapping is repaired from the page each answer records having been sent from, which is the one authority a browser cannot rot; `test/adopt.js` |
 | Only one board per question ever existed, so within an exercise the earlier attempts did not persist: you write, hand it in, the tutor replies, and the board that "appeared" under the reply was the same board slid down the run. Reported as "the previous board for this same question that I have not yet completed doesn't persist... I want ALL boards to persist and to operate independently of each other" | a question is a chain, one board per attempt: frozen where it was written as soon as what it holds has been handed in AND the tutor has answered since — both halves, or Send forks the page under your hand and a second hint cuts a board about nothing — and the next attempt opens on a COPY, which is the only way the working carries forward and the two are still independent; `test/chain.js` |
 | `board export` wrote the tutor's cards and nothing else, named with the second it happened, into `live/export/` -- which a course's `.gitignore` throws away. Half a conversation, unfindable, unkept. Asked for instead: the whole thing as one PDF to show a professor | `document.py` interleaves every card and every page handed in, in the board's own reading order and labelled by attempt; it lands in `transcripts/<lesson>-vN.pdf`, is staged in git, and `--all` makes one document of the whole course; `test/document.py` |
+| A card arrived that was the model thinking out loud, with no tag anywhere in it -- the whole reply was the thought, so every strip in `boardlib` passed it through and `bin/free` wrote it after two attempts came back the same way. Eight hundred tokens of deliberation, cut off mid-sentence, as the lesson | `reads_as_reasoning` judges voice rather than syntax -- a card is addressed to somebody, deliberation is about them -- and every caller refuses rather than edits: the chain tries the next model, `board write` writes nothing, and the board, the recap and the export show a notice in place of a card that got to disk another way; `test/reasoning.py` |
 | A skipped homework problem was dropped. One sentence told the tutor what a skip meant — "do not re-ask it, carry on" — which is right for a concept check and expensive for an assigned problem, where a skip is a lost mark and the student means *not now* | `skip_sense` reads the sitting: in homework the skip defers and names what is still owed, off the document rather than off anyone's memory; `homework.outstanding`, `board hw`, `test/begin.py`, `test/homework.py` |
 | A written answer was shown twice: a frozen picture of the ink under the question, and the board carrying the same ink under the feedback — one of them dead, and the dead one was the one you met first scrolling back up. The freezing was right when the slate was ONE surface that got written over, because then the picture was the only copy of what had been handed in; it stopped being right when every question got a page that is never wiped | the board is the answer; the turn keeps its heading and one line pointing at it, and the picture returns wherever there is no board — a filed lesson, a past one, a browser that never held the page; `test/feedback.js`, `test/interactive.js` |
 | Getting an exercise RIGHT deleted every writing board in the lesson. The boards were painted only while an answer was *owed*, and a `correct` card owes nothing — so finishing a problem left the transcript as frozen pictures of what had been sent, with no surface under any earlier question to add a line to. A picture is a record of an answer, not a place to write one | the boards are painted for the whole live lesson; the one question that goes without a picture is the one the real surface is sitting under; `test/feedback.js` |

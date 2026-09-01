@@ -656,7 +656,7 @@ def cmd_write(live, args):
         print("usage: board write <kind> [slug] < body.md", file=sys.stderr)
         return 1
     kind = args[0] if args[0] in KINDS else "lesson"
-    rest = args[1:] if args[0] in KINDS else args
+    rest = [a for a in (args[1:] if args[0] in KINDS else args) if a != "--force"]
     title = " ".join(rest)
     body = sys.stdin.read()
     # The last gate before a card becomes the lesson. A reasoning model that was
@@ -672,6 +672,21 @@ def cmd_write(live, args):
             print("board write: dropped a block of model reasoning from the top "
                   "of this card", file=sys.stderr)
         body = clean
+    # And the shape no strip can help with: thinking with no tag on it, where the
+    # whole card is the thought. There is nothing to remove, so this refuses --
+    # a turn that writes no card is a wait; a monologue that becomes a card is
+    # the lesson, and there is no undo. Reported from a Galois sitting on
+    # 1 September 2026, eight hundred tokens of it, cut off mid-sentence.
+    #
+    # `--force` exists because the judgement is a heuristic and a lesson ABOUT
+    # how models reason is a real lesson somebody may one day want to write.
+    if "--force" not in args and boardlib.reads_as_reasoning(body):
+        print("board write: this reads as deliberation rather than a card -- it "
+              "talks about the student instead of to them, or narrates its own "
+              "thinking. Nothing was written.\n"
+              "Write the card itself: the mathematics, addressed to the student. "
+              "If you meant it, pass --force.", file=sys.stderr)
+        return 1
     name = "%04d-%s.md" % (live.next_index(), slugify(title or kind))
     path = os.path.join(live.cards, name)
     head = "---\nkind: %s\n" % kind
@@ -1195,6 +1210,14 @@ def cmd_recap(live, args):
     for n in names[len(names) - full:] if full else []:
         with open(os.path.join(live.cards, n), "r", encoding="utf-8") as fh:
             raw = fh.read()
+        # Read back through the same gate the board reads through. A tutor whose
+        # own deliberation ended up in a card should see that the turn did not
+        # land -- and should certainly not be fed its own private working back as
+        # though it were the lesson so far.
+        meta_r, body_r = card_meta(raw)
+        clean = boardlib.card_body(body_r)
+        if clean != body_r:
+            raw = raw[:len(raw) - len(body_r)] + clean
         print("\n--- %s, in full ---\n%s" % (n, raw.strip()))
 
     # What the student has actually done, one line each. A fresh session picking

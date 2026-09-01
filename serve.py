@@ -191,6 +191,10 @@ def load_cards(repo, jobs):
         except OSError:
             continue
         meta, rawbody = parse_front_matter(raw)
+        # Whoever wrote this file. `board write` refuses a card that is the
+        # model deliberating, but an interactive tutor writes the file itself --
+        # the brief tells it to -- and that door has no gate on it.
+        rawbody = boardlib.card_body(rawbody)
         body = extract_tikz(rawbody, jobs, repo)
         cards.append({
             "id": m.group(1),
