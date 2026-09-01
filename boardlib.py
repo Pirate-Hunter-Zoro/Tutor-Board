@@ -466,6 +466,120 @@ def _ts_status():
         return {}
 
 
+def tailnet_addresses():
+    """This machine's own tailscale addresses, if it is on a tailnet.
+
+    A board binds these as well as loopback: the tailnet is the trust boundary
+    the iPad already crosses, and without them the other machine cannot see this
+    one's boards at all -- which is a follower that can only ever point the
+    address at itself.
+    """
+    prefix, _ = tailscale_cli()
+    if not prefix:
+        return []
+    import subprocess
+    try:
+        p = subprocess.run(prefix + ["ip"], stdout=subprocess.PIPE,
+                           stderr=subprocess.DEVNULL, timeout=10)
+        out = p.stdout.decode("utf-8", "replace").split()
+    except (OSError, subprocess.SubprocessError):
+        return []
+    # IPv4 only: the second socket is a convenience, and a v6 bind that fails on
+    # a machine with no v6 route is noise in a log nobody reads.
+    return [a for a in out if a.count(".") == 3]
+
+
+def tailnet_peers(status=None):
+    """Every machine on this tailnet that is online, as something to knock on.
+
+    The follower used to look for the compute node at ONE hostname, out of the
+    config. A compute node's hostname is an allocation -- it was `compute302`
+    today and something else last week -- so that name goes stale, and when it
+    does the follower can see no board anywhere but its own. From the iPad that
+    is: "Galois Theory is the only option, and when I tap Probability I can't
+    switch", for ever, because the only machine it can find is the one it is on.
+
+    So the configured name is a hint, not the answer. If it does not lead
+    anywhere, ask the tailnet who is up and knock on all of them; a course's
+    ports are derived from its name, so nothing needs to be published for this to
+    work.
+    """
+    st = status if status is not None else _ts_status()
+    out = []
+    for peer in (st.get("Peer") or {}).values():
+        if not peer.get("Online"):
+            continue
+        name = (peer.get("DNSName") or "").rstrip(".")
+        if not name:
+            ips = peer.get("TailscaleIPs") or []
+            name = ips[0] if ips else ""
+        if name:
+            out.append(name)
+    return out
+
+
+def board_health(host, port, timeout=2.0):
+    """What is answering on this host:port, or None. `/health` is the honest test.
+
+    Here rather than in the follower because both machines need it now: the
+    follower asks "where is this course", and a board asks "is anybody else
+    already serving it" before it starts a second one.
+    """
+    import urllib.request
+    try:
+        with urllib.request.urlopen("http://%s:%d/health" % (host, port),
+                                    timeout=timeout) as resp:
+            if resp.status != 200:
+                return None
+            doc = json.loads(resp.read(4096).decode("utf-8", "replace"))
+            return doc if isinstance(doc, dict) and doc.get("ok") else None
+    except Exception:                                            # noqa: BLE001
+        return None
+
+
+def board_is(health, name):
+    """Is this board really the course we went looking for?
+
+    Ports are derived from names, and derivation is not proof.
+    """
+    if not health:
+        return False
+    who = health.get("dir") or os.path.basename(health.get("root") or "")
+    return who == name
+
+
+def find_board(host, name, timeout=2.0):
+    """The port this course is answering on at this host, or None."""
+    for port in port_sequence(name):
+        health = board_health(host, port, timeout=timeout)
+        if board_is(health, name):
+            return port
+        if health:
+            break            # somebody else's board; the rest of the run is theirs
+    return None
+
+
+def locate_course(name, skip_local=False, hosts=(), timeout=2.0):
+    """(host, port) of a board serving this course, anywhere this machine can see.
+
+    Local first -- it is free and it is the common case -- then whatever hosts
+    the caller names, then every online peer on the tailnet.
+    """
+    if not skip_local:
+        port = find_board("127.0.0.1", name, timeout=1.0)
+        if port:
+            return ("127.0.0.1", port)
+    seen = set(["127.0.0.1", "localhost"])
+    for host in list(hosts) + tailnet_peers():
+        if not host or host in seen:
+            continue
+        seen.add(host)
+        port = find_board(host, name, timeout=timeout)
+        if port:
+            return (host, port)
+    return None
+
+
 def exit_node(status=None):
     """The exit node this machine is using, or None. Name and address."""
     st = status if status is not None else _ts_status()

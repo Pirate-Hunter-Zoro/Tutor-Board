@@ -295,9 +295,15 @@ def remote_target(node, cands, want=None, hint=None):
     the sequence is walked, because the serving machine read it out of that
     course's own board record and is the only one that can know it.
     """
-    if not node:
-        return None
     by_name = dict((c["dir"], c) for c in cands)
+    if not node:
+        # No configured node is not the same as no other machine. The tailnet
+        # knows who is up; ask it before giving up on the far side entirely.
+        if want:
+            found = boardlib.locate_course(want, skip_local=True, timeout=1.5)
+            if found:
+                return found[0], found[1], True
+        return None
 
     if want:
         if hint:
@@ -311,6 +317,20 @@ def remote_target(node, cands, want=None, hint=None):
             port = find_course(node, by_name[want])
             if port:
                 return node, port, True
+
+    # Not at the configured name. Ask the tailnet.
+    #
+    # `node` is a hostname out of a config file, and a compute node's hostname is
+    # an allocation: it was `compute302` today and something else last week. When
+    # it goes stale every probe above fails and the follower can see no board
+    # anywhere but its own, for ever -- which from the iPad is "Galois Theory is
+    # the only option, and when I tap Probability I can't switch". A course's
+    # ports are derived from its name, so no configuration is needed to find one:
+    # knock on every machine that is up.
+    if want:
+        found = boardlib.locate_course(want, skip_local=True, timeout=1.5)
+        if found:
+            return found[0], found[1], True
 
     # The chosen course is not up over there, or nobody has chosen anything.
     # Whatever is answering is better than nothing, and is marked as what it is.

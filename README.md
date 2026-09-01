@@ -46,6 +46,30 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 1 September 2026
 >
+> **And the reason switching could never have worked, which was underneath all of it: a board only
+> ever listened on loopback.** Deliberately -- there is no authentication here and the university
+> LAN is not somewhere to put an unauthenticated page -- and the consequence went unseen for a
+> week. The always-on host's follower decides where the address points by probing the compute
+> node's ports; every one of those probes was refused by a socket bound to `127.0.0.1`. So the
+> address could only ever land on a board **the Mac itself was running**, whatever the record
+> said, and no amount of correct arbitration on top of that could move it. Measured, not
+> theorised: from the node, `board.tail0c6c62.ts.net` answers on no course port, and neither does
+> this machine's own tailscale address.
+>
+> A board now binds its tailscale address as well as loopback -- the tailnet, not the LAN, which
+> is the same trust boundary the iPad already crosses to read the lesson. And the follower no
+> longer looks for the far side at one hostname out of a config file: a compute node's name is an
+> allocation (`compute302` today, something else last week), so when that name goes stale the
+> follower can see nothing but itself, for ever. It asks the tailnet who is up and knocks on all
+> of them; a course's ports are derived from its name, so nothing has to be published for that to
+> work.
+>
+> The tap was corrected in the same pass. Deciding what to start by the machine's ROLE was wrong
+> in the one way that matters -- if the other machine cannot be reached, a tap did nothing at all
+> and the course could not be opened from anywhere. It probes instead: if something is already
+> serving that course, record the choice and let the follower point at it; if nothing is, start it
+> here. `test/address.py`, `test/choice.py`.
+>
 > **A tap in the hub started a second board and a second tutor, and then fought the follower for
 > the address.** This is the one that made an evening unusable, and every symptom of it was
 > reported at once: *"Every time I try to tap on Probability I get bumped back to Galois Theory...

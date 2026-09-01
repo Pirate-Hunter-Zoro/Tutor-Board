@@ -197,6 +197,12 @@ preferred".
   besides. So the always-on host keeps `board` permanently and re-points `tailscale serve` at
   whichever machine is actually serving. Do not try to make the identity migrate across that
   boundary; the reasoning and the work list are in the README under "Not yet built".
+- **A board must be reachable from the other machine.** It binds its tailscale address as well as
+  loopback — the tailnet, not the LAN. Without that the follower's probes are refused and the
+  address can only ever point at a board the always-on host is running itself, which is switching
+  that cannot work however correct the arbitration above it is. It went unseen for a week because
+  every test of the arbitration passed. And never look for the far side at a hostname out of the
+  config alone: a compute node's name is an allocation. `boardlib.locate_course` asks the tailnet.
 - **A course runs in ONE place, and a tap in the hub does not move it.** The tap records the
   choice — that record is the only thing two machines can both read — and nothing else, unless this
   machine owns its own name or already serves that course. It must never start a board, take the

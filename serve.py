@@ -1889,8 +1889,20 @@ class Handler(BaseHTTPRequestHandler):
             shape = boardlib.machine_shape()
             mine = boardlib.board_is_running(
                 (read_board_record(target) or {}).get("pid"), target)
+            # Is anybody else already serving it? Asked, not assumed.
+            #
+            # The first version of this rule went by the machine's ROLE -- a
+            # compute node never starts a course, the always-on host decides --
+            # and that was wrong in the one way that matters: if the other
+            # machine cannot be reached (and until boards listened on the tailnet
+            # they never could be), a tap did nothing at all and the course could
+            # not be opened from anywhere. A probe is the honest question, and
+            # when it finds nothing the answer is to start it here rather than to
+            # wait for a machine that may not be listening.
+            elsewhere = None if mine else boardlib.locate_course(
+                match["repo"], skip_local=True, timeout=1.5)
             started = ""
-            if shape == "standalone" or mine:
+            if mine or not elsewhere:
                 code, out = board_cli(target, ["start"])
                 if code != 0:
                     return self.send_json({"ok": False, "error": out.strip()[-300:]},
@@ -1903,7 +1915,9 @@ class Handler(BaseHTTPRequestHandler):
                 # machine is how a lesson ends up with two.
                 acode, aout = tutor_cli(["agent", "start", match["repo"]])
             else:
-                acode, aout = 0, "the course is served elsewhere; the address follows"
+                acode, aout = 0, ("%s is serving this course; the address follows the "
+                                  "choice rather than starting a second one"
+                                  % elsewhere[0])
             return self.send_json({"ok": True, "repo": match["repo"],
                                    "detail": started or aout,
                                    "agent": aout.strip() if acode == 0 else None,
@@ -2392,6 +2406,35 @@ def main(argv):
     t = threading.Thread(target=hub.poll_loop, daemon=True)
     t.start()
 
+    # And a second door, on the tailnet address and nowhere else.
+    #
+    # A board listens on loopback, deliberately: there is no authentication here
+    # and the university LAN is not somewhere to put an unauthenticated page. The
+    # consequence went unnoticed for a week -- the OTHER machine could never see
+    # this one's boards. The always-on host's follower probes a course's ports on
+    # the compute node to decide where the address should point, every one of
+    # those probes was refused by a socket bound to 127.0.0.1, and so the address
+    # could only ever land on a board the Mac itself was running. From the iPad:
+    # "Galois Theory is the only option, and when I tap Probability I can't
+    # switch" -- and, when the Mac's own boards changed, the same sentence with
+    # the courses the other way round.
+    #
+    # The tailscale address is not the LAN: it is reachable only by machines on
+    # this tailnet, which is the same trust boundary the iPad already crosses to
+    # read the lesson. So bind that one too, and only that one.
+    tailnet = []
+    for addr in boardlib.tailnet_addresses():
+        try:
+            second = ThreadingHTTPServer((addr, port), Handler)
+        except OSError as exc:
+            sys.stderr.write("not listening on %s: %s\n" % (addr, exc))
+            continue
+        second.daemon_threads = True
+        second.repo = repo
+        second.hub = hub
+        threading.Thread(target=second.serve_forever, daemon=True).start()
+        tailnet.append(addr)
+
     info = {
         "pid": os.getpid(),
         "port": port,
@@ -2403,6 +2446,7 @@ def main(argv):
         "root": repo.root,
         # Only advertise what is actually listening.
         "urls": (["http://127.0.0.1:%d/" % port] +
+                 ["http://%s:%d/" % (a, port) for a in tailnet] +
                  (["http://%s:%d/" % (a, port) for a in lan_addresses()]
                   if host == "0.0.0.0" else [])),
         "started": time.time(),

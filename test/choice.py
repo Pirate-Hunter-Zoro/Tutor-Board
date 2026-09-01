@@ -471,16 +471,22 @@ follow_src = open(os.path.join(ROOT, "bin", "follow"), encoding="utf-8").read()
 
 check("the choice is recorded whatever else the tap does",
       'boardlib.remember_chosen(match["repo"], target)' in serve_src)
-check("but the board is only started where this machine owns its own name, or "
-      "already serves that course",
-      'if shape == "standalone" or mine:' in serve_src)
+check("but a second board is only started when nothing else is serving that "
+      "course -- asked over the tailnet, not assumed from the machine's role",
+      "elsewhere = None if mine else boardlib.locate_course(" in serve_src
+      and "if mine or not elsewhere:" in serve_src)
 check("the tailnet name is only taken by a machine that owns it -- otherwise the "
       "follower and the tap re-point it at each other, every tick",
       'if shape == "standalone":' in serve_src)
 check("and a tutor is started only where the course is actually served, so one "
       "lesson never gets two",
       serve_src.count('tutor_cli(["agent", "start", match["repo"]])') == 1
-      and "the course is served elsewhere" in serve_src)
+      and "is serving this course; the address follows" in serve_src)
+
+check("a board listens on the tailnet as well as loopback, or the other machine "
+      "can never see it and the address can only ever point at home",
+      "boardlib.tailnet_addresses()" in serve_src
+      and "second.serve_forever" in serve_src)
 check("a board publishes whether it has a tutor at all",
       '"tutor": agent.get("state") or None' in serve_src)
 check("and the follower prefers a board with one over an empty room",

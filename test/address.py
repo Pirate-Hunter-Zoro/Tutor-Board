@@ -167,5 +167,27 @@ if calls:
 else:
     ok("and re-pointing at where it already points does nothing at all")
 
+# A board has to be REACHABLE from the other machine, or none of the above can
+# happen at all.
+#
+# Boards bound 127.0.0.1 and nothing else, deliberately -- there is no
+# authentication here. The consequence went unseen for a week: the always-on
+# host's follower probes the compute node's ports to decide where the address
+# should point, and every one of those probes was refused by a loopback socket.
+# So the address could only ever land on a board the Mac itself was running, and
+# switching course could not work no matter how correct the arbitration was.
+src_serve = open(os.path.join(ROOT, "serve.py"), encoding="utf-8").read()
+(ok if "for addr in boardlib.tailnet_addresses():" in src_serve else fail)(
+    "a board listens on this machine's tailnet address as well as loopback")
+(ok if "for a in tailnet]" in src_serve else fail)(
+    "and says so in its record, so the far side knows where to knock")
+(ok if 'if host == "0.0.0.0"' in src_serve else fail)(
+    "but not on the LAN unless somebody asked for that")
+
+src_follow = open(os.path.join(ROOT, "bin", "follow"), encoding="utf-8").read()
+(ok if "boardlib.locate_course(want, skip_local=True" in src_follow else fail)(
+    "and the follower finds a course wherever it is, rather than only at a "
+    "hostname out of a config file that a new allocation invalidates")
+
 print("\n%d FAILURES" % len(errors) if errors else "\nthe address stays with the course")
 sys.exit(1 if errors else 0)
