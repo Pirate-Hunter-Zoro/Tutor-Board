@@ -73,6 +73,15 @@ preferred".
   is alphabetical order wearing a disguise, and it made tapping a course in the hub do nothing
   visible at all. A board also says who it is in `/health`, and no port is served without that name
   matching the course being looked for — a port is derived from a name and derivation is not proof.
+- **A board that is merely running has no claim on the address.** There is one address and it opens
+  one lesson, so the follower's first question is never "who answered" — it is "who is serving the
+  course that was chosen". `local_target` and `remote_target` both return an `exact` flag saying
+  which they are, and in `choose_target` an exact target beats a fallback on either machine, above
+  `prefer` and above the allowance. Preference breaks ties between two boards with an equal claim and
+  decides nothing else; the allowance decides between two machines serving the *same* chosen course,
+  and must never be able to demote a machine to a course nobody asked for — a limited board still
+  shows the lesson, and only new turns fail. The choice itself is read from BOTH machines, newest
+  `at` winning, because it is recorded wherever the hub was served from. `test/choice.py`.
 - **Only a person records a course choice.** `chosen.json` is the record the always-on host follows
   to decide which lesson the one installed address opens, and it means *somebody asked for this*. It
   exists precisely because the answer cannot be derived from disk — working in a course touches its

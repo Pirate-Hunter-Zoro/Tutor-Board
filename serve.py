@@ -1246,7 +1246,14 @@ def chosen_target():
             port = (json.load(fh) or {}).get("port")
     except (OSError, ValueError):
         port = None
-    return {"dir": name, "port": port or boardlib.default_port(name)}
+    # `at` so the always-on host can tell this record from its OWN. The choice is
+    # written on whichever machine was serving the hub when the course was
+    # tapped, so there are two records of it and only the times can say which is
+    # the person's latest word -- without that, a course tapped over here was
+    # invisible to a follower reading only its own file, and the tap did every
+    # correct thing while the address stayed put.
+    return {"dir": name, "port": port or boardlib.default_port(name),
+            "at": rec.get("at") or 0}
 
 
 def handover_secret():

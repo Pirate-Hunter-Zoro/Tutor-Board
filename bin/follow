@@ -218,70 +218,130 @@ def find_course(node, c, timeout=2.0):
     return None
 
 
-def remote_target(node, cands):
-    """(host, port) for the board the person asked for on the compute node.
+def node_choice(node, cands):
+    """What the compute node says a PERSON chose over there, or None.
 
-    This used to return the first course whose port answered, walking the list in
-    sorted order -- so with two boards up the address went to whichever course
-    came first in the alphabet, for ever. Tapping a course in the hub appeared to
-    do nothing at all: the switch worked, the board started, and the proxy went on
-    serving the other one.
+    `{"dir", "port", "at"}`, straight out of the first board that answers --
+    every board on a machine publishes the same record, so the walk exists only
+    to find somebody to ask.
 
-    So the boards are asked instead of raced. Every board publishes the choice
-    (`chosen` in /health), because the choice is recorded on the machine that is
-    serving and this one cannot read that filesystem. The first board to answer is
-    enough to learn it; the scan only exists to find somebody to ask.
+    `at` is why this is separate from finding a board. The choice is recorded on
+    whichever machine happened to be serving the hub when the course was tapped,
+    so there are two records and only their timestamps can say which one is the
+    person's latest word. A node running older code publishes no `at` and reads
+    as ancient, which is the right way round: this machine's own record wins by
+    default and nothing gets dragged off a lesson by a stale name.
+    """
+    if not node:
+        return None
+    for c in cands:
+        health = probe(node, default_port(c["root"]))
+        if health:
+            ch = health.get("chosen") or {}
+            return ch if ch.get("dir") else None
+    return None
+
+
+def wanted_course(remote_choice):
+    """Which COURSE the address opens, deciding across both machines.
+
+    The newest decision wins, wherever it was made. Without this the follower
+    reads only its own record, and a course tapped in a hub served from the other
+    machine was recorded over there and never seen here -- so the tap did every
+    correct thing and the address did not move, which is the whole defect this
+    file exists to prevent, one machine further out.
+    """
+    best = (0.0, None)
+    rec = boardlib.chosen_course()
+    if rec.get("dir"):
+        best = (float(rec.get("at") or 0), rec["dir"])
+    if remote_choice and remote_choice.get("dir"):
+        try:
+            at = float(remote_choice.get("at") or 0)
+        except (TypeError, ValueError):
+            at = 0.0
+        if at > best[0]:
+            best = (at, remote_choice["dir"])
+    return best[1]
+
+
+def remote_target(node, cands, want=None, hint=None):
+    """(host, port, exact) for a board on the compute node, or None.
+
+    `exact` is the part that matters and the part that was missing: True when
+    this board is serving the course that was actually chosen, False when it is
+    merely the board that happened to answer over there. Both are useful -- an
+    address with nothing behind it is worse than the wrong lesson, because the
+    wrong lesson can be tapped out of -- but they are not the same thing, and
+    treating them as the same is how a course nobody chose captured the address
+    off a machine that was mid-proof. The caller decides what a fallback is
+    allowed to beat; see `choose_target`.
+
+    `hint` is the port the node published for the chosen course, checked before
+    the sequence is walked, because the serving machine read it out of that
+    course's own board record and is the only one that can know it.
     """
     if not node:
         return None
     by_name = dict((c["dir"], c) for c in cands)
+
+    if want:
+        if hint:
+            try:
+                hint = int(hint)
+            except (TypeError, ValueError):
+                hint = None
+        if hint and identifies_as(probe(node, hint), want):
+            return node, hint, True
+        if want in by_name:
+            port = find_course(node, by_name[want])
+            if port:
+                return node, port, True
+
+    # The chosen course is not up over there, or nobody has chosen anything.
+    # Whatever is answering is better than nothing, and is marked as what it is.
     for c in cands:
         health = probe(node, default_port(c["root"]))
         if not health:
             continue
-        want = (health.get("chosen") or {}).get("dir")
-        if want and want != health.get("dir"):
-            # Somebody chose a different course. Believe the port it names -- the
-            # serving machine read it out of that board's own record -- but check
-            # who answers there before handing the address over.
-            port = (health.get("chosen") or {}).get("port")
-            if port and identifies_as(probe(node, int(port)), want):
-                return node, int(port)
-            if want in by_name:
-                port = find_course(node, by_name[want])
-                if port:
-                    return node, port
-            # The chosen course is not up. Fall through to whoever answered.
         if identifies_as(health, c["dir"]):
-            return node, default_port(c["root"])
+            return node, default_port(c["root"]), False
         # A board answering on a port that is not its own: find its real home
         # rather than trusting the number.
         port = find_course(node, c)
         if port:
-            return node, port
+            return node, port, False
     return None
 
 
-def local_target(cands):
-    """(host, port) for the board answering on THIS machine, or None.
+def local_target(cands, want=None):
+    """(host, port, exact) for a board answering on THIS machine, or None.
 
     The same two questions the remote side asks -- which course was chosen, and
     is the board that answers really that course -- put to 127.0.0.1. The record
     is consulted first because here, unlike over there, we can actually read it;
     the sequence is walked when it is wrong or missing.
+
+    `want` is the course decided across both machines. When this machine has no
+    clone of it, or no board up for it, whatever is active here is offered
+    instead and marked inexact.
     """
-    active = active_course(cands)
+    by_name = dict((c["dir"], c) for c in cands)
+    active = by_name.get(want) if want else None
+    exact = active is not None
+    if active is None:
+        active = active_course(cands)
     if not active:
         return None
     recorded = local_port(active)
     if identifies_as(probe("127.0.0.1", recorded, timeout=1.0), active["dir"]):
-        return "127.0.0.1", recorded
+        return "127.0.0.1", recorded, exact
     for port in boardlib.port_sequence(active["dir"]):
         if port == recorded:
             continue
         health = probe("127.0.0.1", port, timeout=1.0)
         if identifies_as(health, active["dir"]):
-            return "127.0.0.1", port
+            return "127.0.0.1", port, exact
         if health:
             break        # somebody else's board; the rest of the sequence is theirs
     return None
@@ -290,45 +350,54 @@ def local_target(cands):
 def choose_target(node, cands, prefer="local"):
     """Which machine gets the address this tick, and a phrase for the log.
 
-    `prefer` settles it only when both could serve. "local" is the rule that a
-    course cloned on this machine is taught on this machine; "node" is the
-    original arrangement, where the compute node won because that is where the
-    data and the hardware are.
+    Four rules, in this order, and the order is the whole of it:
 
-    A live board beats a dead one whichever way the preference points -- an
-    address with nothing behind it is the one outcome worse than the wrong
-    machine. When nothing is up anywhere the local port is still named, so the
-    resume that is about to start a board there lands on a live address rather
-    than waiting for the next tick to be noticed.
+      1. A board serving the course that was CHOSEN beats one that is not, on
+         either machine. This is the rule that was missing. Without it any board
+         left running anywhere could capture the one address the iPad has, and it
+         did: a lesson was taken off the machine teaching it and handed to an
+         unrelated course on the other one, because that course's board was up
+         and answering. A board that is merely up has no claim on the address.
+      2. Among boards with an equal claim, one with an allowance beats one
+         without. Two machines serving the same chosen course is exactly the case
+         this decides, and it is unchanged: paid tutor, then the other machine,
+         then the free model. Note it cannot demote a machine to a course nobody
+         asked for -- a limited board still SHOWS the lesson, and only new turns
+         fail, so the wrong lesson is strictly worse.
+      3. Then `prefer`: "local" is the rule that a course cloned on this machine
+         is taught on this machine; "node" is the original arrangement, where the
+         compute node won because that is where the data and the hardware are.
+      4. And never nothing while anything is up. An address with nothing behind
+         it is the one outcome worse than the wrong machine, so when nothing is
+         up anywhere the local port is still named -- the resume that is about to
+         start a board there then lands on a live address rather than waiting for
+         the next tick to be noticed.
 
-    And a board with an allowance beats one without, also whichever way the
-    preference points. That is the only reason the preferred machine is ever
-    passed over while it is up and well: it is up, it is well, and its tutor has
-    been told it has nothing left to spend. Being out of allowance still beats
-    being down -- the last two lines of the loop are what put the address back
-    here when the node is exhausted too, and by then the tutor here has fallen
-    back to what it can run for free.
-
-    The node is probed only when the preferred machine cannot serve. On an
-    ordinary day that never happens, and probing a machine that is not there
-    costs a timeout for every course.
+    Returns ((host, port), phrase); the exactness flag is spent here and does not
+    leave, because the follower's only question is whether the address moved.
     """
-    local = local_target(cands) if cands else None
-    if prefer != "node" and local and not limited(*local):
-        return local, "here"
-    remote = remote_target(node, cands)
+    remote_choice = node_choice(node, cands) if node else None
+    want = wanted_course(remote_choice)
 
-    # Preference first, allowance ahead of it. Evaluated once each: every one of
-    # these questions is a request over the network.
+    local = local_target(cands, want) if cands else None
+    remote = remote_target(node, cands, want, (remote_choice or {}).get("port"))
+
     order = [(remote, "the compute node"), (local, "here")] if prefer == "node" \
         else [(local, "here"), (remote, "the compute node")]
-    order = [(t, w, limited(*t)) for t, w in order if t]
-    for t, w, out in order:
+    order = [(t, w) for t, w in order if t]
+
+    # Rule 1, as a stable partition: preference still decides between two boards
+    # with the same claim, and never overrides the claim itself.
+    order = ([x for x in order if x[0][2]] + [x for x in order if not x[0][2]])
+
+    # Rule 2. Every one of these is a request over the network, so ask once each.
+    graded = [(t, w, limited(t[0], t[1])) for t, w in order]
+    for t, w, out in graded:
         if not out:
-            return t, w
-    if order:
-        t, w, _ = order[0]
-        return t, w + " (out of allowance, and so is everywhere else)"
+            return (t[0], t[1]), w
+    if graded:
+        t, w, _ = graded[0]
+        return (t[0], t[1]), w + " (out of allowance, and so is everywhere else)"
 
     active = active_course(cands) if cands else None
     if active:

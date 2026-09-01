@@ -26,6 +26,7 @@ import importlib.util
 import json
 import os
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -122,10 +123,12 @@ def fake_probe(host, port, timeout=2.0):
 follow.probe = fake_probe
 
 
-def health(name, root, chosen=None, chosen_port=None):
+def health(name, root, chosen=None, chosen_port=None, at=None):
     doc = {"ok": True, "root": root, "dir": name}
     if chosen:
         doc["chosen"] = {"dir": chosen, "port": chosen_port}
+        if at is not None:
+            doc["chosen"]["at"] = at
     return doc
 
 
@@ -135,16 +138,18 @@ boards = {
     GAL_PORT: health("Galois-Theory", GAL, chosen="Probability", chosen_port=PRB_PORT),
     PRB_PORT: health("Probability", PRB, chosen="Probability", chosen_port=PRB_PORT),
 }
+want = "Probability"
 check("a chosen course is served even when another answers first",
-      follow.remote_target("node", CANDS) == ("node", PRB_PORT))
+      follow.remote_target("node", CANDS, want)[:2] == ("node", PRB_PORT))
 
 # The choice is the current course: nothing moves.
 boards = {
     GAL_PORT: health("Galois-Theory", GAL, chosen="Galois-Theory", chosen_port=GAL_PORT),
     PRB_PORT: health("Probability", PRB, chosen="Galois-Theory", chosen_port=GAL_PORT),
 }
+want = "Galois-Theory"
 check("and when the first to answer is the chosen one, it keeps the address",
-      follow.remote_target("node", CANDS) == ("node", GAL_PORT))
+      follow.remote_target("node", CANDS, want)[:2] == ("node", GAL_PORT))
 
 # Chosen course named, but its board is not up. Serve what there is rather than
 # nothing -- an unreachable address is worse than the wrong lesson, because the
@@ -152,18 +157,21 @@ check("and when the first to answer is the chosen one, it keeps the address",
 boards = {
     GAL_PORT: health("Galois-Theory", GAL, chosen="Probability", chosen_port=PRB_PORT),
 }
+want = "Probability"
 check("a chosen course that is not running falls back to a board that is",
-      follow.remote_target("node", CANDS) == ("node", GAL_PORT))
+      follow.remote_target("node", CANDS, want)[:2] == ("node", GAL_PORT))
 
 # Nobody has chosen anything yet.
 boards = {GAL_PORT: health("Galois-Theory", GAL)}
+want = None
 check("with no choice recorded, whatever is up is served",
-      follow.remote_target("node", CANDS) == ("node", GAL_PORT))
+      follow.remote_target("node", CANDS, want)[:2] == ("node", GAL_PORT))
 
 # Nothing is up at all.
 boards = {}
+want = None
 check("and with nothing up, the compute node is not claimed",
-      follow.remote_target("node", CANDS) is None)
+      follow.remote_target("node", CANDS, want) is None)
 
 # ---- identity, so a wrong number cannot become a wrong lesson --------------
 
@@ -173,8 +181,9 @@ boards = {
     GAL_PORT: health("Probability", PRB, chosen="Probability", chosen_port=PRB_PORT),
     PRB_PORT: health("Probability", PRB, chosen="Probability", chosen_port=PRB_PORT),
 }
+want = "Probability"
 check("a board on somebody else's port is not mistaken for them",
-      follow.remote_target("node", CANDS) == ("node", PRB_PORT))
+      follow.remote_target("node", CANDS, want)[:2] == ("node", PRB_PORT))
 
 # The chosen course moved off its usual port -- a start that found it busy walks
 # the sequence. The record on the serving machine knows; the proxy is told.
@@ -183,16 +192,18 @@ boards = {
     GAL_PORT: health("Galois-Theory", GAL, chosen="Probability", chosen_port=moved),
     moved: health("Probability", PRB, chosen="Probability", chosen_port=moved),
 }
+want = "Probability"
 check("a course that had to move ports is still found, because it is named not guessed",
-      follow.remote_target("node", CANDS) == ("node", moved))
+      follow.remote_target("node", CANDS, want)[:2] == ("node", moved))
 
 # And if the published port is wrong, the sequence is walked rather than trusted.
 boards = {
     GAL_PORT: health("Galois-Theory", GAL, chosen="Probability", chosen_port=54321),
     moved: health("Probability", PRB, chosen="Probability", chosen_port=54321),
 }
+want = "Probability"
 check("a published port that is wrong is checked, not believed",
-      follow.remote_target("node", CANDS) == ("node", moved))
+      follow.remote_target("node", CANDS, want)[:2] == ("node", moved))
 
 check("and a port with a stranger on it is never handed the address",
       not follow.identifies_as({"ok": True, "dir": "Something-Else"}, "Probability"))
@@ -255,6 +266,71 @@ anywhere = {(HERE_, GAL_PORT): health("Probability", PRB),
             (NODE_, GAL_PORT): health("Galois-Theory", GAL)}
 check("a local board that is not this course does not win on being local",
       follow.choose_target(NODE_, LOCAL, "local")[0] == (NODE_, GAL_PORT))
+
+# ---- a board nobody chose has no claim on the address -----------------------
+#
+# The one that cost a lesson. Somebody was mid-proof in Galois on the machine
+# holding the repository, and an unrelated Probability board -- up on the other
+# machine, teaching nobody -- took the address away from them. A refresh landed
+# in the wrong course and the hub could not get them out.
+#
+# Nothing about that was a tie for `prefer` to break. A board that is merely
+# running has no claim at all, and the fix is a rule ABOVE preference and above
+# the allowance: a board serving the course that was chosen beats one that is
+# not, on either machine.
+
+import tempfile as _tf                                       # noqa: E402
+
+_box = _tf.mkdtemp()
+boardlib.CHOSEN = os.path.join(_box, "chosen.json")
+boardlib.CONFIG_DIR = _box
+
+BOTH = [{"dir": "Galois-Theory", "root": GAL}, {"dir": "Probability", "root": PRB}]
+
+boardlib.remember_chosen("Galois-Theory", GAL)         # a person, just now
+anywhere = {(HERE_, GAL_PORT): health("Galois-Theory", GAL),
+            (NODE_, PRB_PORT): health("Probability", PRB,
+                                      chosen="Probability", chosen_port=PRB_PORT)}
+check("a course nobody chose does not take the address off the lesson",
+      follow.choose_target(NODE_, BOTH, "local")[0] == (HERE_, GAL_PORT))
+check("and it does not take it even on the machine the config prefers",
+      follow.choose_target(NODE_, BOTH, "node")[0] == (HERE_, GAL_PORT))
+
+# The same board, once it IS the chosen course: preference decides again, which
+# is all preference was ever for.
+boardlib.remember_chosen("Probability", PRB)
+check("and the moment it is chosen, it is served",
+      follow.choose_target(NODE_, BOTH, "local")[0] == (NODE_, PRB_PORT))
+
+# ---- a course can be tapped from either machine -----------------------------
+#
+# The record is written wherever the hub was served from, so there are two of
+# them and they disagree by design. The follower used to read only its own, so a
+# course tapped in a hub served by the OTHER machine was recorded over there and
+# never seen here: the tap started the board, moved nothing, and looked broken.
+# Both records are read now and the newer one is the person's latest word.
+
+boardlib.remember_chosen("Galois-Theory", GAL)
+anywhere = {(HERE_, GAL_PORT): health("Galois-Theory", GAL),
+            (NODE_, PRB_PORT): health("Probability", PRB, chosen="Probability",
+                                      chosen_port=PRB_PORT, at=time.time() + 60)}
+check("a course tapped on the other machine moves the address to it",
+      follow.choose_target(NODE_, BOTH, "local")[0] == (NODE_, PRB_PORT))
+
+anywhere[(NODE_, PRB_PORT)] = health("Probability", PRB, chosen="Probability",
+                                     chosen_port=PRB_PORT, at=time.time() - 3600)
+check("and an older choice over there never outranks this machine's own",
+      follow.choose_target(NODE_, BOTH, "local")[0] == (HERE_, GAL_PORT))
+
+check("a node too old to publish when it was chosen reads as ancient, not as now",
+      follow.wanted_course({"dir": "Probability", "port": PRB_PORT}) == "Galois-Theory")
+
+# And the last resort is unchanged: with no choice anywhere, whatever is up wins,
+# because an address with nothing behind it is worse than the wrong lesson.
+os.remove(boardlib.CHOSEN)
+anywhere = {(NODE_, PRB_PORT): health("Probability", PRB)}
+check("with nobody having chosen anything, a live board still gets the address",
+      follow.choose_target(NODE_, BOTH, "local")[0] == (NODE_, PRB_PORT))
 
 # ---- the machine being left is asked to wrap up ----------------------------
 #

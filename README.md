@@ -45,6 +45,29 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 31 August 2026
 >
+> **And then the other half of it, which is why switching courses never felt reliable.** Stopping the
+> machinery from writing a choice was necessary and not sufficient: the follower's arbitration had no
+> notion of a *claim*. `remote_target` returned "a board on the node" without saying whether it was
+> the course anybody had chosen or merely the one that answered, and `choose_target` then handed that
+> to `prefer` and the allowance rule as though it were a tie between two equals. It was not a tie. A
+> Probability board on the compute node, teaching nobody, took the address off a Galois lesson that
+> was mid-proof on the machine holding the repository.
+>
+> Both targets now carry an `exact` flag, and there is a rule above preference and above the
+> allowance: **a board serving the course that was chosen beats one that is not, on either machine.**
+> Preference goes back to breaking ties between two boards with an equal claim, which is all it was
+> ever for. The allowance ordering is untouched — it decides between two machines serving the *same*
+> chosen course — and it deliberately cannot demote a machine to a course nobody asked for, because a
+> limited board still shows the lesson and only new turns fail.
+>
+> The second defect was underneath it. The choice is recorded on whichever machine served the hub
+> when the course was tapped, so there are two records and they disagree by design — and the follower
+> read only its own. A course tapped in a hub served by the *other* machine was recorded over there,
+> invisible here, and the address stayed put. `/health` now publishes `at` alongside the choice, and
+> `wanted_course` takes the newer of the two records. A machine too old to publish `at` reads as
+> ancient rather than as now, so an old name can never drag anybody off a live lesson.
+> `test/choice.py` holds all of it, including the exact shape of the evening that produced it.
+>
 > **A refresh dropped somebody into another course, and the hub could not get them out.** Reported
 > mid-Galois: a refresh opened Probability, and tapping Galois Theory did nothing — Probability came
 > straight back. One defect, two symptoms, and it is the 28 August defect (*the tailnet name went to
@@ -405,6 +428,8 @@ these tests fail, the test is right.
 | Annotation ink was faceted and jagged next to the slate's: the layer joined raw pointer samples with straight lines, redrew every stroke inside the pointer handler, and never asked for the samples the Pencil actually took | `test/link.js` |
 | A `begin` signal sent while no tutor was attached was invisible for ever: `board wait` took the unread count at start as a baseline and returned only when it grew, so the first tap did nothing and the second one woke it | `test/begin.py` |
 | A resumed turn was told to re-read the contract, the method, the handoff and every card — about fourteen thousand tokens it was already carrying, plus a round trip per card | `test/tokens.py` |
+| A board that was merely running captured the one address off a machine mid-lesson: the follower weighed "the board serving the chosen course" and "some board that answered over there" as if they were the same kind of claim, so `prefer` and the allowance rule decided between a lesson and a stranger | `test/choice.py` |
+| A course tapped in a hub served by the other machine recorded the choice *over there*, where the follower never read it — the tap started the board, moved nothing, and looked broken | `test/choice.py`, and `/health` now publishes when the choice was made |
 | A refresh landed in another course, and tapping the right one in the hub changed nothing: `agent_start` spawns `tutor headless <course>`, which recorded a *person's* course choice — and its callers are all timers, one of which loops over every course, so each tick handed the address to whichever course the loop finished on, and `tutor resume` then re-elected it from the record it had just written | `test/choice.py` |
 | The tutor's own thinking was written onto the board as the lesson: the free chain's models reason in the first person about the student, and the reply was taken from `message.content` and used whole | `test/reasoning.py`, and `boardlib.strip_reasoning` on the wire and again at `board write` |
 | And it was the whole card rather than a preamble to it, because the front-matter parser was anchored at position zero — anything in front of the opening `---` sent the reply down the branch that makes the entire text the body | `test/reasoning.py` |
