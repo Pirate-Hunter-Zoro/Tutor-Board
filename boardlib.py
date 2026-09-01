@@ -489,6 +489,17 @@ def tailnet_addresses():
     return [a for a in out if a.count(".") == 3]
 
 
+def tailnet_self(status=None):
+    """This machine's own tailnet name, which is not its hostname.
+
+    A compute node is `compute302` to slurm and `compute-node` on the tailnet,
+    and only the second one is reachable from anywhere else.
+    """
+    st = status if status is not None else _ts_status()
+    name = ((st.get("Self") or {}).get("DNSName") or "").rstrip(".")
+    return name
+
+
 def publish_board(port, timeout=20):
     """Let the other machines on this tailnet reach this board.
 

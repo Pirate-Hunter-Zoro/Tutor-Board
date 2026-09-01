@@ -2440,7 +2440,10 @@ def main(argv):
     # -- which is the machine that decides where the address points. tailscaled
     # accepts the connection itself and forwards it to loopback.
     if not tailnet and boardlib.publish_board(port):
-        tailnet.append(boardlib.node_name())
+        # The tailnet name, not the hostname: this machine is `compute302` to
+        # slurm and `compute-node` on the tailnet, and only the second one is
+        # reachable from the machine that needs to reach it.
+        tailnet.append(boardlib.tailnet_self() or boardlib.node_name())
 
     info = {
         "pid": os.getpid(),
