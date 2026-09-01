@@ -581,6 +581,16 @@ finally:
     shutil.rmtree(conf, ignore_errors=True)
 
 print()
+# A restart must survive a broken agent record.
+#
+# `os.kill(None, ...)` raises TypeError, not OSError, so a half-written
+# `agent.json` -- which is what a daemon killed with its state directory pulled
+# out from under it leaves -- took the whole restart down, every course after it
+# included. Found by wiping the boards while one was running.
+src_t = open(os.path.join(ROOT, "bin", "tutor"), encoding="utf-8").read()
+check("a restart skips a record with no pid rather than dying on it",
+      "if not was:" in src_t and '"%s (no pid in its record)"' in src_t)
+
 print("%d FAILURES" % len(fails) if fails
       else "a new node takes the board over, and leaves a live one alone")
 sys.exit(1 if fails else 0)

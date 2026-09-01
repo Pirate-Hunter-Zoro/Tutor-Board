@@ -1418,6 +1418,14 @@ def cmd_restart(cfg, args):
         was_name = st.get("agent")
         name = resolve_agent(cfg, c) or was_name
         was = st.get("pid")
+        if not was:
+            # A record with no pid in it. It happens: a daemon killed with its
+            # state directory underneath it leaves half a file, and `os.kill`
+            # with None does not raise OSError -- it raises TypeError, which is
+            # not caught here and took the whole restart down with it, every
+            # course after this one included.
+            held.append("%s (no pid in its record)" % c["dir"])
+            continue
         try:
             os.kill(was, _sig.SIGTERM)
         except OSError:
