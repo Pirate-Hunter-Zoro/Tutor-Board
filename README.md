@@ -43,6 +43,28 @@ which kind of subject it is and the board adapts.
 >   board that is answering) but it is worth confirming: the port the HTTPS name points at should
 >   be the course they are working in.
 >
+> ### Where this is right now, 1 September 2026
+>
+> **Every past board was blank, and an evening's working was not on the surface at all.** Reported
+> from a Galois sitting on the Mac mini. Nothing was lost — the pages were on disk, saving
+> normally — but the surface never took them, so every dormant board was a photograph of a blank
+> sheet and every question read as work that had gone missing.
+>
+> The cause is the 31 August fix, undone by the order of two statements. `settled()` exists to
+> tell the board that the page count can be believed; it ran before the saved pages were adopted.
+> The board believed a count of one, ruled the question it was on to be filed past the end, and
+> cut a fresh page — and the adoption guard was `pages.length === 1`, so cutting that page is what
+> made the sitting unadoptable. A blank sheet refused an evening. Worse than the display: the next
+> stroke saved that blank page to disk under its new number, over a real one.
+>
+> Three things, because one of them is not enough on its own: the board is told last, adoption now
+> asks whether any page carries INK rather than counting sheets, and the question-to-page mapping
+> — which lives in localStorage, where nothing can tell a stale entry from a live one — is
+> repaired from the server's own record of the page each answer was sent from. That last one is
+> what brings an already-damaged evening back, and it only overrules an entry that is already
+> untrustworthy: absent, past the end, sharing a sheet, or pointing at a blank page.
+> `test/adopt.js`. Shell version `board-shell-v62`.
+>
 > ### Where this is right now, 31 August 2026
 >
 > **And then the other half of it, which is why switching courses never felt reliable.** Stopping the
@@ -470,6 +492,7 @@ these tests fail, the test is right.
 | Every past board read as empty and the working looked lost. Nothing was lost — the page held 537 strokes and was still saving. The surface is a plane: you pan down and carry on, the page box grows, and on a real evening's page the ink began 769 units down a box 1514 tall. `fitPage` parked the view at the top of the box, "where the writing begins", which is true of a fresh page and false of every page anyone has worked down — so opening it showed blank paper with the working below the fold, and a dormant board, being a photograph with nobody to pan it, showed the blank paper and nothing else | opening a page frames its ink, at the same page-width zoom so nothing is resized; the preview does the same, being a picture of the same page; `test/plane.js` records the transform, there being no other way to ask where a drawing looked |
 | A question was posed with nowhere to answer it: a preliminary marked right, the real problem asked, and no board. Going back to an earlier question pins the live surface there and nothing cleared the pin — `workingOn` was set by touching a board and outlived everything, the tutor asking something new included. The new question found the surface parked several cards above it, and having never been written on it had no page, and a question with no page drew no board at all. Both halves were mine, shipped the same evening the boards became reachable enough for anyone to hit them | a new question ends the excursion, the rule `reopenedFor` already had; and a question with no page shows a blank board rather than nothing; `test/feedback.js` |
 | A new board for the same question came up blank, and an evening's working ended up on one sheet with the mapping to it destroyed. `Slate.create` hands back ONE blank page synchronously — deliberately, so a stroke made before the network answers is not lost — and adopts the saved pages when `/slate/state` arrives. The board read that count to decide which page a question belongs on, so a question recorded against page 3 looked like one recorded past the end: its page was ruled gone, a fresh one was cut, and *that* was written down. Every reload refiled another question onto page 0. Nothing a person could see was lost, which is why it survived — the accident looked like continuity | `api.ready()` and the `onPages` callback; the board files nothing against a page count it has been told not to believe, and is called the moment the real one lands; `test/feedback.js` |
+| And then that fix was defeated by its own ordering, which cost the whole sitting rather than one mapping. `settled()` — the call whose entire job is to say *the page count can be believed now* — ran as the FIRST statement of the `/slate/state` handler, before the saved pages were adopted. So the board was told to believe a count of one, judged the question it was on to be recorded past the end, cut a fresh page for it, and by cutting it pushed the length to two. The adoption guard was `pages.length === 1`. It no longer held, so an evening on disk was refused in silence: every past board a blank photograph, and the next stroke saved a blank sheet over a real page under its new number. **The pattern, in a new coat: a guard written against the only thing that could break it at the time it was written** | the board is told last, once the pages are actually in; adoption asks whether any page has INK rather than how many sheets there are, so nothing blank can refuse a sitting; and the mapping is repaired from the page each answer records having been sent from, which is the one authority a browser cannot rot; `test/adopt.js` |
 | A skipped homework problem was dropped. One sentence told the tutor what a skip meant — "do not re-ask it, carry on" — which is right for a concept check and expensive for an assigned problem, where a skip is a lost mark and the student means *not now* | `skip_sense` reads the sitting: in homework the skip defers and names what is still owed, off the document rather than off anyone's memory; `homework.outstanding`, `board hw`, `test/begin.py`, `test/homework.py` |
 | A written answer was shown twice: a frozen picture of the ink under the question, and the board carrying the same ink under the feedback — one of them dead, and the dead one was the one you met first scrolling back up. The freezing was right when the slate was ONE surface that got written over, because then the picture was the only copy of what had been handed in; it stopped being right when every question got a page that is never wiped | the board is the answer; the turn keeps its heading and one line pointing at it, and the picture returns wherever there is no board — a filed lesson, a past one, a browser that never held the page; `test/feedback.js`, `test/interactive.js` |
 | Getting an exercise RIGHT deleted every writing board in the lesson. The boards were painted only while an answer was *owed*, and a `correct` card owes nothing — so finishing a problem left the transcript as frozen pictures of what had been sent, with no surface under any earlier question to add a line to. A picture is a record of an answer, not a place to write one | the boards are painted for the whole live lesson; the one question that goes without a picture is the one the real surface is sitting under; `test/feedback.js` |

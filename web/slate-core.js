@@ -1570,19 +1570,31 @@ function create(opts) {
   fitPage();
 
   fetch("/slate/state").then(function (r) { return r.json(); }).then(function (d) {
-    settled();
     var saved = (d.pages || []).filter(function (p) { return p && p.w && p.h; });
-    if (!saved.length) return;
     /* Only adopt saved pages if nothing has been drawn in the meantime --
-       whatever is under the pen wins over whatever the server remembered. */
-    if (pages.length === 1 && !pages[0].strokes.length) {
+       whatever is under the pen wins over whatever the server remembered.
+
+       "Nothing drawn" is about INK, not about the number of sheets. It used to
+       be `pages.length === 1`, which is the same thing only for as long as
+       nobody else can add a page -- and `settled()` used to run first, so the
+       board was told the count was trustworthy while it was still the stand-in
+       sheet, cut a page for the question it was on, and by doing so pushed the
+       length to two. The whole evening on disk was then refused adoption: every
+       board on the page a blank photograph, and the next stroke saved over a
+       real page under its new number. A blank sheet must never be able to
+       refuse a sitting. */
+    var untouched = pages.every(function (p) { return !p.strokes.length; });
+    if (saved.length && untouched) {
       pages = saved;
       current = pages.length - 1;
       dropInk();
       layout();
       fitPage();
     }
-    savedTag.textContent = "saved";
+    if (saved.length) savedTag.textContent = "saved";
+    /* Last, and it has to be last: this is what tells the board the count can
+       be believed, and it can only be believed once the pages above are in. */
+    settled();
   }).catch(function () { settled(); /* offline is fine; the page still works */ });
 
   /* Whether the saved pages have arrived -- either they did, or the request

@@ -883,6 +883,10 @@ function render(data) {
   }
   /* A past lesson is read only: no pen, no box, nothing to send into a session
      that has already been filed. */
+  /* Before anything reads the mapping: the surface may know more about where
+     this lesson's working actually is than this browser does. */
+  lastTurns = data.turns || [];
+  repairPages();
   placeWriter(owed && !data.archived, qNode, live);
   /* The boards do not come and go with the answer panel.
 
@@ -2118,6 +2122,60 @@ function savePages() {
   try { localStorage.setItem(pagesKey(), JSON.stringify(questionPage)); } catch (e) {}
 }
 
+/* The turns this lesson has, kept so the page mapping can be repaired against
+   them from wherever it is read. */
+var lastTurns = [];
+
+/* Which page a question sits on, taken back from the record when the record in
+   this browser has rotted.
+
+   `questionPage` lives in localStorage and there is nothing in a browser that
+   can tell a stale entry from a live one -- the pattern this repository keeps
+   relearning, one more time: a record with no way to expire. And it CAN rot: an
+   evening where the surface was told its page count too early was an evening
+   where question after question was refiled against a page it was never written
+   on, and the entry outlived the reload that made it.
+
+   The server knows better, and always did. Every answer handed in carries the
+   page it was sent from, so for any question that has been sent at all there is
+   an authority for where its working is, on disk, surviving this browser
+   entirely.
+
+   It is applied conservatively, because the record is not the whole truth: a
+   question written on and never sent has no record at all, and a page CLONED out
+   of a shared sheet has moved since the send that named it. So the record is
+   taken only where the entry in hand is already untrustworthy -- absent, past
+   the end of the pages, sharing a sheet with another question, or pointing at a
+   blank page when the record points at written-on one. A healthy mapping is left
+   exactly as it is. */
+function repairPages() {
+  if (!writer || !writer.ready || !writer.ready()) return;
+  var n = writer.pages();
+  var sentOn = {};
+  lastTurns.forEach(function (t) {
+    if (!t || t.kind !== "ink" || !t.answers) return;
+    if (typeof t.page !== "number") return;
+    var page = t.page - 1;                 /* the record is one-based */
+    if (page < 0 || page >= n) return;
+    var have = sentOn[t.answers];
+    if (!have || (t.t || 0) >= have.t) sentOn[t.answers] = { t: t.t || 0, page: page };
+  });
+  var changed = false;
+  for (var q in sentOn) {
+    var want = sentOn[q].page;
+    var now = questionPage[q];
+    if (now === want) continue;
+    var rotten = now === undefined
+              || now >= n
+              || pageOwnedByOther(now, q)
+              || (writer.inkOn && writer.inkOn(now) === 0 && writer.inkOn(want) > 0);
+    if (!rotten) continue;
+    questionPage[q] = want;
+    changed = true;
+  }
+  if (changed) savePages();
+}
+
 /* Every question has a board under it, and one of them is real.
 
    The board wanted, in the words it was asked for: it should LOOK like there
@@ -2473,6 +2531,9 @@ function restoreAnswer() {
 
      Waiting costs nothing: `onPages` calls this the moment the count is real. */
   if (!writer.ready || !writer.ready()) return;
+  /* The pages have only just become knowable, and this is the first thing to
+     read the mapping when they do. */
+  repairPages();
 
   if (answering.question && writer.fresh) {
     var q = answering.question;
