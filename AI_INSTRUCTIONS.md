@@ -197,6 +197,14 @@ preferred".
   besides. So the always-on host keeps `board` permanently and re-points `tailscale serve` at
   whichever machine is actually serving. Do not try to make the identity migrate across that
   boundary; the reasoning and the work list are in the README under "Not yet built".
+- **A course runs in ONE place, and a tap in the hub does not move it.** The tap records the
+  choice — that record is the only thing two machines can both read — and nothing else, unless this
+  machine owns its own name or already serves that course. It must never start a board, take the
+  tailnet name, or start a tutor for a course that lives on the other machine: that is two boards
+  for one course, **two tutors on one inbox** writing contradictory cards into one lesson, and the
+  address re-pointed at itself every tick. All three happened in one evening, 1 September 2026.
+  The follower places the address; a board with a tutor attached beats an empty room with the same
+  claim. `test/choice.py`.
 - **The tailnet address must never depend on the machine.** The node registers as `board`, not
   as the compute host, and its state lives in the shared home so the identity follows the user
   from node to node. The installed iPad app has one origin baked into it; changing that address

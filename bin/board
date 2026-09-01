@@ -535,7 +535,24 @@ def cmd_open(live, args):
             # bare dash on the board where the chapter line goes.
             chapter = review.sitting_label(chosen, review.kind(live.root) or "chapters")
 
+    # A chapter is its own thing, and its handoff goes with it.
+    #
+    # `HANDOFF.md` is the only continuity a session has, and it was continuity
+    # across the wrong boundary: opening Chapter 3 carried "left unfinished in
+    # Chapter 1" into it, and the new chapter's tutor read that and offered to go
+    # back for an exercise the student had closed. Reported in those words. So
+    # the handoff of the chapter being left is parked under its own name, and the
+    # one belonging to the chapter being opened -- if it has been taught before
+    # -- comes back.
+    was = live.state().get("chapter") or ""
+    if (chapter or "") != was:
+        parked = boardlib.park_handoff(live.root, was)
+        if parked:
+            print("  handoff for %s parked at %s"
+                  % (was or "the last sitting", os.path.relpath(parked, live.root)))
     cmd_archive(live, [])
+    if (chapter or "") != was and boardlib.restore_handoff(live.root, chapter):
+        print("  handoff from the last sitting on this chapter is back")
     live.set_state(course=course, chapter=chapter, session=session or "lecture",
                    finished=None, hw=None,
                    review=[u["name"] for u in chosen] or None,

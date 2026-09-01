@@ -46,6 +46,32 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 1 September 2026
 >
+> **A tap in the hub started a second board and a second tutor, and then fought the follower for
+> the address.** This is the one that made an evening unusable, and every symptom of it was
+> reported at once: *"Every time I try to tap on Probability I get bumped back to Galois Theory...
+> And NOW suddenly it bumped me to Probability and I can't get back."*
+>
+> `/switch` did three things on whichever machine happened to serve the hub: started the course's
+> board **here**, took the tailnet name for it **here** with `vpn serve`, and started a tutor for
+> it **here**. On one machine that is exactly right. On two it is the cause of all of it — a board
+> for one course on each machine, so the follower had a choice to make that should never have
+> existed; **two tutors on one lesson**, both blocked on the same inbox, both answering every
+> message (that evening's own handoff says it: *"Two headless sessions have been firing on the
+> same inbox messages all evening, and the other one is unreliable"* — cards contradicting each
+> other, a chapter archived mid-exercise by the run that was not teaching); and a tug-of-war over
+> the name, `vpn serve` pointing it here while the follower pointed it back, every tick.
+>
+> Now: the tap records the choice — always, because on a pair of machines that record is the only
+> thing both can read — and then does nothing else unless this machine owns its own name or
+> already serves that course. The follower places the address, which is its job. A board also
+> publishes whether it has a tutor at all, and the follower prefers a board with one over an empty
+> room with the same claim. `test/choice.py`.
+>
+> **Every course's board state was wiped at the student's request**, in one commit per repository:
+> cards, turns, ink, answers, archived lessons, inboxes and handoffs. The written-up work is
+> untouched — `chapters/`, the homework `.tex` and `.pdf`, the filed handwriting and the readings
+> are all outside `live/`. Nothing is destroyed; it is a commit, and the history has all of it.
+>
 > **"My writing didn't get saved when a new board came up."** Two things were behind that, and
 > only one of them was a bug.
 >

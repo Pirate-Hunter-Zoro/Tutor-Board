@@ -1226,6 +1226,19 @@ def board_cli(repo, args, timeout=90):
         return 1, str(exc)
 
 
+def fresh_tutor(root, course):
+    """Stop this course's assistant and start a new one, out of the way.
+
+    The name is the whole of it: what comes back has read the new chapter's
+    lesson and nothing else. `--wait` on the stop, so the two do not overlap;
+    a start against a daemon that is still going would be a second one.
+    """
+    def run():
+        tutor_cli(["agent", "stop", course, "--wait"], timeout=180)
+        tutor_cli(["agent", "start", course], timeout=120)
+    threading.Thread(target=run, daemon=True).start()
+
+
 def tutor_cli(args, timeout=30):
     """Drive the launcher from inside the server, for the agent handover.
 
@@ -1243,6 +1256,15 @@ def tutor_cli(args, timeout=30):
         return p.returncode, p.stdout.decode("utf-8", "replace")
     except (OSError, subprocess.TimeoutExpired) as exc:
         return 1, str(exc)
+
+
+def read_board_record(root):
+    """A course's `.board.json`, or None. Which machine, which pid, which port."""
+    try:
+        with open(os.path.join(root, "live", ".board.json"), "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
 
 
 def chosen_target():
@@ -1743,9 +1765,16 @@ class Handler(BaseHTTPRequestHandler):
             # Only the machine serving can know that -- the limit is written by
             # its own tutor into its own state directory -- so it is published
             # here for the same reason the choice is.
+            # `tutor` so the follower can prefer a board that actually has one.
+            # Two machines can end up with a board for the same course -- a tap
+            # in a hub used to start one wherever the tap landed -- and between
+            # a board with a tutor listening and a board with nobody behind it
+            # there is no contest: the second one is a lesson that cannot answer.
+            agent = load_agent(repo) or {}
             return self.send_json({"ok": True, "root": repo.root,
                                    "dir": os.path.basename(repo.root),
                                    "chosen": chosen_target(),
+                                   "tutor": agent.get("state") or None,
                                    "limited": boardlib.limited_until()})
         return self.send_bytes(b"not found", "text/plain", status=404)
 
@@ -1824,24 +1853,59 @@ class Handler(BaseHTTPRequestHandler):
             if not match:
                 return self.send_json({"ok": False, "error": "unknown course"}, status=404)
             target = os.path.join(os.path.dirname(repo.root), match["repo"])
-            code, out = board_cli(target, ["start"])
-            if code != 0:
-                return self.send_json({"ok": False, "error": out.strip()[-300:]}, status=500)
-            # A tap in the hub is a person saying which course they mean, which is
-            # the one thing that moves the address. Recording it first, because
-            # the always-on host follows the record and not the port scan; then
-            # `vpn serve`, which is the forced re-point -- an ordinary start
-            # deliberately will not take the name off a board that is answering,
-            # and every other course on this machine still is.
+
+            # A tap in the hub is a person saying which course they mean, and
+            # that -- the RECORD -- is the whole of what moves the address. It is
+            # written first and unconditionally, because on a pair of machines it
+            # is the only thing both of them can read.
             boardlib.remember_chosen(match["repo"], target)
-            board_cli(target, ["vpn", "serve"])
-            # The assistant follows the course: start one here if none is
-            # listening, and leave the other courses' alone -- they cost nothing
-            # while idle and keep the lesson in their head for the way back. It
-            # detaches, so this request does not wait on a model.
-            acode, aout = tutor_cli(["agent", "start", match["repo"]])
+
+            # What this machine does about it depends on whether this machine is
+            # the one that decides.
+            #
+            # It used to do all of it, everywhere: start the course's board here,
+            # take the tailnet name for it here, and start a tutor for it here --
+            # whichever machine happened to be serving the hub. On one machine
+            # that is exactly right. On two it is the cause of an evening's worth
+            # of damage reported on 1 September 2026:
+            #
+            #   - two boards for one course, one on each machine, so the follower
+            #     had a choice to make that should never have existed;
+            #   - two TUTORS for one course, both blocked on the same inbox,
+            #     both answering every message -- cards contradicting each other,
+            #     answers invented, one run archiving the other's chapter
+            #     mid-exercise. The handoff of that evening says it plainly:
+            #     "Two headless sessions have been firing on the same inbox
+            #     messages all evening, and the other one is unreliable";
+            #   - and a tug-of-war over the tailnet name, because `vpn serve`
+            #     here re-points it here while the always-on host's follower
+            #     re-points it there, every tick. From the iPad that is "every
+            #     time I tap Probability I get bumped back to Galois Theory".
+            #
+            # So: on a machine that owns its own name, do the lot. On a machine
+            # that does not, record the choice and let the follower place the
+            # address -- it reads the record off both machines and points at
+            # whichever one is actually serving that course.
+            shape = boardlib.machine_shape()
+            mine = boardlib.board_is_running(
+                (read_board_record(target) or {}).get("pid"), target)
+            started = ""
+            if shape == "standalone" or mine:
+                code, out = board_cli(target, ["start"])
+                if code != 0:
+                    return self.send_json({"ok": False, "error": out.strip()[-300:]},
+                                          status=500)
+                started = out.strip()
+                if shape == "standalone":
+                    board_cli(target, ["vpn", "serve"])
+                # The assistant follows the course, and only where the course is
+                # actually being served. Starting one from a tap on the other
+                # machine is how a lesson ends up with two.
+                acode, aout = tutor_cli(["agent", "start", match["repo"]])
+            else:
+                acode, aout = 0, "the course is served elsewhere; the address follows"
             return self.send_json({"ok": True, "repo": match["repo"],
-                                   "detail": out.strip(),
+                                   "detail": started or aout,
                                    "agent": aout.strip() if acode == 0 else None,
                                    "agent_error": None if acode == 0 else aout.strip()[-300:]})
 
@@ -1921,6 +1985,22 @@ class Handler(BaseHTTPRequestHandler):
                 course = repo.state().get("course") or read_config(repo.root)["name"] or ""
                 board_cli(repo.root, ["open", course, chapter,
                                       "--lecture" if kind == "lecture" else "--homework"])
+                # A chapter gets its own tutor.
+                #
+                # An assistant is long-lived on purpose -- one that survives being
+                # left still has the lesson in its head when you come back -- and
+                # across a chapter that is the wrong thing to have in its head.
+                # Reported an hour into Chapter 3: "the tutor is telling me that
+                # problems from chapter 1 are still incomplete. I don't like
+                # that." Its own conversation held the whole of Chapter 1, and no
+                # file on disk could have told it otherwise.
+                #
+                # On its own thread: stopping is a wrap-up TURN, which is a model
+                # call, and the person tapping a chapter is not waiting a minute
+                # to see the chapter change. The handoff that turn writes is
+                # stamped with the chapter it was teaching, so it is filed under
+                # that chapter rather than read as this one's.
+                fresh_tutor(repo.root, course)
 
             st = repo.state()
             st["session"] = kind

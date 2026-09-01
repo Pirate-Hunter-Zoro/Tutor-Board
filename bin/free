@@ -311,11 +311,23 @@ def brief_sources(root):
             os.path.join(root, "HANDOFF.md"))
 
 
+def chapter_now(root):
+    try:
+        with open(os.path.join(root, "live", "state.json"), "r", encoding="utf-8") as fh:
+            return (json.load(fh) or {}).get("chapter") or ""
+    except (OSError, ValueError):
+        return ""
+
+
 def build_brief(root):
     method = read(os.path.join(root, "live", "TEACHING.md"))
     contract = read(os.path.join(root, "AI_INSTRUCTIONS.md"))
     macros = read(os.path.join(root, "latex", "coursemacros.sty"))
-    handoff = read(os.path.join(root, "HANDOFF.md"))
+    # Only this chapter's. A handoff about a chapter that has been closed is the
+    # last chapter's unfinished business, and distilling it into the brief would
+    # feed it to every turn of the new one.
+    handoff = (read(os.path.join(root, "HANDOFF.md"))
+               if boardlib.handoff_applies(root, chapter_now(root)) else "")
     if not any((method, contract, handoff)):
         return ""
     prompt = (
@@ -394,6 +406,8 @@ def handoff(root):
         return 1
     with open(os.path.join(root, "HANDOFF.md"), "w", encoding="utf-8") as fh:
         fh.write(text.strip() + "\n")
+    # Which chapter it is about, while this is still the only thing that knows.
+    boardlib.stamp_handoff(root, chapter_now(root))
     return 0
 
 

@@ -185,6 +185,20 @@ def identifies_as(health, name):
     return who == name
 
 
+def has_tutor(host, port, timeout=2.0):
+    """Is there an assistant attached to the board answering here?
+
+    Between a board with a tutor listening and a board with nobody behind it
+    there is no contest, and until 1 September 2026 there was no rule about it:
+    a tap in a hub started a board for the chosen course on whichever machine
+    served the hub, so a course could be up on both -- one of them teaching, the
+    other an empty room with the same name. Preference alone then decided, and
+    preference does not know which one anybody is in.
+    """
+    health = probe(host, port, timeout=timeout)
+    return bool(health and health.get("tutor"))
+
+
 def limited(host, port, timeout=2.0):
     """Has this machine's tutor been told its allowance has run out?
 
@@ -358,6 +372,9 @@ def choose_target(node, cands, prefer="local"):
          did: a lesson was taken off the machine teaching it and handed to an
          unrelated course on the other one, because that course's board was up
          and answering. A board that is merely up has no claim on the address.
+      1.5. Among boards with an equal claim, one with a tutor attached beats one
+         with nobody behind it. Two boards for one course is a state that should
+         not exist and did: a tap in a hub started one wherever the tap landed.
       2. Among boards with an equal claim, one with an allowance beats one
          without. Two machines serving the same chosen course is exactly the case
          this decides, and it is unchanged: paid tutor, then the other machine,
@@ -389,6 +406,16 @@ def choose_target(node, cands, prefer="local"):
     # Rule 1, as a stable partition: preference still decides between two boards
     # with the same claim, and never overrides the claim itself.
     order = ([x for x in order if x[0][2]] + [x for x in order if not x[0][2]])
+
+    # Rule 1.5: among boards with the same claim, one with a tutor attached beats
+    # one without. A stable partition again, so it cannot promote a board that
+    # was not chosen -- an empty room is better than the wrong lesson, but a
+    # lesson with nobody to teach it is worse than the same lesson with somebody.
+    withtutor = [x for x in order if has_tutor(x[0][0], x[0][1])]
+    without = [x for x in order if x not in withtutor]
+    order = ([x for x in withtutor if x[0][2]] + [x for x in without if x[0][2]]
+             + [x for x in withtutor if not x[0][2]]
+             + [x for x in without if not x[0][2]])
 
     # Rule 2. Every one of these is a request over the network, so ask once each.
     graded = [(t, w, limited(t[0], t[1])) for t, w in order]

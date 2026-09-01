@@ -399,10 +399,7 @@ first, choose a manageable few, teach only what each one needs, pose one questio
 and stop. It ships with the board rather than with the course, so it is the same
 everywhere and cannot drift.
 
-**Read `HANDOFF.md` before your first card** if the repository has one. It is
-what the last session left for you: where the student got to, what they got
-wrong, and what comes next. Sessions end without warning — a switched course, a
-closed lid, an allocation that expired — so it is the only continuity there is.
+%(handoff)s
 
 **`board recap` is how you read the lesson, not `live/cards/` one file at a
 time.** One command prints the session, every card as a line, the newest card in
@@ -472,21 +469,50 @@ import time
 # re-read is charged again for the rest of the turn and again for the rest of the
 # session; a twelve-card lesson was paying twelve growing round trips before a
 # word of teaching was written. Nothing about teaching quality needed it.
+HANDOFF_CLAUSE = (
+    "**Read `HANDOFF.md` before your first card** if the repository has one. It is\n"
+    "what the last session left for you: where the student got to, what they got\n"
+    "wrong, and what comes next. Sessions end without warning — a switched course, a\n"
+    "closed lid, an allocation that expired — so it is the only continuity there is.")
+
+NO_HANDOFF_CLAUSE = (
+    "**There is no handoff for this chapter, and that is deliberate.** A chapter is\n"
+    "its own thing: what was left unfinished in an earlier one is not this chapter's\n"
+    "business, and bringing it in is exactly what the student asked to stop. Do not\n"
+    "go looking for it — not in `live/archive/`, not in `live/handoffs/`, not in an\n"
+    "older chapter's write-up. If they want to go back to an earlier chapter they\n"
+    "will say so, and reopening it brings that chapter's own handoff back with it.")
+
+
+def chapter_now(root):
+    """Which chapter is open, according to the board's own state."""
+    try:
+        with open(os.path.join(root, "live", "state.json"), "r", encoding="utf-8") as fh:
+            return (json.load(fh) or {}).get("chapter") or ""
+    except (OSError, ValueError):
+        return ""
+
+
+def handoff_clause(root):
+    """What to tell a tutor about the handoff -- including that there is none."""
+    return (HANDOFF_CLAUSE if boardlib.handoff_applies(root, chapter_now(root))
+            else NO_HANDOFF_CLAUSE)
+
+
 HEADLESS_FIRST_PROMPT = (
     "You are running headless: there is no terminal and nobody will read stdout. "
     "The student is on the board.\n\n"
     "Read these once, in this order: AI_INSTRUCTIONS.md (the contract for this "
     "course), live/TEACHING.md (the method -- the section's exercises first, a "
     "manageable few, teach only what each needs, one question per turn, then "
-    "stop), and HANDOFF.md at the root if it exists (where the last session got "
-    "to and what not to re-teach).\n\n"
+    "stop). %(handoff)s\n\n"
     # One call instead of one per card. The lesson is a transcript and an
     # assistant resuming it needs its shape, its last card and the student's last
     # move -- not every card re-read in full.
     "Then run `board recap`. That one command prints the session, every card as a "
     "single line, the newest card in full and the student's latest turn with its "
     "file paths. Do not read live/cards/ file by file; the recap is the lesson.\n\n"
-    "They just sent this:\n\n%s\n\n"
+    "They just sent this:\n\n%(inbox)s\n\n"
     "That text is the inbox -- it already carries every file path, so do not run "
     "`board inbox` as well; it has been marked read and will tell you nothing. "
     "Open anything the text names -- handwriting and PDFs: read them however your "
@@ -508,7 +534,7 @@ HEADLESS_RESUME_PROMPT = (
     "HANDOFF.md, or the cards in live/cards/.** Re-reading what is already in "
     "front of you is the most expensive thing you can do here and it teaches "
     "nothing.\n\n"
-    "They just sent this:\n\n%s\n\n"
+    "They just sent this:\n\n%(inbox)s\n\n"
     "That text is the inbox and carries every file path, so do not run `board "
     "inbox` as well. Open what it names -- handwriting and PDFs, read however your "
     "model sees images (open directly, or `describe_image` on the path and read "
@@ -1025,7 +1051,8 @@ def headless(cfg, course, agent_name, session):
     with open(os.path.join(live, "BRIEF.md"), "w", encoding="utf-8") as fh:
         fh.write(BRIEF % {"name": course.get("name") or course["dir"],
                           "mode": course.get("mode") or "unknown",
-                          "session": session or "lecture", "urls": urls})
+                          "session": session or "lecture", "urls": urls,
+                          "handoff": handoff_clause(root)})
 
     agent_state(live, host=host, agent=agent_name, pid=os.getpid(),
                 started=time.time(), state="listening", turns=0, last_error=None)
@@ -1064,6 +1091,10 @@ def headless(cfg, course, agent_name, session):
     threading.Thread(target=beat_transcript, daemon=True).start()
 
     turns = 0
+    # Which chapter this daemon has actually been teaching, refreshed each turn.
+    # Not read at the end: by then the board may have opened the next one, and
+    # the handoff would be stamped with a chapter it says nothing about.
+    taught_chapter = [chapter_now(root)]
     carried = 0          # turns the agent's current session is carrying
     # An inbox whose turn failed for a reason that has since been repaired. The
     # student sent something and got nothing back; `board wait` will not hand it
@@ -1134,7 +1165,15 @@ def headless(cfg, course, agent_name, session):
         # A script agent (the free tutor) builds its own context, so it gets the
         # raw inbox rather than the instruction prompt the interactive agents
         # expect -- its whole state is on disk and it re-reads what it needs.
-        prompt = out.strip() if spec.get("raw_prompt") else template % out.strip()
+        taught_chapter[0] = chapter_now(root) or taught_chapter[0]
+        fill = {"inbox": out.strip(),
+                # Only the chapter that is open. A handoff about another one is
+                # parked as this is read, so a tutor is never handed the last
+                # chapter's unfinished business as though it were this one's.
+                "handoff": (HANDOFF_CLAUSE
+                            if boardlib.handoff_applies(root, chapter_now(root))
+                            else NO_HANDOFF_CLAUSE)}
+        prompt = out.strip() if spec.get("raw_prompt") else template % fill
         cmd = [a.replace("{prompt}", prompt) for a in use]
         # Where this turn's own words begin, so that if it fails we can read
         # back what it said rather than guess at why.
@@ -1151,7 +1190,7 @@ def headless(cfg, course, agent_name, session):
                 # -- would produce a card written against no contract at all.
                 # Retry as what it actually is: a first turn.
                 log.write("!! resume failed, retrying as a fresh turn\n")
-                cmd = [a.replace("{prompt}", HEADLESS_FIRST_PROMPT % out.strip())
+                cmd = [a.replace("{prompt}", HEADLESS_FIRST_PROMPT % fill)
                        for a in first]
                 p = subprocess.run(cmd, cwd=root, stdout=log, stderr=subprocess.STDOUT,
                                    timeout=cfg.get("headless_timeout", 900))
@@ -1282,6 +1321,13 @@ def headless(cfg, course, agent_name, session):
             subprocess.run(cmd, cwd=root, stdout=log, stderr=subprocess.STDOUT,
                            timeout=cfg.get("handoff_timeout", 600))
             wrote = os.path.isfile(os.path.join(root, "HANDOFF.md"))
+            # Say which chapter it is about, now, while this is the only process
+            # that knows. The wrap-up is a model call and takes as long as it
+            # takes; by the time anybody reads the file the board may already
+            # have opened the next chapter, and an unstamped handoff would then
+            # be read as though it belonged to it.
+            if wrote:
+                boardlib.stamp_handoff(root, taught_chapter[0])
             log.write("handoff written\n" if wrote else "!! no HANDOFF.md was written\n")
         except (subprocess.TimeoutExpired, OSError) as exc:
             log.write("!! handoff failed: %s\n" % exc)
@@ -1812,6 +1858,7 @@ def main(argv):
         "mode": course.get("mode") or "unknown",
         "session": flags["session"] or "lecture",
         "urls": urls or "  (run: board net)",
+        "handoff": handoff_clause(course["root"]),
     }
     with open(os.path.join(live, "BRIEF.md"), "w", encoding="utf-8") as fh:
         fh.write(brief)
