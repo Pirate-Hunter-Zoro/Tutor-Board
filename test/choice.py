@@ -307,5 +307,85 @@ with open(boardlib.CHOSEN, "w", encoding="utf-8") as fh:
 check("a corrupt record is nobody's choice rather than a crash",
       boardlib.chosen_course() == {})
 
+# ---- who is allowed to record a choice -------------------------------------
+# The record is a DECISION, and the whole reason it exists is that it cannot be
+# derived from the filesystem: resuming a course touches its files, so "most
+# recently used" is self-reinforcing. That protection was quietly lost, not by
+# changing the record, but by letting machinery write it.
+#
+# `agent_start` spawns `tutor headless <course>`, and that command recorded a
+# choice. Its callers are all timers -- a login hook, the periodic tool pull, a
+# restart after a ship -- and `cmd_restart` calls it in a LOOP over the courses
+# on the machine. So every tick handed the address to whichever course the loop
+# happened to finish on, and because `tutor resume` READS that record to decide
+# what to bring back, the wrong course then re-elected itself for ever. A person
+# tapping the right one in the hub was overwritten by the next tick, which is
+# what "clicking Galois does nothing" looked like from an iPad.
+#
+# The rule now: machinery marks its spawn `--respawn` and records nothing; the
+# entry points that are a person naming a course do the recording themselves.
+print()
+
+import subprocess                                            # noqa: E402
+
+src_tutor = open(os.path.join(ROOT, "bin", "tutor"), encoding="utf-8").read()
+i = src_tutor.index("def agent_start(")
+check("every daemon machinery starts is marked as a respawn",
+      '"--respawn"' in src_tutor[i:i + 2000])
+
+home = tempfile.mkdtemp()
+courses_dir = os.path.join(home, "courses")
+for name in ("Galois-Theory", "Probability"):
+    os.makedirs(os.path.join(courses_dir, name, "live"), exist_ok=True)
+    open(os.path.join(courses_dir, name, "tutorboard.json"), "w").write("{}")
+
+cfg_dir = os.path.join(home, "config", "tutor-board")
+os.makedirs(cfg_dir, exist_ok=True)
+with open(os.path.join(cfg_dir, "config.json"), "w", encoding="utf-8") as fh:
+    json.dump({"courses_dir": courses_dir}, fh)
+chosen = os.path.join(cfg_dir, "chosen.json")
+
+env = dict(os.environ, XDG_CONFIG_HOME=os.path.join(home, "config"),
+           BOARD_STATE_DIR=os.path.join(home, "state"))
+
+
+def run_headless(*extra):
+    subprocess.run([sys.executable, os.path.join(ROOT, "bin", "tutor"), "headless",
+                    "Probability", "--agent", "nosuchagent"] + list(extra),
+                   env=env, cwd=home, stdout=subprocess.DEVNULL,
+                   stderr=subprocess.DEVNULL, timeout=120)
+
+
+def recorded():
+    try:
+        with open(chosen, encoding="utf-8") as fh:
+            return (json.load(fh) or {}).get("dir")
+    except (OSError, ValueError):
+        return None
+
+
+boardlib.remember_chosen.__doc__      # (the record under test is the file, not this process)
+with open(chosen, "w", encoding="utf-8") as fh:
+    json.dump({"dir": "Galois-Theory", "root": os.path.join(courses_dir, "Galois-Theory"),
+               "at": 1.0}, fh)
+
+run_headless("--respawn")
+check("a daemon put back by machinery does not touch the person's choice",
+      recorded() == "Galois-Theory")
+
+run_headless()
+check("and a person naming a course on the command line still records it",
+      recorded() == "Probability")
+
+check("the flag is a flag: the parser knows it, so it is never taken for a course",
+      'elif a == "--respawn":' in src_tutor)
+
+# The other half of the rule: the entry points that ARE a person still record.
+i = src_tutor.index('if sub == "start":')
+check("tutor agent start records the course somebody named",
+      "remember_course(course)" in src_tutor[i:i + 1200])
+check("and so does a tap in the hub",
+      "remember_chosen" in open(os.path.join(ROOT, "serve.py"), encoding="utf-8").read())
+
 print("\n%d FAILURES" % len(errors) if errors else "\nthe address follows the choice")
 sys.exit(1 if errors else 0)

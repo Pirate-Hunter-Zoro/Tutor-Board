@@ -73,6 +73,16 @@ preferred".
   is alphabetical order wearing a disguise, and it made tapping a course in the hub do nothing
   visible at all. A board also says who it is in `/health`, and no port is served without that name
   matching the course being looked for — a port is derived from a name and derivation is not proof.
+- **Only a person records a course choice.** `chosen.json` is the record the always-on host follows
+  to decide which lesson the one installed address opens, and it means *somebody asked for this*. It
+  exists precisely because the answer cannot be derived from disk — working in a course touches its
+  files, so "most recently used" re-elects itself. Machinery must therefore never write it:
+  `agent_start` spawns `tutor headless <course> --respawn`, and `--respawn` means *record nothing*.
+  Its callers are the login hook, the periodic pull, and `tutor restart --tutors`, which loops over
+  every course — so a write here handed the address to whichever course a loop finished on, and the
+  resume that read it back made the mistake permanent. The entry points that are a person naming a
+  course (`tutor <course>`, `tutor agent start <course>`, a tap in the hub) do the recording
+  themselves, before starting anything. `test/choice.py`.
 - **Cards are append-only files.** The assistant writes `live/cards/NNNN-slug.md` and never edits
   a card the student has already read, except to fix a genuine error — the board is a transcript.
 - **A card carries what the tutor SAID, never what it thought.** Every model worth teaching with

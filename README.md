@@ -45,6 +45,31 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 31 August 2026
 >
+> **A refresh dropped somebody into another course, and the hub could not get them out.** Reported
+> mid-Galois: a refresh opened Probability, and tapping Galois Theory did nothing — Probability came
+> straight back. One defect, two symptoms, and it is the 28 August defect (*the tailnet name went to
+> whichever course came last*) returned through a door nobody was watching.
+>
+> `agent_start` spawns `tutor headless <course>`, and that command recorded a course choice — the
+> record whose entire purpose is to say *a person asked for this*, because it cannot be derived from
+> the filesystem. But every caller of `agent_start` is machinery: the login hook, the periodic
+> `tool-pull`, and `tutor restart --tutors` after a ship, which calls it in a **loop** over the
+> courses on the machine. So each tick wrote down whichever course the loop finished on. Then
+> `tutor resume` reads that record to decide what to bring back — so the wrong course re-elected
+> itself, for ever, and a tap in the hub survived only until the next tick.
+>
+> **The pattern, again, and it is worth naming precisely this time:** not a rule with no way to
+> expire, but *a derivation wearing a decision's clothes*. `remember_course`'s own docstring says
+> the record exists because "resuming a course touches its files too, so most recently used is
+> self-reinforcing" — and the fix for that was defeated by letting the resume write the record
+> instead of the file. When you add a caller to something that records intent, ask whether that
+> caller is a person. Machinery now spawns with `--respawn` and records nothing; `tutor agent start`
+> and the hub tap record it themselves, because those are somebody naming a course. `test/choice.py`.
+>
+> This one was self-inflicted in the most literal way available: the ship above is what moved the
+> address off the Galois lesson that reported the bug above it. **Check the address after every
+> ship** is written three paragraphs from the top of this file for a reason.
+>
 > **The tutor's own thinking was on the board, and it was the whole card.** Reported from a Galois
 > sitting on the Mac mini: a turn came back as the model's private deliberation rather than a lesson.
 > The Mac is the one machine that can produce it — it holds the address, so when its allowance runs
@@ -380,6 +405,7 @@ these tests fail, the test is right.
 | Annotation ink was faceted and jagged next to the slate's: the layer joined raw pointer samples with straight lines, redrew every stroke inside the pointer handler, and never asked for the samples the Pencil actually took | `test/link.js` |
 | A `begin` signal sent while no tutor was attached was invisible for ever: `board wait` took the unread count at start as a baseline and returned only when it grew, so the first tap did nothing and the second one woke it | `test/begin.py` |
 | A resumed turn was told to re-read the contract, the method, the handoff and every card — about fourteen thousand tokens it was already carrying, plus a round trip per card | `test/tokens.py` |
+| A refresh landed in another course, and tapping the right one in the hub changed nothing: `agent_start` spawns `tutor headless <course>`, which recorded a *person's* course choice — and its callers are all timers, one of which loops over every course, so each tick handed the address to whichever course the loop finished on, and `tutor resume` then re-elected it from the record it had just written | `test/choice.py` |
 | The tutor's own thinking was written onto the board as the lesson: the free chain's models reason in the first person about the student, and the reply was taken from `message.content` and used whole | `test/reasoning.py`, and `boardlib.strip_reasoning` on the wire and again at `board write` |
 | And it was the whole card rather than a preamble to it, because the front-matter parser was anchored at position zero — anything in front of the opening `---` sent the reply down the branch that makes the entire text the body | `test/reasoning.py` |
 | The "is a tutor attached" dot could never go green outside headless: only the daemon ever wrote `agent.json`, and a heartbeat is the wrong test for a session that is idle whenever its person is thinking | `test/agents.py`, `test/begin.py` |

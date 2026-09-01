@@ -884,8 +884,15 @@ def agent_start(cfg, course, agent_name, session=None):
     sync(root, quiet=True)
 
     os.makedirs(live_dir, exist_ok=True)
+    # `--respawn` says this daemon was started by machinery rather than by a
+    # person, and the only thing it changes is that the spawned process does NOT
+    # record a course choice. Every caller here is a machine deciding to put a
+    # tutor back where one already was -- a login hook, a periodic pull, a
+    # restart after a ship -- and none of them is somebody saying which lesson
+    # the address should open. The entry points that ARE somebody saying so
+    # record it themselves before they get here; see the hub tap in `serve.py`.
     cmd = [sys.executable, os.path.realpath(__file__), "headless", course["dir"],
-           "--agent", agent_name]
+           "--agent", agent_name, "--respawn"]
     if session:
         cmd.append("--" + session)
     out = open(os.path.join(live_dir, "agent.log"), "a", buffering=1)
@@ -961,6 +968,11 @@ def cmd_agent(cfg, args):
         # no reason to make attention exclusive. They still write their handoff
         # when they are actually stopped.
         name = resolve_agent(cfg, course, _flag(args, "--agent"))
+        # Somebody named this course -- on the command line, or by tapping it in
+        # the hub, which comes through here. That is a decision and it moves the
+        # address; `agent_start` deliberately no longer records one, because its
+        # other callers are timers.
+        remember_course(course)
         code, msg = agent_start(cfg, course, name)
         print(msg, file=sys.stderr if code else sys.stdout)
         return code
@@ -1675,7 +1687,8 @@ def cmd_where(cfg, args):
 
 def main(argv):
     cfg = load_config()
-    args, flags = [], {"session": None, "agent": None, "no_agent": False, "over": []}
+    args, flags = [], {"session": None, "agent": None, "no_agent": False,
+                       "over": [], "respawn": False}
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -1710,6 +1723,8 @@ def main(argv):
                 flags["over"].append(argv[i])
         elif a == "--no-agent":
             flags["no_agent"] = True
+        elif a == "--respawn":
+            flags["respawn"] = True
         elif a == "--stop":
             pass
         elif a == "--agent":
@@ -1741,7 +1756,16 @@ def main(argv):
             return headless_stop(cfg, rest)
         found = courses(cfg)
         course = pick(found, rest[0]) if rest else choose(found)
-        remember_course(course)
+        # Only when a person asked for this. `agent_start` spawns exactly this
+        # command with `--respawn`, and it is spawned in a LOOP over the courses
+        # on this machine -- so recording here handed the address to whichever
+        # course the loop finished on, every login, every periodic pull, every
+        # ship. That is the 28 August defect back through a different door, and
+        # it is worse than the original: because the record is what `tutor
+        # resume` reads to decide, the wrong course re-elected itself for ever,
+        # and a tap on the right one in the hub was overwritten by the next tick.
+        if not flags["respawn"]:
+            remember_course(course)
         return headless(cfg, course, resolve_agent(cfg, course, flags["agent"]),
                         flags["session"])
 
