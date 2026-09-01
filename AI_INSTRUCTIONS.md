@@ -133,6 +133,17 @@ preferred".
   the device that made it. Decided by the person whose lesson it is, on the argument that a
   correct answer is written up into the document and the transcript is not the archival copy.
   `test/feedback.js` and `test/interactive.js` hold both halves of the rule.
+- **An export is the whole conversation, numbered, and kept.** `board export` and the board's own
+  menu produce one document per sitting: the tutor's cards *and* every page the student handed in,
+  as the picture that was sent, in the board's own reading order. Both halves, for the same reason
+  `board archive` keeps both -- a folder of the assistant's cards with the student's half missing
+  is a record of half a conversation. It goes in `transcripts/`, which git can see, under
+  `<lesson>-vN` -- **numbered, never a timestamp**, asked for in those words -- and it is staged
+  rather than committed, because a commit mid-lesson is the person's decision. `document.py` is
+  the only exporter; the board and the CLI both call it. Two things there are load-bearing and
+  neither is obvious: Unicode in a card is a fatal pdflatex error and is mapped or dropped, and
+  graphicx, xcolor and hyperref load *after* the course's own macros with no options, because an
+  option clash is fatal too. `test/document.py`.
 - **A question is a chain of boards, and nothing takes one away.** One board per attempt: it is
   frozen exactly where it was written as soon as what it holds has been handed in *and* the tutor
   has written something since, and the next attempt opens on a **copy** of it. Both halves of that

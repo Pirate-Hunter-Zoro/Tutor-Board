@@ -15,7 +15,8 @@ which kind of subject it is and the board adapts.
 
 **Contents** — [What it is not](#what-it-is-not) · [The three surfaces](#the-three-surfaces) ·
 [Commands](#commands) · [Writing a card](#writing-a-card) · [The slate](#the-slate--writing-by-hand)
-· [Getting work back](#getting-work-back) · [Any agent](#any-agent-not-just-one) ·
+· [Getting work back](#getting-work-back) ·
+[Exporting it](#exporting-the-whole-conversation) · [Any agent](#any-agent-not-just-one) ·
 [Layout](#layout) · [Setup, start to finish](#setup-start-to-finish) ·
 [Networking](#networking-reaching-it-from-anywhere) · [The iPad app](#the-ipad-app) ·
 [What is verified](#what-is-verified-and-what-is-not)
@@ -44,6 +45,32 @@ which kind of subject it is and the board adapts.
 >   be the course they are working in.
 >
 > ### Where this is right now, 1 September 2026
+>
+> **And the lesson can now leave the board as a document.** Asked for in the same sitting: the
+> whole tutor-and-student conversation as one PDF to show a professor, tracked in git, and
+> numbered rather than stamped with the time -- "that'll be an eyesore". `board export`, and **⋯ →
+> export this lesson** on the iPad, writes `transcripts/<lesson>-v1.pdf` and counts up from there;
+> `--all` puts every filed lesson and the open one into a single document with a contents page.
+>
+> What it exports is both halves. The old `board export` wrote the tutor's cards alone, with a
+> timestamp for a name, into a directory the course's `.gitignore` throws away -- a record of half
+> a conversation that nobody can find and nothing keeps. It now interleaves every page that was
+> handed in, as the picture that was actually sent, labelled with which attempt it is, in the
+> order the board itself reads them. Written up under [Exporting the whole
+> conversation](#exporting-the-whole-conversation); `document.py` owns it and `test/document.py`
+> holds it, including a real LaTeX run wherever there is a LaTeX.
+>
+> **Two things that will bite somebody and are worth knowing.** A model writes prose with arrows
+> and Greek in it, and every one of those characters is a *fatal* error to pdflatex rather than a
+> warning -- the first real lesson this was pointed at died on the down arrow in the word “save”.
+> Known characters are mapped to the command that draws them and the rest are dropped, because a
+> missing glyph beats no document. And a course's own `coursemacros.sty` loads hyperref its own
+> way, so the export loads graphicx, xcolor and hyperref *after* it and with no options: an option
+> clash is also fatal.
+>
+> **Not verified, and only the device can settle it:** whether a ten-attempt exercise reads well
+> as ten full-page images, and how long a whole-course export takes on the Mac with an evening's
+> worth of handwriting in it. Shell version `board-shell-v64`.
 >
 > **Then the boards within one exercise, which is the same ask one level down.** With the pages
 > adopted again, the report was that boards persist between questions and not inside one: write,
@@ -516,6 +543,7 @@ these tests fail, the test is right.
 | A new board for the same question came up blank, and an evening's working ended up on one sheet with the mapping to it destroyed. `Slate.create` hands back ONE blank page synchronously — deliberately, so a stroke made before the network answers is not lost — and adopts the saved pages when `/slate/state` arrives. The board read that count to decide which page a question belongs on, so a question recorded against page 3 looked like one recorded past the end: its page was ruled gone, a fresh one was cut, and *that* was written down. Every reload refiled another question onto page 0. Nothing a person could see was lost, which is why it survived — the accident looked like continuity | `api.ready()` and the `onPages` callback; the board files nothing against a page count it has been told not to believe, and is called the moment the real one lands; `test/feedback.js` |
 | And then that fix was defeated by its own ordering, which cost the whole sitting rather than one mapping. `settled()` — the call whose entire job is to say *the page count can be believed now* — ran as the FIRST statement of the `/slate/state` handler, before the saved pages were adopted. So the board was told to believe a count of one, judged the question it was on to be recorded past the end, cut a fresh page for it, and by cutting it pushed the length to two. The adoption guard was `pages.length === 1`. It no longer held, so an evening on disk was refused in silence: every past board a blank photograph, and the next stroke saved a blank sheet over a real page under its new number. **The pattern, in a new coat: a guard written against the only thing that could break it at the time it was written** | the board is told last, once the pages are actually in; adoption asks whether any page has INK rather than how many sheets there are, so nothing blank can refuse a sitting; and the mapping is repaired from the page each answer records having been sent from, which is the one authority a browser cannot rot; `test/adopt.js` |
 | Only one board per question ever existed, so within an exercise the earlier attempts did not persist: you write, hand it in, the tutor replies, and the board that "appeared" under the reply was the same board slid down the run. Reported as "the previous board for this same question that I have not yet completed doesn't persist... I want ALL boards to persist and to operate independently of each other" | a question is a chain, one board per attempt: frozen where it was written as soon as what it holds has been handed in AND the tutor has answered since — both halves, or Send forks the page under your hand and a second hint cuts a board about nothing — and the next attempt opens on a COPY, which is the only way the working carries forward and the two are still independent; `test/chain.js` |
+| `board export` wrote the tutor's cards and nothing else, named with the second it happened, into `live/export/` -- which a course's `.gitignore` throws away. Half a conversation, unfindable, unkept. Asked for instead: the whole thing as one PDF to show a professor | `document.py` interleaves every card and every page handed in, in the board's own reading order and labelled by attempt; it lands in `transcripts/<lesson>-vN.pdf`, is staged in git, and `--all` makes one document of the whole course; `test/document.py` |
 | A skipped homework problem was dropped. One sentence told the tutor what a skip meant — "do not re-ask it, carry on" — which is right for a concept check and expensive for an assigned problem, where a skip is a lost mark and the student means *not now* | `skip_sense` reads the sitting: in homework the skip defers and names what is still owed, off the document rather than off anyone's memory; `homework.outstanding`, `board hw`, `test/begin.py`, `test/homework.py` |
 | A written answer was shown twice: a frozen picture of the ink under the question, and the board carrying the same ink under the feedback — one of them dead, and the dead one was the one you met first scrolling back up. The freezing was right when the slate was ONE surface that got written over, because then the picture was the only copy of what had been handed in; it stopped being right when every question got a page that is never wiped | the board is the answer; the turn keeps its heading and one line pointing at it, and the picture returns wherever there is no board — a filed lesson, a past one, a browser that never held the page; `test/feedback.js`, `test/interactive.js` |
 | Getting an exercise RIGHT deleted every writing board in the lesson. The boards were painted only while an answer was *owed*, and a `correct` card owes nothing — so finishing a problem left the transcript as frozen pictures of what had been sent, with no surface under any earlier question to add a line to. A picture is a record of an answer, not a place to write one | the boards are painted for the whole live lesson; the one question that goes without a picture is the one the real surface is sitting under; `test/feedback.js` |
@@ -1782,6 +1810,44 @@ it works with or without this tool:
 - Nothing to commit is a success, not an error; unpushed commits still get pushed.
 - No `origin` means it commits locally and says so.
 
+## Exporting the whole conversation
+
+A lesson on the board is a scroll on a piece of glass. Somebody eventually has to *show* it —
+to a professor, to themselves in a fortnight — and neither a screenshot nor a print of the page
+is a document.
+
+```
+board export                     # this lesson
+board export --all               # every lesson in the course, as one
+```
+
+and, on the iPad, **⋯ → export this lesson** or **export the whole course**. It writes both
+halves of the sitting in the order they happened — the tutor's cards typeset from their own
+markdown and mathematics, and *every page you handed in*, as the picture that was actually sent,
+labelled `You wrote — attempt 2 of 5` with the time. An exercise worked over ten attempts is ten
+pages of your own handwriting with the tutor's replies between them, which is the record of the
+work rather than a summary of it.
+
+It lands in `transcripts/` — outside `live/`, which is runtime state a course repository ignores
+— as `<lesson>-v1.pdf`, then `-v2.pdf`, then `-v3.pdf`. **Numbered, never stamped with the time.**
+A folder of `20260901-143210-...` is an eyesore and still does not answer the only question anyone
+asks of it, which is which one is the latest. The `.tex` is kept beside the PDF, because the
+source is the record and a PDF nobody can rebuild is a dead end; the images are named relative to
+the repository, so it still builds on another machine.
+
+Both files are `git add`-ed as soon as they are written — **staged, not committed**. An export
+happens in the middle of a lesson and a commit in the middle of a lesson is a decision the person
+makes, so it goes with the next `⤓ save` or `board push` like everything else.
+
+`--all` puts every filed lesson and the one still open into a single document with a contents
+page, each sitting named by the moment it was filed and the open one saying *(in progress)* —
+because two evenings on the same chapter carry the same label in `state.json` and a table of
+contents that cannot tell them apart is not one.
+
+What it costs: a LaTeX run of a minute or so for a long course, and the board says so while it
+waits. A failure never loses the source — the `.tex` is written and staged either way, and the
+error appears on the board rather than in a log nobody opens.
+
 ## Setting up a course repository
 
 The minimum is nothing at all: make a directory next to this one and run `board start` inside it.
@@ -1795,9 +1861,10 @@ Everything below is optional, and each item buys something specific.
    use in your `.tex` files works unchanged on the board. Without it you still get the shared set
    in `web/macros.js` — `\QQ`, `\degree{L}{K}`, `\Gal`, `\PP`, `\EE` and the rest.
 
-3. **`scripts/build.sh`** *(optional)* — if it exists, `board export --build` uses it instead of
-   the built-in compile, so an exported lesson comes out through the same pipeline as the rest of
-   your documents. It is called with one argument, the path to a `.tex` file.
+3. **`scripts/build.sh`** *(optional)* — how this repository compiles a `.tex` file, called with
+   one argument, the path to it. `board hw build` uses it, so a homework write-up comes out
+   through the same pipeline as the rest of your documents. (The transcript export compiles
+   itself, because it has to work in a repository that has no build script at all.)
 
 4. **`AI_INSTRUCTIONS.md`** — how the assistant should teach *this* subject. The board is a
    display; this is the contract. It is also what marks a directory as a course if you have no
@@ -1887,7 +1954,8 @@ board recap                      # the lesson so far, in one call
 board inbox                      # what the student sent back, with file paths
 board slate                      # just the pages written on the iPad
 board wait --timeout 300         # block until the student sends something
-board export --build             # the whole lesson as a typeset PDF
+board export                     # the whole conversation, as transcripts/<lesson>-vN.pdf
+board export --all               # every lesson in the course, as one document
 board hw                         # this sitting's problem set: what is still empty
 board hw build                   # compile it; the result lands on the board
 board hw file 7.2                # file a sent page into the set's handwritten/
@@ -2155,8 +2223,14 @@ live/
   slate/           page-NN.json (strokes) and page-NN.png (what the assistant reads)
   tikzcache/       compiled SVG, keyed by content hash
   archive/         previous lessons, filed by `board open` or `board archive`
-  export/          .tex and PDF produced by `board export`
   .board.json      which node, which pid, which port
+```
+
+and one directory outside `live/`, because it is meant to be kept and the rest of `live/` is
+runtime state:
+
+```
+transcripts/       <lesson>-v1.pdf, -v2.pdf … written by `board export`
 ```
 
 ---

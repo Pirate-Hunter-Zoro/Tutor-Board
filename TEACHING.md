@@ -426,6 +426,12 @@ Sessions end by being abandoned far more often than they end tidily, so do not
 leave the write-up for a moment that may not arrive. An exercise agreed at
 half past is typeset by twenty-five to, not at the end of the evening.
 
+The transcript of the sitting is not your job either. The student can export the
+whole conversation — your cards and every page they handed in — as a numbered PDF
+from the board's own menu, or with `board export`. Do not assemble one by hand, and
+do not paste the lesson back into a card so that it can be "kept": it is already
+kept, and the export is what turns it into something they can hand to somebody.
+
 ## Sections are permanent, so do not cram
 <!-- mode: math -->
 

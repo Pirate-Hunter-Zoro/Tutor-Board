@@ -32,6 +32,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 import boardlib
+import document
 import homework
 import review
 import syllabus
@@ -912,6 +913,21 @@ def load_push(repo):
         return None
 
 
+def load_export(repo):
+    """The outcome of the last export, for the same reason.
+
+    A LaTeX run is a minute of somebody staring at an iPad, and the answer to
+    "did that work" cannot be a line in a terminal nobody is looking at. It also
+    has to survive the payload that lands the moment it finishes, which is why
+    it is a file rather than a message.
+    """
+    try:
+        with open(os.path.join(repo.live, "export.json"), "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
 def hw_needs_building(repo):
     """The sitting's problem set, if its PDF is missing or older than its source.
 
@@ -1428,6 +1444,7 @@ class Hub:
             "text_drafts": load_text_drafts(self.repo),
             "unsaved": repo_dirty(self.repo),
             "push": load_push(self.repo),
+            "export": load_export(self.repo),
             "agent": load_agent(self.repo),
             "history": len(list_archive(self.repo)),
         }
@@ -1756,6 +1773,28 @@ class Handler(BaseHTTPRequestHandler):
                     json.dump(st, fh, indent=2)
             self.server.hub.worker.dirty.set()
             return self.send_json(record)
+
+        if path == "/export":
+            # The whole conversation as one document. It can take a minute of
+            # LaTeX, so the board is told what happened rather than left to
+            # guess -- and the record it gets back is the same one the CLI
+            # prints, because there is one exporter and it lives in document.py.
+            try:
+                payload = json.loads(self.read_body().decode("utf-8") or "{}")
+            except Exception:
+                payload = {}
+            scope = "all" if payload.get("scope") == "all" else "lesson"
+            try:
+                rec = document.build(repo.root, scope=scope)
+            except Exception as e:                       # noqa: BLE001
+                rec = {"ok": False, "detail": "export failed: %s" % e}
+            rec["at"] = time.time()
+            rec["iso"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            with open(os.path.join(repo.live, "export.json"), "w", encoding="utf-8") as fh:
+                json.dump(rec, fh, indent=2)
+            _DIRTY["value"] = None      # the new file is uncommitted; say so
+            self.server.hub.worker.dirty.set()
+            return self.send_json(rec)
 
         if path == "/dismiss-finish":
             st = repo.state()

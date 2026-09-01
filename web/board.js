@@ -773,7 +773,7 @@ function render(data) {
   var started = (data.cards || []).length > 0;
   els.empty.hidden = started || linkDead;
 
-  paintSession(state, data.push, data.agent);
+  paintSession(state, data.push, data.agent, data.export);
   paintHomework(data.hw);
   paintReview(state, data.review);
   if (!started) paintWaiting(data);
@@ -1094,7 +1094,7 @@ function lastLine(text) {
   return lines.length ? lines[lines.length - 1].trim().slice(0, 160) : "";
 }
 
-function paintSession(state, push, agent) {
+function paintSession(state, push, agent, exported) {
   /* Whether an assistant is attached, and whether it is thinking. Without this
      the page looks identical when nothing is listening at all. */
   /* Never hidden. A blank space where this belongs reads as "fine", and it is
@@ -1150,19 +1150,59 @@ function paintSession(state, push, agent) {
     if (!savePrompted()) els.finish.hidden = true;
   }
 
-  if (!push || push.at <= pushDismissed) {
+  /* One banner, two things that can land in it. A push and an export are both
+     "something slow happened, here is how it went", and the newer one is the
+     one the person is waiting on -- an export triggers a payload the moment it
+     finishes, and without this that payload would repaint the banner with a
+     push from an hour ago. */
+  var last = push;
+  if (exported && (!push || (exported.at || 0) > (push.at || 0))) last = exported;
+  if (!last || last.at <= pushDismissed) {
     els.pushed.hidden = true;
     return;
   }
   els.pushed.hidden = false;
-  els.pushed.className = "pushed " + (push.ok ? "ok" : "bad");
-  els.pushedIcon.textContent = push.ok ? "✓" : "✕";
-  if (push.ok) {
-    var first = (push.detail || "").split("\n").filter(function (l) { return l.trim(); });
-    els.pushedText.textContent = (first[first.length - 1] || "pushed") + " · " + push.iso;
+  els.pushed.className = "pushed " + (last.ok ? "ok" : "bad");
+  els.pushedIcon.textContent = last.ok ? "✓" : "✕";
+  if (last === exported) {
+    els.pushedText.textContent = last.ok
+      ? (last.pdf || last.tex) + " — saved in the repository, and staged for "
+        + "the next save"
+      : "Export failed — "
+        + ((last.detail || "no detail").split("\n")[0] || "no detail");
+  } else if (last.ok) {
+    var first = (last.detail || "").split("\n").filter(function (l) { return l.trim(); });
+    els.pushedText.textContent = (first[first.length - 1] || "pushed") + " · " + last.iso;
   } else {
-    els.pushedText.textContent = "Push failed — " + (push.detail || "no detail");
+    els.pushedText.textContent = "Push failed — " + (last.detail || "no detail");
   }
+}
+
+/* The whole conversation as one document.
+
+   Asked for from the device: something to show a professor. A print of the
+   board is a screenshot of a scroll; this is the lesson typeset -- the tutor's
+   cards and the pages that were handed in, in the order they happened -- kept
+   in the repository under a numbered name, because "which one is the latest"
+   should not mean reading a timestamp. */
+function doExport(scope) {
+  els.pushed.hidden = false;
+  els.pushed.className = "pushed";
+  els.pushedIcon.textContent = "…";
+  els.pushedText.textContent = scope === "all"
+    ? "building the whole course — LaTeX takes a moment…"
+    : "building this lesson as a PDF…";
+  return fetch("/export", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ scope: scope || "lesson" })
+  }).then(function (r) { return r.json(); })
+    .then(function (rec) { paintSession({}, null, null, rec); })
+    .catch(function () {
+      els.pushed.className = "pushed bad";
+      els.pushedIcon.textContent = "✕";
+      els.pushedText.textContent = "Export failed — could not reach the board";
+    });
 }
 
 /* Is the standing prompt one the student raised, rather than the end of a
@@ -1183,7 +1223,7 @@ function doPush() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({})
   }).then(function (r) { return r.json(); })
-    .then(function (rec) { paintSession({}, rec); })
+    .then(function (rec) { paintSession({}, rec, null, null); })
     .catch(function () {
       els.pushed.className = "pushed bad";
       els.pushedIcon.textContent = "✕";
@@ -3124,6 +3164,8 @@ document.getElementById("btn-theme").onclick = function () {
   applyTheme(next);
 };
 document.getElementById("btn-print").onclick = function () { window.print(); };
+document.getElementById("btn-export").onclick = function () { doExport("lesson"); };
+document.getElementById("btn-export-all").onclick = function () { doExport("all"); };
 document.getElementById("btn-reload").onclick = function () { location.reload(); };
 /* Nothing live has ever arrived, so the shell itself may be a cached one --
    reload rather than merely re-open the stream. */
