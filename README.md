@@ -46,6 +46,15 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 1 September 2026
 >
+> **And reaching, which is the same wall from the other side.** A machine in userspace mode cannot
+> open a tailnet connection either: from the compute node, the address does not resolve and the
+> Mac's IP has no route — both measured. The launcher has always started tailscaled with
+> `--socks5-server=localhost:1055`, and nothing ever used it. A health probe now falls back to
+> that proxy, so the node can ask the Mac what it is serving instead of assuming nobody is there —
+> which is how a second board and a second tutor for one course were getting started. Never for
+> loopback, where a proxy cannot help and would only let a test's make-believe ports leak onto the
+> real tailnet.
+>
 > **The measurement that settled it, and the mechanism that actually works.** Binding the tailnet
 > address is the obvious fix and it fails on the one machine that matters: a compute node without
 > administrator rights runs tailscaled in *userspace* mode, where the address exists and no

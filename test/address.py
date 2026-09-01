@@ -196,5 +196,24 @@ src_follow = open(os.path.join(ROOT, "bin", "follow"), encoding="utf-8").read()
     "and the follower finds a course wherever it is, rather than only at a "
     "hostname out of a config file that a new allocation invalidates")
 
+# Reaching, as well as being reached.
+#
+# A machine running tailscaled in userspace mode cannot open a tailnet
+# connection through the ordinary socket API either: from the compute node,
+# `curl https://board.tail0c6c62.ts.net/` does not resolve and
+# `curl http://100.79.20.10:9098/` has no route. Measured, both. The launcher has
+# always started tailscaled with `--socks5-server=localhost:1055`, and nothing
+# used it -- so every question the node asked about the other machine came back
+# "nobody is there", which is how a second board and a second tutor for one
+# course get started.
+src_lib = open(os.path.join(ROOT, "boardlib.py"), encoding="utf-8").read()
+(ok if "def socks_proxy(" in src_lib and "--socks5-server=" in src_lib else fail)(
+    "the SOCKS proxy tailscaled is already running is found rather than assumed")
+(ok if "proxy = socks_proxy()" in src_lib else fail)(
+    "and a health probe falls back to it when the ordinary socket cannot route, "
+    "which on a machine with no administrator rights is always")
+(ok if "def _proc_cmdlines(" in src_lib else fail)(
+    "found by reading what is actually running, not by assuming a port number")
+
 print("\n%d FAILURES" % len(errors) if errors else "\nthe address stays with the course")
 sys.exit(1 if errors else 0)

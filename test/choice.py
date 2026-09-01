@@ -48,6 +48,10 @@ def check(m, cond):
     ok(m) if cond else fail(m)
 
 
+# This suite reasons about which board wins, so it must not reach the real
+# tailnet, where the answer depends on what happens to be running tonight.
+os.environ["BOARD_NO_TAILNET"] = "1"
+
 import boardlib                                              # noqa: E402
 
 spec = importlib.util.spec_from_loader(
