@@ -388,9 +388,9 @@ const withNew = Object.assign({}, lesson, {
     ? ok('arriving at a new question never wipes the surface')
     : fail('the surface is still cleared when a new question arrives — that is a '
            + 'page of working, deleted, because the tutor asked something else');
-  /writer\.fresh\(/.test(restore) && /questionPage\[/.test(restore)
-    ? ok('each question gets a page of its own instead')
-    : fail('there is no page per question, so answers still share one surface');
+  /writer\.fresh\(/.test(restore) && /boardPage\[/.test(restore)
+    ? ok('each board gets a page of its own instead')
+    : fail('there is no page per board, so answers still share one surface');
   /inkOn\(\)\s*>\s*0/.test(restore)
     ? ok('and a page with ink on it is never overwritten from the server')
     : fail('the server can still replace working written since the last send');
@@ -689,6 +689,15 @@ const withNew = Object.assign({}, lesson, {
       try { return JSON.parse(window.localStorage.getItem(KEY) || '{}'); }
       catch (e) { return {}; }
     };
+    // A question is a chain of boards now, so what is filed against a page is
+    // the attempt in hand: the last board that question has.
+    const pageFiled = (q) => {
+      const map = filedIn();
+      const keys = Object.keys(map).filter((k) => k.slice(0, k.lastIndexOf('#')) === q);
+      keys.sort((a, b) => parseInt(a.split('#')[1], 10) - parseInt(b.split('#')[1], 10));
+      const rec = keys.length ? map[keys[keys.length - 1]] : null;
+      return rec ? rec.p : undefined;
+    };
     const fresh41 = Object.assign({}, lesson, {
       cards: [card('0041', 'question', 'a question never seen before', 1)],
       turns: [],
@@ -698,7 +707,7 @@ const withNew = Object.assign({}, lesson, {
     slate.ready = () => false;
     es.onmessage({ data: JSON.stringify(fresh41) });
     await sleep(20);
-    filedIn()['0041'] === undefined
+    pageFiled('0041') === undefined
       ? ok('a question arriving before the pages do is not filed against one')
       : fail('the board filed a question against a page number it had been told '
              + 'not to believe, and wrote it down — which is the whole defect');
@@ -707,7 +716,7 @@ const withNew = Object.assign({}, lesson, {
     slate.ready = realReady;
     es.onmessage({ data: JSON.stringify(fresh41) });
     await sleep(20);
-    filedIn()['0041'] !== undefined
+    pageFiled('0041') !== undefined
       ? ok('and is filed the moment the real pages arrive')
       : fail('the question never got a page even after the surface was ready');
 
@@ -840,7 +849,17 @@ const withNew = Object.assign({}, lesson, {
     try { return JSON.parse(window.localStorage.getItem(KEY2) || '{}'); }
     catch (e) { return {}; }
   };
-  const first = filed()['0071'];
+  const lastKey = (map, q) => {
+    const keys = Object.keys(map).filter((k) => k.slice(0, k.lastIndexOf('#')) === q);
+    keys.sort((a, b) => parseInt(a.split('#')[1], 10) - parseInt(b.split('#')[1], 10));
+    return keys.length ? keys[keys.length - 1] : null;
+  };
+  const pageOfQ = (q) => {
+    const map = filed();
+    const k = lastKey(map, q);
+    return k ? map[k].p : undefined;
+  };
+  const first = pageOfQ('0071');
   first !== undefined
     ? ok('the first question is given a page')
     : fail('no page was filed for the first question');
@@ -850,7 +869,7 @@ const withNew = Object.assign({}, lesson, {
     cards: two.cards.concat([card('0072', 'question', 'the second', 2)]),
   })) });
   await sleep(20);
-  const second = filed()['0072'];
+  const second = pageOfQ('0072');
   second !== undefined
     ? ok('and so is the second')
     : fail('no page was filed for the second question');
@@ -865,7 +884,7 @@ const withNew = Object.assign({}, lesson, {
   // the state the old code left behind.
   {
     const map = filed();
-    map['0072'] = map['0071'];
+    map[lastKey(map, '0072')].p = map[lastKey(map, '0071')].p;
     window.localStorage.setItem(KEY2, JSON.stringify(map));
     // The board keeps its own copy in memory; drive the collision through the
     // path that repairs it by making 0072 the question in hand.

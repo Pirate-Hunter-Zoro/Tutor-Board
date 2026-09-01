@@ -133,6 +133,17 @@ preferred".
   the device that made it. Decided by the person whose lesson it is, on the argument that a
   correct answer is written up into the document and the transcript is not the archival copy.
   `test/feedback.js` and `test/interactive.js` hold both halves of the rule.
+- **A question is a chain of boards, and nothing takes one away.** One board per attempt: it is
+  frozen exactly where it was written as soon as what it holds has been handed in *and* the tutor
+  has written something since, and the next attempt opens on a **copy** of it. Both halves of that
+  condition are load-bearing — freezing on the send alone forks the page every time somebody
+  presses Send to check their working, and freezing on any card at all cuts a board for a hint
+  about working nobody has sent. The copy is what makes "all my prior work is on it" and
+  "independently of each other" true at the same time, and it is why a new attempt must never be a
+  blank sheet or the same sheet. Asked for from the device on 1 September 2026, in those words.
+  The record is one entry per board — `"<question>#<attempt>": { p, a }` in `board.pages`, per
+  course — and every board keeps the card it sits under, because a reload has no other way to know
+  where it goes. `test/chain.js`.
 - **Two courses, two session boundaries.** Maths ends a session when the chapter does, which is
   what `board open` marks. Code ends it at the commit: `board push` archives and starts the next
   one, because a commit is what "we got this working" means. Do not invent a third.

@@ -560,9 +560,13 @@ function render(data) {
      page -- the mapping is local to the device that wrote it -- or a surface
      that has not been built yet. */
   function onABoard(m) {
-    return live && !!writer && m.kind === "ink" && !!m.png
-           && !!m.answers && !!isQuestion[m.answers]
-           && questionPage[m.answers] !== undefined;
+    if (!(live && !!writer && m.kind === "ink" && !!m.png
+          && !!m.answers && !!isQuestion[m.answers])) return false;
+    var found = false;
+    slotsOf(m.answers).forEach(function (k) {
+      if (boardPage[k].p !== undefined) found = true;
+    });
+    return found;
   }
 
   /* Feedback supersedes feedback. An answer is versioned and only its newest
@@ -830,8 +834,32 @@ function render(data) {
      to add a line to the proof under it is ordinary work, not an edge case. */
   var qids = ordered.filter(function (c) { return c.kind === "question"; })
                     .map(function (c) { return c.id; });
-  if (workingOn && qids.indexOf(workingOn) === -1) workingOn = null;
-  var onQ = workingOn || newestQ;
+
+  /* Where each question's run ends: the last card written before the next
+     question was asked. The newest board of a question sits there, because an
+     answer belongs under the feedback it is answering. */
+  var runEndOf = Object.create(null);
+  var openQ = null;
+  ordered.forEach(function (c) {
+    if (c.kind === "question") { openQ = c.id; runEndOf[c.id] = c.id; return; }
+    if (openQ) runEndOf[openQ] = c.id;
+  });
+
+  /* Before anything reads the mapping: bring the chain of boards up to date with
+     the transcript, and let the surface -- which may know more about where this
+     lesson's working actually is than this browser does -- correct it. */
+  lastTurns = data.turns || [];
+  syncSlots(qids, runEndOf, lastTurns);
+  repairPages();
+
+  /* Which BOARD is being written on. Usually the attempt in hand on the newest
+     question; whichever they picked, if they went back to an earlier one. A
+     board that has scrolled off the top of the transcript is still a board, and
+     going back to add a line to the proof on it is ordinary work. */
+  if (workingOn && (!boardPage[workingOn]
+                    || qids.indexOf(slotQ(workingOn)) === -1)) workingOn = null;
+  var liveKey = workingOn || (newestQ ? newestSlot(newestQ) : null);
+  var onQ = liveKey ? slotQ(liveKey) : newestQ;
 
   var mine = (data.turns || []).filter(function (t) {
     return t.kind === "ink" && t.answers === onQ;
@@ -857,18 +885,14 @@ function render(data) {
      surface stays where it is and says so underneath itself -- see paintSent.
      What it must never do is sit under a frozen copy of the very ink still
      showing on the surface: that is the same thing twice, one above the other. */
-  /* The surface goes at the end of the QUESTION'S OWN run -- after the last card
-     written before the next question was asked. For the newest question that is
-     the end of the transcript, which is where it has always gone; for an earlier
-     one it is directly under the feedback that question got, which is the same
-     rule and the same reason. */
-  var runEndOf = Object.create(null);
-  var openQ = null;
-  ordered.forEach(function (c) {
-    if (c.kind === "question") { openQ = c.id; runEndOf[c.id] = c.id; return; }
-    if (openQ) runEndOf[openQ] = c.id;
-  });
-  var runEnd = runEndOf[onQ] || null;
+  /* The surface goes where the BOARD it is standing in for goes -- the attempt
+     in hand at the end of the question's own run, or, if they went back, exactly
+     where that earlier attempt was written. For the newest question the end of
+     the run is the end of the transcript, which is where the surface has always
+     gone; for an earlier one it is directly under the feedback that question
+     got, which is the same rule and the same reason. */
+  var runEnd = (liveKey && boardPage[liveKey] && boardPage[liveKey].a)
+             || runEndOf[onQ] || null;
   var qNode = runEnd
     ? els.cards.querySelector('[data-card="' + runEnd + '"]')
     : null;
@@ -883,10 +907,7 @@ function render(data) {
   }
   /* A past lesson is read only: no pen, no box, nothing to send into a session
      that has already been filed. */
-  /* Before anything reads the mapping: the surface may know more about where
-     this lesson's working actually is than this browser does. */
-  lastTurns = data.turns || [];
-  repairPages();
+  liveSlot = liveKey;
   placeWriter(owed && !data.archived, qNode, live);
   /* The boards do not come and go with the answer panel.
 
@@ -898,10 +919,10 @@ function render(data) {
      the device, in exactly those words: "I want the actual writing board
      containing my response".
 
-     The one board that is not drawn is the question the LIVE surface is sitting
-     under, because that one is really there. With the panel shut there is no
-     such question, and every one of them gets its picture. */
-  paintBoards(qids, runEndOf, els.writer.hidden ? null : onQ, !live);
+     The one board that is not drawn is the one the LIVE surface is standing in
+     for, because that one is really there. With the panel shut there is no such
+     board, and every one of them gets its picture. */
+  paintBoards(qids, els.writer.hidden ? null : liveKey, !live);
   /* Offered exactly when there is no surface to write on: the tutor has written
      something, and nothing is owed. */
   if (els.reopen) {
@@ -2079,16 +2100,49 @@ var lastNewestQ = "";
    boards became reachable enough for anyone to hit it. */
 var workingOn = null;
 var workingOnAt = null;
-/* Which slate page belongs to which question.
- 
-   One page per question, and no page is ever destroyed. The surface used to be
-   cleared whenever a new question arrived -- with the reasoning that the next
-   answer should not start on top of the last one, which is true, and with the
-   consequence that a page of somebody's proof was deleted because the tutor
-   asked something else, which is not acceptable. Two hours of Exercise 1.3 went
-   that way. Kept per course, because the pages are. */
+/* The board the surface is standing in for, as `render` last worked it out.
+   `workingOn` is a request; this is the answer to it, and it is what
+   `restoreAnswer` puts under the pen. */
+var liveSlot = null;
+/* Which slate page belongs to which board.
+
+   A question is not one board. It is a CHAIN of them, and that is what an
+   exercise actually looks like: you write, you hand it in, the tutor answers
+   underneath, and the next attempt carries on below the answer. Each of those
+   attempts is a board of its own -- it stays where it was written, it keeps what
+   was on it, and it can still be written on, because going back up an exercise
+   to add a line to an earlier attempt is ordinary work.
+
+   It used to be one page per question, and the single board slid down the run to
+   sit under the newest card. So the earlier attempts did not persist: there was
+   never more than one board per question to persist. Reported from a Galois
+   sitting, in these words: "the previous board for this same question that I
+   have not yet completed doesn't persist... I want ALL boards to persist and to
+   operate independently of each other."
+
+   Independently is the load-bearing word, and it is why a new attempt opens on a
+   COPY of the one before it rather than on the same sheet. The working carries
+   forward -- what is under the pen is everything written so far, which is what
+   a correction needs -- and the board above keeps what it had, for ever, because
+   they are two pages from the moment the copy is taken.
+
+   No page is ever destroyed. The surface used to be cleared whenever a new
+   question arrived -- with the reasoning that the next answer should not start
+   on top of the last one, which is true, and with the consequence that a page of
+   somebody's proof was deleted because the tutor asked something else, which is
+   not acceptable. Two hours of Exercise 1.3 went that way.
+
+   The record is one entry per BOARD, kept per course because the pages are:
+
+       "<question>#<attempt>": { p: <page index>, a: <card it sits under> }
+
+   `p` is missing on a board nobody has written on yet -- it is cut the moment
+   somebody touches it, so a question the student never reached does not leave a
+   sheet behind. `a` is where the board sits: the newest board of a question
+   floats to the end of that question's run, because an answer belongs under the
+   feedback it is answering, and it stops floating the moment it is frozen. */
 var PAGES_KEY = "board.pages";
-var questionPage = {};
+var boardPage = {};
 var pagesLoaded = false;
 
 function pagesKey() {
@@ -2097,29 +2151,115 @@ function pagesKey() {
 }
 
 function loadPages() {
-  try { questionPage = JSON.parse(localStorage.getItem(pagesKey()) || "{}") || {}; }
-  catch (e) { questionPage = {}; }
+  var raw = {};
+  try { raw = JSON.parse(localStorage.getItem(pagesKey()) || "{}") || {}; }
+  catch (e) { raw = {}; }
+  boardPage = {};
+  for (var k in raw) {
+    var v = raw[k];
+    /* Before a question could have more than one board, the record was the page
+       number alone under the question's own id. That is its first attempt, and
+       where it sits is worked out on the next render. */
+    if (typeof v === "number") boardPage[slotKey(k, 0)] = { p: v, a: null };
+    else if (v && typeof v === "object") {
+      boardPage[k.indexOf("#") === -1 ? slotKey(k, 0) : k] =
+        { p: typeof v.p === "number" ? v.p : undefined, a: v.a || null };
+    }
+  }
 }
 
-/* Does any OTHER question already own this page?
+function savePages() {
+  try { localStorage.setItem(pagesKey(), JSON.stringify(boardPage)); } catch (e) {}
+}
 
-   One question per page is the rule and nothing enforced it. The slate hands
-   back a trailing blank page rather than cutting a new one every time -- right,
-   or every question leaves an empty sheet behind it -- but two questions in a
-   row that reach it before either is written on both get the same index. From
-   then on they are the same sheet: writing on the earlier board changes the
-   later one, which is what it looks like from the outside and is exactly what it
-   is. The slate cannot know; it deals in ink, not in questions. */
-function pageOwnedByOther(n, q) {
+/* A board's name is its question and which attempt it is. */
+function slotKey(q, n) { return q + "#" + n; }
+function slotQ(key) { return key.slice(0, key.lastIndexOf("#")); }
+function slotN(key) {
+  var n = parseInt(key.slice(key.lastIndexOf("#") + 1), 10);
+  return isNaN(n) ? 0 : n;
+}
+
+/* Every board a question has, oldest attempt first. */
+function slotsOf(q) {
+  var out = [];
+  for (var k in boardPage) { if (slotQ(k) === q) out.push(k); }
+  out.sort(function (a, b) { return slotN(a) - slotN(b); });
+  return out;
+}
+
+/* The one an answer goes on now: the last attempt of the question. */
+function newestSlot(q) {
+  var all = slotsOf(q);
+  return all.length ? all[all.length - 1] : null;
+}
+
+function pageOf(key) {
+  var rec = key && boardPage[key];
+  return rec ? rec.p : undefined;
+}
+
+/* Does any OTHER board already own this page?
+
+   One board per page is the rule and nothing enforced it. The slate hands back a
+   trailing blank page rather than cutting a new one every time -- right, or
+   every board leaves an empty sheet behind it -- but two boards that reach it
+   before either is written on both get the same index. From then on they are the
+   same sheet: writing on the earlier one changes the later one, which is what it
+   looks like from the outside and is exactly what it is. The slate cannot know;
+   it deals in ink, not in questions. */
+function pageOwnedByOther(n, key) {
   if (n === undefined || n < 0) return false;
-  for (var k in questionPage) {
-    if (k !== q && questionPage[k] === n) return true;
+  for (var k in boardPage) {
+    if (k !== key && boardPage[k].p === n) return true;
   }
   return false;
 }
 
-function savePages() {
-  try { localStorage.setItem(pagesKey(), JSON.stringify(questionPage)); } catch (e) {}
+/* The chain of boards, brought up to date with the transcript.
+
+   A board is frozen -- left exactly where it is, with what is on it -- as soon
+   as two things are true of it: what it holds has been handed in, and the tutor
+   has written something since. The next attempt then opens on a copy, so the
+   working carries forward and the two go their own ways from there.
+
+   Both halves are needed. Freezing on the send alone would cut a board every
+   time somebody pressed Send to check their working, and freezing on the
+   tutor's card alone would cut one for a hint about working that has not been
+   handed in yet. It is the reply to an answer that ends an attempt. */
+function syncSlots(qids, runEndOf, turns) {
+  var changed = false;
+  var handedIn = {};                  /* question -> the page its answer came off */
+  (turns || []).forEach(function (t) {
+    if (!t || t.kind !== "ink" || !t.answers) return;
+    if (typeof t.page === "number") handedIn[t.answers] = t.page - 1;
+  });
+  var ready = !!(writer && writer.ready && writer.ready());
+  qids.forEach(function (q) {
+    var end = runEndOf[q] || q;
+    var key = newestSlot(q);
+    if (!key) {
+      /* A question nobody has reached yet still has a board: it says the
+         question can be answered here, and touching it cuts the page. */
+      boardPage[slotKey(q, 0)] = { p: undefined, a: end };
+      changed = true;
+      return;
+    }
+    var rec = boardPage[key];
+    var sent = rec.p !== undefined && handedIn[q] === rec.p;
+    if (sent && rec.a && rec.a !== end) {
+      /* Handed in, and answered underneath. This attempt is finished with:
+         freeze it here and open the next one on a copy of it. */
+      if (!ready) return;             /* the pages are not knowable yet; next render */
+      boardPage[slotKey(q, slotN(key) + 1)] = { p: writer.clone(rec.p), a: end };
+      changed = true;
+    } else if (!sent || !rec.a) {
+      /* Still the attempt in progress, so it follows the end of the run: the
+         place to answer is under the last thing the tutor said. */
+      if (rec.a !== end) { rec.a = end; changed = true; }
+    }
+  });
+  if (changed) savePages();
 }
 
 /* The turns this lesson has, kept so the page mapping can be repaired against
@@ -2129,7 +2269,7 @@ var lastTurns = [];
 /* Which page a question sits on, taken back from the record when the record in
    this browser has rotted.
 
-   `questionPage` lives in localStorage and there is nothing in a browser that
+   `boardPage` lives in localStorage and there is nothing in a browser that
    can tell a stale entry from a live one -- the pattern this repository keeps
    relearning, one more time: a record with no way to expire. And it CAN rot: an
    evening where the surface was told its page count too early was an evening
@@ -2142,12 +2282,18 @@ var lastTurns = [];
    entirely.
 
    It is applied conservatively, because the record is not the whole truth: a
-   question written on and never sent has no record at all, and a page CLONED out
-   of a shared sheet has moved since the send that named it. So the record is
-   taken only where the entry in hand is already untrustworthy -- absent, past
-   the end of the pages, sharing a sheet with another question, or pointing at a
-   blank page when the record points at written-on one. A healthy mapping is left
-   exactly as it is. */
+   board written on and never sent has no record at all, and a page CLONED out of
+   a shared sheet has moved since the send that named it. So the record is taken
+   only where the entry in hand is already untrustworthy -- absent, past the end
+   of the pages, sharing a sheet with another board, or pointing at a blank page
+   when the record points at a written-on one. A healthy mapping is left exactly
+   as it is.
+
+   Which board of a question the record is about is not in doubt: an answer is
+   versioned rather than re-sent, so a question has one turn and its page is the
+   page of the attempt in hand. If any board of that question already holds it --
+   they went back and handed in an earlier attempt -- there is nothing to repair
+   and nothing to move. */
 function repairPages() {
   if (!writer || !writer.ready || !writer.ready()) return;
   var n = writer.pages();
@@ -2163,14 +2309,19 @@ function repairPages() {
   var changed = false;
   for (var q in sentOn) {
     var want = sentOn[q].page;
-    var now = questionPage[q];
-    if (now === want) continue;
+    var keys = slotsOf(q);
+    if (!keys.length) continue;            /* nothing to repair onto yet */
+    var held = false;
+    keys.forEach(function (k) { if (boardPage[k].p === want) held = true; });
+    if (held) continue;
+    var key = keys[keys.length - 1];
+    var now = boardPage[key].p;
     var rotten = now === undefined
               || now >= n
-              || pageOwnedByOther(now, q)
+              || pageOwnedByOther(now, key)
               || (writer.inkOn && writer.inkOn(now) === 0 && writer.inkOn(want) > 0);
     if (!rotten) continue;
-    questionPage[q] = want;
+    boardPage[key].p = want;
     changed = true;
   }
   if (changed) savePages();
@@ -2192,11 +2343,15 @@ function repairPages() {
    handed straight through so its first stroke is not eaten by the swap. The
    difference is invisible until you write, which is exactly when it stops
    existing. */
-function boardSlot(qid) {
-  var slot = els.cards.querySelector('[data-board="' + qid + '"]');
+function boardSlot(key, qid) {
+  var slot = els.cards.querySelector('[data-slot="' + key + '"]');
   if (slot) return slot;
   slot = document.createElement("section");
   slot.className = "board";
+  /* The board's own name, and the question it belongs to. Both, because a
+     question has several boards and everything outside this function -- the
+     transcript's way back to the working, the tests -- asks about a question. */
+  slot.dataset.slot = key;
   slot.dataset.board = qid;
   slot.innerHTML =
     '<div class="board-head">'
@@ -2208,12 +2363,12 @@ function boardSlot(qid) {
     + ' decoding="async" loading="lazy">';
 
   var goLive = function (ev, andSend) {
-    if (workingOn === qid && !els.writer.hidden) return;
-    /* Touching a board is asking to write on that question, and `workingOn` is
-       already the whole of that ask: an answer is owed wherever it points, so
-       this opens the panel on a lesson the tutor has marked right without
-       needing a second flag to say so. */
-    workingOn = qid;
+    if (workingOn === key && !els.writer.hidden) return;
+    /* Touching a board is asking to write on THAT board -- this attempt, not
+       merely this question -- and `workingOn` is already the whole of that ask:
+       an answer is owed wherever it points, so this opens the panel on a lesson
+       the tutor has marked right without needing a second flag to say so. */
+    workingOn = key;
     workingOnAt = lastNewestQ;
     reopenedFor = null;
     if (lastLive) render(lastLive);
@@ -2235,9 +2390,12 @@ function boardSlot(qid) {
 }
 
 /* Go to the board that carries a question's working, wherever it is on the page:
-   the picture of it, or the live surface if that question is the one open. */
+   the picture of it, or the live surface if that question is the one open. A
+   question has a chain of boards; the one meant here is the attempt in hand,
+   which is the last of them. */
 function showBoardFor(qid) {
-  var n = els.cards.querySelector('[data-board="' + qid + '"]');
+  var all = els.cards.querySelectorAll('[data-board="' + qid + '"]');
+  var n = all.length ? all[all.length - 1] : null;
   if (!n && !els.writer.hidden && answering.question === qid) n = els.writer;
   if (n && n.scrollIntoView) n.scrollIntoView({ block: "center", behavior: "smooth" });
 }
@@ -2260,33 +2418,49 @@ function handOnStroke(ev, sheet) {
   sheet.dispatchEvent(copy);
 }
 
-/* One board per question, each at the end of its own question's run, and the
-   live one swapped in for whichever is being answered. */
-function paintBoards(qids, runEndOf, onQ, off) {
+/* Every board this lesson has, each under the card it was written beneath, and
+   the live surface swapped in for whichever one is being written on. */
+function paintBoards(qids, liveKey, off) {
+  /* Every board in the lesson, in reading order, with which attempt of its
+     question it is. */
+  var all = [];
+  qids.forEach(function (qid) {
+    var attempts = slotsOf(qid);
+    attempts.forEach(function (key, i) {
+      all.push({ key: key, qid: qid, n: i + 1, of: attempts.length });
+    });
+  });
   var live = {};
-  qids.forEach(function (qid) { live[qid] = true; });
-  Array.prototype.forEach.call(els.cards.querySelectorAll("[data-board]"),
+  all.forEach(function (it) { live[it.key] = true; });
+
+  Array.prototype.forEach.call(els.cards.querySelectorAll("[data-slot]"),
                                function (node) {
-    /* The question being answered has the real surface, so its picture goes --
+    /* The board being written on has the real surface, so its picture goes --
        leaving it would show the board twice, once alive and once as a
        photograph of a moment ago. */
-    if (off || !live[node.dataset.board] || node.dataset.board === onQ) {
+    if (off || !live[node.dataset.slot] || node.dataset.slot === liveKey) {
       node.remove();
     }
   });
   if (off || !writer) return;
 
-  qids.forEach(function (qid) {
-    if (qid === onQ) return;                       /* the real one goes here */
-    var anchor = els.cards.querySelector('[data-card="' + runEndOf[qid] + '"]');
+  all.forEach(function (it) {
+    if (it.key === liveKey) return;                /* the real one goes here */
+    var rec = boardPage[it.key];
+    var anchor = els.cards.querySelector('[data-card="' + rec.a + '"]');
     if (!anchor || !anchor.parentNode) return;
-    var slot = boardSlot(qid);
+    var slot = boardSlot(it.key, it.qid);
     if (anchor.nextSibling !== slot) {
       anchor.parentNode.insertBefore(slot, anchor.nextSibling);
     }
     slot.hidden = false;
-    slot.querySelector(".board-hint").textContent = "question " + qid + " · tap to write";
-    var page = questionPage[qid];
+    /* Which attempt this is, but only once there is more than one -- on a
+       question answered in one go the number is noise. */
+    var which = it.of > 1
+      ? "question " + it.qid + " · attempt " + it.n + " of " + it.of
+      : "question " + it.qid;
+    slot.querySelector(".board-hint").textContent = which + " · tap to write";
+    var page = rec.p;
     if (page === undefined) {
       /* Never written on, so there is no picture to take -- but a blank board is
          still a board. It says the question can be answered here, and touching it
@@ -2300,7 +2474,7 @@ function paintBoards(qids, runEndOf, onQ, off) {
          was on disk the whole time. A board is allowed to be empty; it is not
          allowed to be ambiguous about it. */
       slot.querySelector(".board-hint").textContent =
-        "question " + qid + " · nothing written here yet · tap to write";
+        which + " · nothing written here yet · tap to write";
       var blank = slot.querySelector(".board-shot");
       if (slot.dataset.shot !== "blank") {
         blank.removeAttribute("src");
@@ -2535,27 +2709,27 @@ function restoreAnswer() {
      read the mapping when they do. */
   repairPages();
 
-  if (answering.question && writer.fresh) {
-    var q = answering.question;
-    var want = questionPage[q];
+  if (liveSlot && boardPage[liveSlot] && writer.fresh) {
+    var rec = boardPage[liveSlot];
+    var want = rec.p;
     if (want === undefined || want >= writer.pages()) {
-      /* First time on this question. A blank page at the end, unless the page in
-         hand is still blank -- in which case it is already the right one, and
-         adding another would leave an empty page behind on every question. That
-         reuse is right only while the blank page belongs to nobody: hand it to a
-         second question and the two share a sheet, which is one board changing
+      /* Nobody has written on this board yet. A blank page at the end, unless
+         the page in hand is still blank -- in which case it is already the right
+         one, and adding another would leave an empty page behind on every board.
+         That reuse is right only while the blank page belongs to nobody: hand it
+         to a second board and the two share a sheet, which is one board changing
          when you write on another. */
-      want = writer.fresh(pageOwnedByOther(writer.pages() - 1, q));
-      questionPage[q] = want;
+      want = writer.fresh(pageOwnedByOther(writer.pages() - 1, liveSlot));
+      rec.p = want;
       savePages();
-    } else if (pageOwnedByOther(want, q)) {
+    } else if (pageOwnedByOther(want, liveSlot)) {
       /* Already sharing. Give this one its own copy: the working stays where it
          is on screen -- nothing disappears out from under anybody -- and from
-         here the two boards go their own ways. Repaired when the question is
-         opened rather than in a sweep, because that is when the copy becomes the
-         page in hand and the ordinary save carries it to disk. */
+         here the two boards go their own ways. Repaired when the board is opened
+         rather than in a sweep, because that is when the copy becomes the page in
+         hand and the ordinary save carries it to disk. */
       want = writer.clone(want);
-      questionPage[q] = want;
+      rec.p = want;
       savePages();
       loadedTurn = null;
     } else if (want !== writer.at()) {

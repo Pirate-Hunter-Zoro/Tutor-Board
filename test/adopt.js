@@ -215,12 +215,15 @@ function surface(saved, onPages) {
 
     let filed = {};
     try { filed = JSON.parse(window.localStorage.getItem(KEY) || '{}'); } catch (e) {}
-    filed['0005'] === 3
+    // A question is a chain of boards; the record is about the attempt in hand,
+    // which for both of these questions is the first and only one.
+    const pageOfQ = (q) => (filed[q + '#0'] || {}).p;
+    pageOfQ('0005') === 3
       ? ok('a question filed onto another question\'s sheet is put back on the '
            + 'page the record says it was sent from')
       : fail('the rotted mapping stood: question 0005 is still on page '
-             + filed['0005'] + ', sharing with 0001');
-    filed['0001'] === 0
+             + pageOfQ('0005') + ', sharing with 0001');
+    pageOfQ('0001') === 0
       ? ok('and the question that was not sent keeps the page it had')
       : fail('a mapping with no record behind it was overwritten anyway');
   }
