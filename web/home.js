@@ -28,7 +28,11 @@ var els = {
   pastWrap: document.getElementById("past-wrap"),
   past: document.getElementById("past"),
   where: document.getElementById("where"),
-  busy: document.getElementById("busy")
+  busy: document.getElementById("busy"),
+  busyText: document.getElementById("busy-text"),
+  busySub: document.getElementById("busy-sub"),
+  busyAgain: document.getElementById("busy-again"),
+  busyStay: document.getElementById("busy-stay")
 };
 
 function plural(n, one, many) {
@@ -211,7 +215,9 @@ function paintCourses(list, host) {
 }
 
 function switchTo(repo, host) {
-  els.busy.hidden = false;
+  if (moving) return;                 /* one at a time; a second tap is a queue */
+  moving = lastAsked = { repo: repo, host: host || "" };
+  showBusy("moving the board to " + repo + "…", "asking", false);
   fetch("/switch", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -220,17 +226,81 @@ function switchTo(repo, host) {
     body: JSON.stringify({ repo: repo, host: host || "" })
   }).then(function (r) { return r.json(); }).then(function (res) {
     if (!res.ok) throw new Error(res.error || "switch failed");
-    /* The proxy now points somewhere else; give it a moment, then come back to
-       this same address, which is now served by the other course's board. */
-    setTimeout(function () { location.href = "/"; }, 700);
+    return waitForAddress(repo, host || "", Date.now());
+  }).then(function (landed) {
+    if (landed) { location.href = "/"; return; }
+    /* Not landed, and saying nothing here is what made this look broken: the
+       old code reloaded regardless and put you back where you started. */
+    showBusy("still on the old board",
+             repo + " was asked for, but the address has not moved yet. It may "
+             + "be starting up — give it a moment, or ask again.", true);
+    moving = null;
   }).catch(function (e) {
-    els.busy.hidden = true;
-    alert("Could not move the board: " + e.message);
+    showBusy("could not move the board", e.message || String(e), true);
+    moving = null;
   });
 }
 
+/* Which course, and which machine, is answering at this address RIGHT NOW.
+   The address is a proxy on the always-on host and it moves on its own clock,
+   so this is the only honest way to know a switch has landed. */
+function serving() {
+  return fetch("/health?t=" + Date.now(), { cache: "no-store" })
+    .then(function (r) { return r.json(); })
+    .catch(function () { return null; });   /* mid-move the socket is closed */
+}
+
+function sameHost(a, b) {
+  if (!a || !b) return true;         /* nobody said, or an older board */
+  return String(a).split(".")[0] === String(b).split(".")[0];
+}
+
+/* Poll until the address actually serves what was asked for.
+
+   This is the whole of the fix for "I had to tap it ten times". `/switch`
+   records the choice and returns; the FOLLOWER on the always-on host is what
+   moves the address, and it does that a moment later. Reloading before then
+   lands on the board you were trying to leave, which reads exactly like a tap
+   that did nothing — so you tap again, and every one of those taps was working. */
+function waitForAddress(repo, host, began) {
+  return serving().then(function (h) {
+    if (h && h.dir === repo && sameHost(h.host, host)) return true;
+    var waited = Math.round((Date.now() - began) / 1000);
+    if (waited >= SWITCH_PATIENCE) return false;
+    showBusy("moving the board to " + repo + "…",
+             "waiting for the address to follow · " + waited + "s", false);
+    return new Promise(function (go) { setTimeout(go, 800); })
+      .then(function () { return waitForAddress(repo, host, began); });
+  });
+}
+
+var SWITCH_PATIENCE = 60;             /* seconds. A cold board start is slow. */
+var moving = null;
+
+function showBusy(text, sub, done) {
+  els.busy.hidden = false;
+  els.busyText.textContent = text;
+  els.busySub.textContent = sub || "";
+  els.busyAgain.hidden = !done;
+  els.busyStay.hidden = !done;
+}
+
+els.busyStay.onclick = function () {
+  els.busy.hidden = true;
+  moving = null;
+  refresh();
+};
+els.busyAgain.onclick = function () {
+  var again = lastAsked;
+  if (!again) { els.busy.hidden = true; return; }
+  moving = null;
+  switchTo(again.repo, again.host);
+};
+var lastAsked = null;
+
 /* ------------------------------------------------------------------ load */
 function refresh() {
+  if (moving) return Promise.resolve();   /* not while the address is in flight */
   return Promise.all([
     fetch("/board.json").then(function (r) { return r.json(); }),
     fetch("/courses.json").then(function (r) { return r.json(); }).catch(function () { return {}; }),

@@ -10,7 +10,7 @@
    network -- a cached lesson is a stale lesson, which is worse than none.
    ========================================================================== */
 
-var VERSION = "board-shell-v66";
+var VERSION = "board-shell-v67";
 
 var SHELL = [
   "/",
@@ -41,7 +41,10 @@ var SHELL = [
 var RUNTIME = /\/static\/(katex\/fonts|fonts)\//;
 
 /* Never intercepted. Live data, or a stream that must not be buffered. */
-var LIVE = /^\/(events|board\.json|courses\.json|switch|say|upload|slate\/(save|state)|figure\/|uploads\/|slate\/page-)/;
+/* `health` and `hosts.json` are here for the same reason as the rest: the hub
+   polls /health to find out whether a switch has actually landed, and an
+   answer out of a cache would say the address is still where it was. */
+var LIVE = /^\/(events|board\.json|courses\.json|hosts\.json|health|switch|chose|start|say|upload|slate\/(save|state)|figure\/|uploads\/|slate\/page-)/;
 
 self.addEventListener("install", function (e) {
   e.waitUntil(

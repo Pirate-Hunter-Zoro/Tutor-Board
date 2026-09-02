@@ -549,10 +549,19 @@ check("a course can be started on the machine that has it, from a hub on the "
       "other one",
       'if path == "/start":' in serve_src)
 check("and choosing a course on a named machine records both",
-      "boardlib.remember_chosen(want, \"\", host=on_host)" in serve_src)
+      'boardlib.remember_chosen(want, "", host=on_host, at=rec_at)' in serve_src)
 check("the record carries the host",
-      "def remember_chosen(name, root, host=None):"
+      "def remember_chosen(name, root, host=None, at=None):"
       in open(os.path.join(ROOT, "boardlib.py"), encoding="utf-8").read())
+# And it is PUBLISHED, which is the half that never left the machine it was
+# written on. `wanted_host` reads the host off whichever record is newest,
+# including ones it gets by asking a board -- and a board published the course,
+# the port and the time and not the host. So a choice made anywhere but the
+# follower's own machine arrived with the host blank and rule 0 could not fire:
+# the person picked the node, the record said the node, and the address went
+# wherever `prefer` liked.
+check("and a board publishes the host, or a choice of machine never leaves it",
+      '"at": rec.get("at") or 0, "host": rec.get("host") or ""' in serve_src)
 check("and a named machine decides the address, above every preference, but "
       "only among boards serving the course that was chosen too",
       "def wanted_host(" in follow_src and "if want_host:" in follow_src)
@@ -583,6 +592,118 @@ check("a board publishes whether it has a tutor at all",
       '"tutor": agent.get("state") or None' in serve_src)
 check("and the follower prefers a board with one over an empty room",
       "def has_tutor(" in follow_src and "withtutor" in follow_src)
+
+# ---- one tap, one record, on every machine at once --------------------------
+#
+# Reported in these words: "I just had to type Galois Theory ten fucking times
+# to switch to it from Probability, and then it just switched back."
+#
+# Three separate things were behind it and each one is guarded below. The first:
+# the record a tap writes is the only thing both machines can read, and each one
+# wrote only its own copy. The other side found out by being ASKED, on the
+# follower's next tick, up to thirty seconds later -- and the fast wake above
+# watches a file that only a local tap ever touches, so a tap on the machine
+# that was not holding the address woke nobody. A tap is an event and can simply
+# be sent.
+check("a tap is relayed to every machine that can hear it, not waited for",
+      "def announce_choice(" in serve_src and "def announce_later(" in serve_src)
+check("and a board has somewhere to receive one",
+      'if path == "/chose":' in serve_src)
+check("which records and nothing else -- no board, no tutor, no address",
+      "boardlib.remember_chosen(want, root if os.path.isdir(root) else \"\","
+      in serve_src)
+check("every path that records a choice relays it: the hub's own machine,",
+      serve_src.count("announce_later(") >= 3)
+check("and the relay keeps the original time, so two clocks cannot disagree "
+      "about one tap",
+      "at=rec_at" in serve_src and "def remember_chosen(name, root, host=None, at=None):"
+      in open(os.path.join(ROOT, "boardlib.py"), encoding="utf-8").read())
+check("a relay that says what is already recorded rewrites nothing, because "
+      "the file's own mtime is what wakes a follower",
+      'if have.get("dir") == want and mine_at >= at:' in serve_src)
+check("and a genuinely ancient relay is junk rather than a decision",
+      "at < time.time() - RELAY_STALE" in serve_src)
+# What is deliberately NOT there: deciding which of two records is newer by
+# comparing timestamps that came off two different machines' clocks. A relay is
+# sent the instant somebody taps, so arriving at all is the evidence -- and
+# rejecting a person's tap because the other machine's clock reads earlier is a
+# failure that would be invisible from an iPad.
+check("and a tap is never refused for what another machine's clock says",
+      "if mine_at > at:" not in serve_src)
+check("and a relayed name is a name, never a path",
+      "want != safe_filename(want)" in serve_src)
+
+# The second: the fast wake watched a file this process may not share. The
+# follower is started by launchd with launchd's environment; the boards are
+# started from a session. When those two disagree the stat never changes and
+# every tap waits out the full interval -- which is most of "ten times".
+check("and the wake asks a board as well as reading a file, because those are "
+      "not always the same answer",
+      "def _published_stamp(" in follow_src
+      and "if _published_stamp() != published:" in follow_src)
+
+# The third, and the one that made it switch BACK: a running board writes into
+# its own live/ constantly, so the course being LEFT went on touching its
+# directory and overtook the recorded choice within seconds of the tap.
+_box2 = _tf.mkdtemp()
+boardlib.CHOSEN = os.path.join(_box2, "chosen.json")
+boardlib.CONFIG_DIR = _box2
+for _n in ("Galois-Theory", "Probability"):
+    os.makedirs(os.path.join(_box2, _n, "live"), exist_ok=True)
+PAIR = [{"dir": "Galois-Theory", "root": os.path.join(_box2, "Galois-Theory")},
+        {"dir": "Probability", "root": os.path.join(_box2, "Probability")}]
+# A fresh copy of the module: the section above replaced `active_course` with a
+# stub to keep the preference fixtures honest, and asking a stub what it thinks
+# proves nothing.
+_spec2 = importlib.util.spec_from_loader(
+    "followcli2",
+    importlib.machinery.SourceFileLoader("followcli2", os.path.join(ROOT, "bin", "follow")))
+follow2 = importlib.util.module_from_spec(_spec2)
+_spec2.loader.exec_module(follow2)
+boardlib.remember_chosen("Galois-Theory", PAIR[0]["root"])
+# Probability's board goes on writing, as a live board does, every second.
+time.sleep(0.02)
+with open(os.path.join(PAIR[1]["root"], "live", "state.json"), "w") as fh:
+    fh.write("{}")
+check("a course that is merely busy does not overtake the one that was chosen",
+      follow2.active_course(PAIR)["dir"] == "Galois-Theory")
+# And with nobody having chosen anything, the most recently worked course is
+# still the honest answer -- it is the only question a modification time can
+# actually answer.
+os.remove(boardlib.CHOSEN)
+check("and with no choice recorded, the most recently worked one is served",
+      follow2.active_course(PAIR)["dir"] == "Probability")
+
+# ---- and the hub waits for the address to actually move ---------------------
+#
+# The last of it, and the most direct: the page fired /switch, waited 700ms and
+# reloaded. The follower had not moved the address yet, so the reload landed on
+# the board being tapped AWAY from -- which is indistinguishable from a tap that
+# did nothing. So you tap it again. Ten times.
+home_src = open(os.path.join(ROOT, "web", "home.js"), encoding="utf-8").read()
+check("the hub no longer reloads on a timer and hopes",
+      "setTimeout(function () { location.href" not in home_src)
+check("it waits until the address serves what was asked for",
+      "function waitForAddress(" in home_src and "h.dir === repo" in home_src)
+check("on the machine that was asked for, when one was named",
+      "sameHost(h.host, host)" in home_src)
+check("and a board says which machine it is, so that can be checked",
+      '"host": boardlib.tailnet_self() or ""' in serve_src)
+check("a second tap while one is in flight is not a second switch",
+      "if (moving) return;" in home_src)
+check("and when it does not land, it says so instead of reloading",
+      "still on the old board" in home_src)
+# And a machine, once found, is not lost again between refreshes. The walk that
+# finds a peer's board only knows the courses cloned HERE, and the two machines
+# are not the same list -- five courses on one of this pair and nine on the
+# other -- so a peer whose only board is a course this machine has not got is
+# invisible to it. A hub that loses a machine is a machine you cannot switch to.
+check("a machine that answered once is asked at that port first",
+      "_PEER_PORT" in serve_src and "was = _PEER_PORT.get(host)" in serve_src)
+
+sw_src = open(os.path.join(ROOT, "web", "sw.js"), encoding="utf-8").read()
+check("the health check is never answered out of the cache",
+      "health" in sw_src.split("var LIVE")[1].split("\n")[0])
 
 print("\n%d FAILURES" % len(errors) if errors else "\nthe address follows the choice")
 sys.exit(1 if errors else 0)

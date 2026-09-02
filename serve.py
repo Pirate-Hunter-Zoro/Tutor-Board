@@ -1183,6 +1183,10 @@ def this_host_entry(repo):
     }
 
 
+# The port a peer's board answered on last. See `peer_hosts`.
+_PEER_PORT = {}
+
+
 def peer_hosts(repo):
     """Every other machine on the tailnet that is running a board, and its courses.
 
@@ -1195,13 +1199,25 @@ def peer_hosts(repo):
     ours = [c["repo"] for c in sibling_courses(repo)]
     for host in boardlib.tailnet_peers():
         found = None
-        for name in ours:
+        # The port that answered for this machine last time, first. The walk
+        # below only knows the courses cloned HERE, and the two machines are not
+        # the same list -- this pair has five courses on one and nine on the
+        # other. So a peer whose only board is a course this machine has not got
+        # is invisible to the walk, and once found it should not have to be
+        # found again the hard way: a hub that loses a machine between refreshes
+        # is a machine you cannot switch to.
+        was = _PEER_PORT.get(host)
+        if was and boardlib.board_health(host, was, timeout=1.0):
+            found = was
+        for name in ours if not found else []:
             port = boardlib.default_port(name)
             if boardlib.board_health(host, port, timeout=1.0):
                 found = port
                 break
         if not found:
+            _PEER_PORT.pop(host, None)
             continue
+        _PEER_PORT[host] = found
         doc = boardlib.board_json(host, found, "/courses.json", timeout=2.0) or {}
         courses = doc.get("courses") or []
         for c in courses:
@@ -1389,8 +1405,70 @@ def chosen_target():
     # the person's latest word -- without that, a course tapped over here was
     # invisible to a follower reading only its own file, and the tap did every
     # correct thing while the address stayed put.
+    # And the HOST, which was the half that never left this machine. The hub can
+    # ask for a course ON a named machine, `wanted_host` in bin/follow is the
+    # rule that honours it -- and it reads the host off whichever record is
+    # newest, including the ones it gets by asking a board. This did not publish
+    # one, so a choice made anywhere but the follower's own machine arrived with
+    # the host silently blank and rule 0 could never fire: the person picked the
+    # node, the record said the node, and the address went to whichever machine
+    # `prefer` liked.
     return {"dir": name, "port": port or boardlib.default_port(name),
-            "at": rec.get("at") or 0}
+            "at": rec.get("at") or 0, "host": rec.get("host") or ""}
+
+
+# How old a relayed tap may be before it is junk rather than a decision. Ten
+# minutes is far longer than a relay can take (one POST, three second timeout)
+# and far shorter than the gap between two sittings.
+RELAY_STALE = 600
+
+
+def announce_choice(repo, name, host, at):
+    """Tell every machine that can hear it which course was just tapped.
+
+    The record a tap writes is the only thing both machines can read, and until
+    now each one wrote only its own copy: the other side found out by being asked
+    on the follower's next tick, up to thirty seconds later. From the iPad that
+    is a tap that does nothing, so you tap it again, and again -- reported in
+    exactly those terms, ten times for one switch.
+
+    Polling harder is the wrong fix. A tap is an event and it can simply be sent:
+    one POST per machine, so every `chosen.json` on the tailnet changes within a
+    moment of the finger coming off the glass, and every follower's own
+    cheap file-watch fires. The relayed record keeps the ORIGINAL timestamp, so
+    one tap is one identical record everywhere and there is nothing for two
+    clocks to disagree about.
+
+    Best effort by construction. A machine that is asleep, older, or unreachable
+    simply does not get told, and the follower's tick still finds the choice the
+    slow way -- this makes the common case instant, it does not become something
+    the switch depends on.
+    """
+    names = [c["repo"] for c in sibling_courses(repo)]
+    # The chosen course first: it is the one most likely to have a board up, and
+    # one board is enough because every board on a machine publishes the same
+    # record. Then a handful of others, in case that one is not running there.
+    order = [name] + [n for n in names if n != name]
+    payload = {"repo": name, "host": host or "", "at": at}
+    for peer in boardlib.tailnet_peers():
+        if boardlib.peer_is_down(peer):
+            continue
+        for n in order[:6]:
+            got = boardlib.board_post(peer, boardlib.default_port(n),
+                                      "/chose", payload, timeout=3.0)
+            if got and got.get("ok"):
+                break
+
+
+def announce_later(repo, name, host, at):
+    """`announce_choice` off the request's thread.
+
+    The person is waiting on the response to their tap, and telling three
+    machines is up to three round trips over a tailnet. None of it changes what
+    this machine already recorded, so none of it belongs in front of the answer.
+    """
+    threading.Thread(target=announce_choice, args=(repo, name, host, at),
+                     daemon=True).start()
 
 
 def handover_secret():
@@ -1876,9 +1954,14 @@ class Handler(BaseHTTPRequestHandler):
             # in a hub used to start one wherever the tap landed -- and between
             # a board with a tutor listening and a board with nobody behind it
             # there is no contest: the second one is a lesson that cannot answer.
+            # `host` so a CLIENT can tell which machine it reached. The hub
+            # waits for a switch to actually land before it reloads, and "the
+            # right course" is not the whole question when both machines have a
+            # clone of it.
             agent = load_agent(repo) or {}
             return self.send_json({"ok": True, "root": repo.root,
                                    "dir": os.path.basename(repo.root),
+                                   "host": boardlib.tailnet_self() or "",
                                    "chosen": chosen_target(),
                                    "tutor": agent.get("state") or None,
                                    "limited": boardlib.limited_until()})
@@ -1943,6 +2026,52 @@ class Handler(BaseHTTPRequestHandler):
             self.server.hub.worker.dirty.set()
             return self.send_json({"ok": True})
 
+        if path == "/chose":
+            # A choice made on another machine, relayed here the moment it was
+            # made. It records and nothing else: no board is started, no address
+            # is moved, no tutor is spawned. The follower does all of that, and
+            # the only thing it was ever short of was knowing.
+            try:
+                payload = json.loads(self.read_body().decode("utf-8") or "{}")
+            except Exception:
+                payload = {}
+            want = (payload.get("repo") or "").strip()
+            # A name, not a path. The record is read back by machinery that
+            # joins it to a directory, so a request must never be able to put a
+            # traversal in it.
+            if not want or want != safe_filename(want):
+                return self.send_json({"ok": False, "error": "bad course"}, status=400)
+            try:
+                at = float(payload.get("at") or 0)
+            except (TypeError, ValueError):
+                at = 0.0
+            at = at or time.time()
+            have = boardlib.chosen_course()
+            try:
+                mine_at = float(have.get("at") or 0)
+            except (TypeError, ValueError):
+                mine_at = 0.0
+            # Already recorded: a no-op, and say so rather than rewriting the
+            # file, because the file's modification time is what wakes the
+            # follower and there is nothing here to wake it for.
+            if have.get("dir") == want and mine_at >= at:
+                return self.send_json({"ok": True, "kept": want,
+                                       "detail": "already recorded"})
+            # A relay carrying a genuinely ancient tap is junk, not a decision.
+            # Note what is deliberately NOT here: a comparison of this timestamp
+            # against the local record's to decide which is newer. They come off
+            # two different clocks, and rejecting a person's tap because the
+            # other machine's clock reads earlier is the failure that would be
+            # impossible to see from an iPad. A relay is only ever sent the
+            # instant somebody tapped, so arriving at all is the evidence.
+            if at < time.time() - RELAY_STALE:
+                return self.send_json({"ok": False, "error": "stale"}, status=409)
+            root = os.path.join(os.path.dirname(repo.root), want)
+            boardlib.remember_chosen(want, root if os.path.isdir(root) else "",
+                                     host=payload.get("host") or "", at=at)
+            self.server.hub.worker.dirty.set()
+            return self.send_json({"ok": True, "repo": want, "at": at})
+
         if path == "/start":
             # Bring a course up ON THIS MACHINE, asked by a hub somewhere else.
             #
@@ -1971,8 +2100,10 @@ class Handler(BaseHTTPRequestHandler):
             # The choice belongs to the machine the person is looking at, and it
             # has already been recorded there; this records it here as well, so
             # whichever machine the follower asks gets the same answer.
+            rec_at = time.time()
             boardlib.remember_chosen(match["repo"], target,
-                                     host=payload.get("host") or "")
+                                     host=payload.get("host") or "", at=rec_at)
+            announce_later(repo, match["repo"], payload.get("host") or "", rec_at)
             tutor_cli(["agent", "start", match["repo"]])
             return self.send_json({"ok": True, "repo": match["repo"],
                                    "port": boardlib.default_port(match["repo"]),
@@ -1992,7 +2123,12 @@ class Handler(BaseHTTPRequestHandler):
             # address at it. Nothing is started here -- starting a second clone of
             # somebody else's course is the thing that made a mess of an evening.
             if on_host and on_host != (boardlib.tailnet_self() or ""):
-                boardlib.remember_chosen(want, "", host=on_host)
+                rec_at = time.time()
+                boardlib.remember_chosen(want, "", host=on_host, at=rec_at)
+                # Every machine, not only the one being asked to start it. The
+                # follower lives on whichever machine holds the address, and
+                # that is not always either of these two.
+                announce_later(repo, want, on_host, rec_at)
                 port = None
                 for h in known_hosts(repo)["hosts"]:
                     if h.get("host") == on_host:
@@ -2027,8 +2163,10 @@ class Handler(BaseHTTPRequestHandler):
             # that -- the RECORD -- is the whole of what moves the address. It is
             # written first and unconditionally, because on a pair of machines it
             # is the only thing both of them can read.
+            rec_at = time.time()
             boardlib.remember_chosen(match["repo"], target,
-                                     host=boardlib.tailnet_self() or "")
+                                     host=boardlib.tailnet_self() or "", at=rec_at)
+            announce_later(repo, match["repo"], boardlib.tailnet_self() or "", rec_at)
 
             # What this machine does about it depends on whether this machine is
             # the one that decides.

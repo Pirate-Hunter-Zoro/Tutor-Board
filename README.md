@@ -46,6 +46,60 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 2 September 2026
 >
+> **Switching a course reliably moves the address, and the hub waits for it to.** Reported in
+> these words: *"I just had to type Galois Theory ten fucking times to switch to it from
+> Probability, and then it just switched back."* Four separate defects, and every one of them made
+> a correct tap look like a tap that did nothing.
+>
+> **The hub reloaded after 700 milliseconds.** `/switch` records the choice and returns; the
+> **follower** on the always-on host is what moves the address, and it does that some time later.
+> The page reloaded before then, landed on the board being tapped *away* from, and looked exactly
+> like nothing had happened — so you tap again. Ten times. It now polls `/health` until the
+> address actually serves the course that was asked for, on the machine that was asked for, says
+> what it is waiting for while it waits, and when it does not land in a minute it *says so*
+> instead of reloading you back where you started. A second tap while one is in flight is not a
+> second switch.
+>
+> **A tap was recorded on one machine and the other found out by being asked.** Up to thirty
+> seconds later, on the follower's next tick — and the cheap wake that exists to avoid that wait
+> watches a file only a *local* tap touches, so a tap on the machine not holding the address woke
+> nobody. A tap is an event and can be sent: every machine that can hear it now gets the record
+> within a moment, by POST to a new `/chose`, which records and does nothing else — no board, no
+> tutor, no address. The relay keeps the **originating** timestamp, so one tap is one identical
+> record everywhere and there is nothing left for two clocks to disagree about, and an older word
+> can never overwrite a newer one in either direction. The wake also asks a board now as well as
+> reading a file, because the follower runs under launchd and the boards do not, and those two are
+> not always the same disk view — the lesson from 1 September, applied to the other half of it.
+>
+> **And a board never published the host.** The hub can ask for a course *on a named machine* and
+> `wanted_host` is the rule that honours it — reading the host off whichever record is newest,
+> including ones it gets by asking a board. A board published the course, the port and the time,
+> and not the host. So a choice made anywhere but the follower's own machine arrived with the
+> machine silently blank and rule 0 could never fire. The comparison was wrong too: it checked the
+> person's choice against the *configured* node name, which is exactly the name that goes stale
+> and is why the tailnet walk exists at all. It compares against the host the board was actually
+> found on.
+>
+> **Then it switched back**, and this is the one worth reading. `active_course` decided the
+> fallback by comparing the choice's timestamp against every course's `live/` modification time
+> and taking the newest. That reads as reasonable and is self-defeating: a running board writes
+> into its own `live/` constantly — a heartbeat, a state file, a turn — so the course being *left*
+> went on touching its directory and overtook the recorded choice within seconds of the tap. Being
+> busy was being read as evidence of being wanted. A named course now wins outright, and
+> modification time decides only when nobody has chosen anything, which is the only question it
+> can honestly answer.
+>
+> **And a machine, once found, is not lost again.** The walk that discovers a peer's board knocks
+> on the ports of the courses cloned *here*, and the two machines are not the same list — five
+> courses on one of this pair and nine on the other. So a peer whose only running board is a
+> course this machine has not got was invisible to it, and a machine that drops out of the
+> **Where** row is a machine you cannot switch to. The port that answered is remembered per host
+> and asked first. What is still true and worth knowing: a machine with **no** board running at
+> all cannot appear there, because a board is the only thing on a machine that answers — bring one
+> up over there once and it is findable from then on.
+>
+> `test/choice.py` holds all of it. Shell version `board-shell-v67`.
+>
 > **The tutor stopped lecturing.** Asked for in these words: *"I want tutoring style for
 > homework/lessons of any kind based on a book to be completely about exercises. Completely."*
 > `TEACHING.md` had the right instinct already — teach toward the question they are about to

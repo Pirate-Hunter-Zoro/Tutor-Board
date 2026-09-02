@@ -139,13 +139,28 @@ def last_used(root):
 
 
 def active_course(cands):
-    """The course to serve locally when the node is down: last named, else last
-    worked. Reuses the same two signals as `tutor resume`."""
-    best = None
+    """The course to serve locally when nothing better is known.
+
+    A NAMED course wins outright. It used to only start the bidding: the record's
+    timestamp was compared against every course's `live/` modification time, and
+    the newest won. That reads as reasonable and is self-defeating, because a
+    running board writes into its own `live/` constantly -- a heartbeat, a state
+    file, a turn -- so the course being LEFT goes on touching its directory and
+    overtakes the choice within seconds of the tap.
+
+    From the iPad that is the second half of the report this was written for:
+    "I just had to type Galois Theory ten times to switch to it from Probability,
+    and then it just switched back." It switched back because the course being
+    left was busy, and being busy was treated as evidence of being wanted.
+
+    Modification time is what decides when NOBODY has chosen anything, which is
+    the only question it can honestly answer.
+    """
     rec = boardlib.chosen_course()
     for c in cands:
         if boardlib.same_dir(c["root"], rec.get("root")) or c["dir"] == rec.get("dir"):
-            best = (rec.get("at") or 0, c)
+            return c
+    best = None
     for c in cands:
         when = last_used(c["root"])
         if when and (not best or when > best[0]):
@@ -527,11 +542,19 @@ def choose_target(node, cands, prefer="local"):
     # over there to take the address off the lesson somebody is in.
     if want_host:
         here = (boardlib.tailnet_self() or "")
+        want_label = want_host.split(".")[0]
         named = []
         for t, w in order:
-            on = here if w == "here" else (node or "")
-            if t[2] and (on == want_host or w == "here" and here == want_host
-                         or on.split(".")[0] == want_host.split(".")[0]):
+            # The host the board was actually FOUND on, not the one out of the
+            # config. `remote_target` reaches the far side three different ways
+            # -- the configured name, a published port, and a walk of the tailnet
+            # -- and only the last of those is how a compute node whose hostname
+            # is an allocation gets found at all. Comparing the person's choice
+            # against `node` therefore failed in exactly the case the walk exists
+            # for: the board was found, on the machine that was asked for, and
+            # the rule that honours the choice did not recognise it.
+            on = here if w == "here" else (t[0] or node or "")
+            if t[2] and on.split(".")[0] == want_label:
                 named.append((t, w))
         if named:
             order = named + [x for x in order if x not in named]
@@ -698,6 +721,43 @@ def _choice_stamp():
         return None
 
 
+def _published_stamp():
+    """What a board ON THIS MACHINE says was chosen, as something to compare.
+
+    The file above is the cheap watch and it is not a sufficient one, for the
+    reason already learned once and only half fixed: this process is started by
+    launchd with whatever environment launchd hands it, and the boards are
+    started from a session, so `boardlib.CHOSEN` here is not always the path a
+    board writes. When they differ the stat never changes, the fast wake never
+    fires, and every tap waits out the full interval -- which is the first half
+    of "I had to tap it ten times".
+
+    So ask something that definitely wrote the record. One request to loopback,
+    to the board that answered last, is a cost that does not show up next to a
+    proxy already forwarding a lesson.
+    """
+    ch = _local_published()
+    if not ch:
+        return None
+    return (ch.get("dir"), ch.get("at"), ch.get("host") or "")
+
+
+def _local_published():
+    """The choice as published by a board on this machine, without the walk.
+
+    Only the port that answered last, because this runs every second. Finding a
+    board in the first place is `local_choice`'s job and happens on the interval.
+    """
+    port = _ASKED_LOCAL[0]
+    if not port:
+        return None
+    health = probe("127.0.0.1", port, timeout=1.0)
+    if not health:
+        return None
+    ch = health.get("chosen") or {}
+    return ch if ch.get("dir") else None
+
+
 def follower(target, node, cands, log, prefer="local", secret=None):
     """Re-decide where the address points, and act only when it changes.
 
@@ -735,11 +795,16 @@ def follower(target, node, cands, log, prefer="local", secret=None):
         # round again. Everything else still waits the full interval, because
         # re-deciding means asking the other machine and that is not free.
         stamp = _choice_stamp()
+        published = _published_stamp()
         waited = 0.0
         while waited < interval:
             time.sleep(min(1.0, interval - waited))
             waited += 1.0
             if _choice_stamp() != stamp:
+                break
+            # And the same question asked of a board rather than of a file, for
+            # the machines where those two are not the same answer.
+            if _published_stamp() != published:
                 break
 
 

@@ -79,7 +79,21 @@
   <p id="where" class="where"></p>
 </main>
 
-<div id="busy" class="busy" hidden><span></span></div>
+<!-- The switch overlay. It used to be a word and a 700ms timer: the page said
+     "moving the board…", reloaded, and landed back on the course you had just
+     tapped away from, because the address had not moved yet and nothing was
+     watching for it to. It now says what it is waiting for and waits for the
+     thing itself. -->
+<div id="busy" class="busy" hidden>
+  <div class="busy-box">
+    <p id="busy-text">moving the board…</p>
+    <p id="busy-sub" class="busy-sub"></p>
+    <div class="busy-acts">
+      <button type="button" id="busy-again" hidden>ask again</button>
+      <button type="button" id="busy-stay" hidden>stay here</button>
+    </div>
+  </div>
+</div>
 
 <script src="/static/home.js"></script>
 </body>

@@ -178,9 +178,15 @@ h2 {
   backdrop-filter: blur(3px);
   font-family: var(--ui); font-size: .9rem; color: var(--ink-2);
 }
-.busy span::after {
-  content: "moving the board…";
+.busy-box { max-width: 22rem; padding: 0 1.5rem; text-align: center; }
+.busy-box p { margin: 0; }
+.busy-sub { margin-top: .45rem !important; font-size: .8rem; color: var(--ink-3); }
+.busy-acts { display: flex; gap: .5rem; justify-content: center; margin-top: 1rem; }
+.busy-acts button {
+  font: inherit; padding: .45rem .9rem; border-radius: .5rem;
+  border: 1px solid var(--rule); background: var(--paper); color: var(--ink-2);
 }
+.busy-acts button:active { background: var(--rule); }
 
 /* last push, so the state of the repository is visible without a terminal */
 .pushline {

@@ -77,7 +77,7 @@ def chosen_course():
         return {}
 
 
-def remember_chosen(name, root, host=None):
+def remember_chosen(name, root, host=None, at=None):
     """Record that this course was asked for. A note, never a requirement.
 
     `host` is the machine it was asked for ON, when the person picked one. Which
@@ -86,16 +86,23 @@ def remember_chosen(name, root, host=None):
     hub could offer the choice the answer was whichever machine won an argument.
     Empty means "wherever it is", which is the old behaviour and the right one
     when nobody has said.
+
+    `at` is for a RELAYED record -- one tap, copied to every machine that can
+    hear it -- and it is the originator's timestamp, kept rather than restamped.
+    That matters more than it looks: the follower compares these times across
+    machines to find the person's latest word, and two machines' clocks are not
+    the same clock. One tap that lands as one identical record everywhere has
+    nothing left to disagree about.
     """
     try:
         os.makedirs(CONFIG_DIR, exist_ok=True)
         tmp = CHOSEN + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump({"dir": name, "root": root, "at": time.time(),
+            json.dump({"dir": name, "root": root, "at": float(at or time.time()),
                        "host": host or ""}, fh)
         os.replace(tmp, CHOSEN)
         return True
-    except OSError:
+    except (OSError, TypeError, ValueError):
         return False
 
 
