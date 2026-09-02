@@ -46,6 +46,47 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 2 September 2026
 >
+> **The Mac never has to be visited again.** Asked for in these words: *"make and ship something
+> that once I run it on the mac, it will always periodically pull and run this catch-up... I only
+> want to have to do this one more time."*
+>
+> `bash scripts/stay-current.sh`, once, on the always-on host. It registers a LaunchAgent that runs
+> a **round** every ten minutes: fetch this repository and every course beside it, and if anything
+> actually arrived, run `scripts/catch-up.sh`. That last clause is the whole difference between
+> this and a cron line — a catch-up restarts every board on the machine, and doing that every ten
+> minutes to somebody mid-proof would be worse than the problem it solves. Nothing arrived is
+> nothing done, silently.
+>
+> **The part that makes it the last visit** is easy to miss and is the reason this is a script
+> rather than a plist somebody pastes. A timer that only *runs* something has to be reinstalled by
+> hand the next time the schedule, the log path, or the set of background jobs changes — which
+> means going back to the machine, which is the thing being abolished. So every round re-asserts
+> its own launchd definition **from the repository it just pulled**, and reloads it only if the
+> definition actually differs (reloading the follower costs the address a moment, and doing that
+> for a file that was already correct is a cost for nothing). It asserts the follower and the warm
+> board too, installing them only if they are missing. A future commit that changes how any of this
+> is supervised lands by itself.
+>
+> A round also hands over to the code it just pulled — `exec`, so a commit that changes what a
+> round *does* takes effect on the round that fetched it rather than the one after. Guarded on
+> HEAD having actually moved, because exec'ing after a pull that changed nothing is a loop.
+>
+> Two things it is careful about, both of which would otherwise turn into a visit. **"Behind" means
+> origin has something we have not** — not that two hashes differ. A machine that is *ahead* of
+> origin differs too, and reading that as behind is an infinite loop with a `git pull` in it; it is
+> an ancestry question and `--behind` exposes the real one, so the suite tests what runs rather
+> than a copy of it. And **the tool repository can never be the thing that gets stuck**: a machine
+> that cannot fast-forward is a machine somebody has to go and visit, so a diverged or dirty tool
+> is put back on origin the same way `catch-up.sh` puts a course back — `git stash push -u` first,
+> then a tag, then the reset, with both named in the log. Nothing is destroyed; it is just no
+> longer checked out.
+>
+> It supersedes `com.tutorboard.pull`, which pulled the tool and none of the courses, and retires
+> it on install rather than leaving two timers racing for the same repository.
+> `bash scripts/stay-current.sh --status` says whether it is loaded, when it last ran, what it
+> found and which commit the machine is on. `test/current.py` drives a real round against real
+> repositories.
+>
 > **Switching a course reliably moves the address, and the hub waits for it to.** Reported in
 > these words: *"I just had to type Galois Theory ten fucking times to switch to it from
 > Probability, and then it just switched back."* Four separate defects, and every one of them made
@@ -693,6 +734,7 @@ repository and it carries the invariants that were learned the hard way. Then:
 board doctor          # is this machine equipped
 tutor where           # what is running, and where
 bash scripts/catch-up.sh   # put this machine right, and say what is true
+bash scripts/stay-current.sh  # ...and keep doing that, without anybody here
 bash test/all.sh      # every suite; fetches jsdom itself the first time
 ```
 
