@@ -2574,6 +2574,32 @@ function paintCarry(btn, key) {
 }
 
 function paintBoards(qids, liveKey, off) {
+  /* The answer each question actually handed in, newest revision.
+
+     A past board used to be a picture of a SLATE PAGE, taken now -- and a slate
+     page is live. It gets written on again, cleared, cloned, reused. So a board
+     under an old question showed whatever had happened to that sheet since,
+     which from the iPad is: "their recordings are out of wack. My writing from
+     one section is wrong and came from a later section" and later "the very
+     latest few are just repeats of my earliest".
+
+     Measured on this lesson rather than guessed: the answer to question 6 was
+     handed in off page 7 with 279 strokes, and page 7 now holds one; question
+     7's came off page 9 with 279, and page 9 now holds a different 228. Pages 4
+     and 12 are byte-identical. Every FROZEN answer was correct and distinct the
+     whole time -- nothing was ever lost -- and the boards were pointing at a
+     moving target.
+
+     What was handed in cannot move: it is written once, into live/answers/, and
+     never touched again. So a board whose page no longer holds the answer that
+     came off it shows the answer instead. */
+  var sentInk = {};
+  (lastTurns || []).forEach(function (t) {
+    if (!t || t.kind !== "ink" || !t.answers || !t.png) return;
+    var have = sentInk[t.answers];
+    if (!have || (t.t || 0) >= (have.t || 0)) sentInk[t.answers] = t;
+  });
+
   /* Every board in the lesson, in reading order, with which attempt of its
      question it is. */
   var all = [];
@@ -2614,6 +2640,32 @@ function paintBoards(qids, liveKey, off) {
       : "question " + it.qid;
     slot.querySelector(".board-hint").textContent = which + " · tap to write";
     var page = rec.p;
+
+    /* Has this page stopped being the answer that came off it?
+   
+       Fewer strokes than were handed in is the test, and it is the honest one:
+       a page can only lose strokes by being cleared, reused or cloned over, and
+       any of those means it is somebody else's sheet now. MORE strokes is the
+       ordinary case of carrying on writing after sending, and the live page is
+       then the better picture -- it contains the answer and the work since. */
+    var answer = sentInk[it.qid];
+    var lost = !!answer
+            && (page === undefined
+                || page >= writer.pages()
+                || (typeof answer.strokes === "number" && writer.inkOn
+                    && writer.inkOn(page) < answer.strokes));
+    if (lost) {
+      slot.querySelector(".board-hint").textContent = which + " · as it was handed in";
+      var frozen = slot.querySelector(".board-shot");
+      if (slot.dataset.shot !== answer.png) {
+        frozen.src = answer.png;
+        frozen.alt = "the answer handed in for question " + it.qid;
+        slot.dataset.shot = answer.png;
+      }
+      paintCarry(slot.querySelector(".board-carry"), it.key);
+      return;
+    }
+
     if (page === undefined) {
       /* Never written on, so there is no picture to take -- but a blank board is
          still a board. It says the question can be answered here, and touching it

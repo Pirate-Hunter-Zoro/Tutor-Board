@@ -46,6 +46,32 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 2 September 2026
 >
+> **A past board was a picture of a live page, and a live page moves.** Reported twice in
+> different words — *"my writing from one section is wrong and came from a later section"*, and
+> then *"the very latest few board recordings are just repeats of my earliest"* — and the second
+> report is what made it findable, because it says the boards are showing **early** sheets.
+>
+> Measured on the actual lesson rather than guessed. The record is intact and always was: every
+> answer handed in has its own distinct frozen ink in `live/answers/`, four for four, nothing lost
+> and nothing crossed. What had moved were the **slate pages** those answers came off. Question 6's
+> answer was handed in off page 7 with 279 strokes; page 7 now holds one. Question 7's came off
+> page 9 with 279; page 9 now holds a different 228. Pages 4 and 12 are byte-identical. A dormant
+> board was `writer.preview(page)` — a photograph of that sheet **as it is now** — so every one of
+> them was pointing at a moving target.
+>
+> What was handed in cannot move: it is written once, into `live/answers/`, and never touched
+> again. So a board whose page no longer holds the answer that came off it now shows the answer,
+> and says *as it was handed in*. The test for "no longer holds it" is **fewer strokes than were
+> sent** — a page can only lose strokes by being cleared, reused or cloned over. More strokes is
+> the ordinary case of carrying on after sending, and the live page is then the better picture:
+> it contains the answer and the work since. `test/chain.js` hands an answer in, reuses its sheet
+> under a later question, and fails on the old behaviour.
+>
+> A note on the measuring, because it cost a wrong turn: `board_json` caps a response at 1 MB and
+> a slate is bigger than that, so the first probe reported **zero** slate pages and briefly looked
+> like the working had been deleted. It had not. Read the file, not the endpoint, when the file is
+> the thing.
+>
 > **And annotating was paying for a picture nobody read, after every stroke.** Reported straight
 > after the selection fix landed: *"Annotating isn't doing the highlighting anymore but it is HELLA
 > laggy. I try to write something out multiple times and a few seconds later the multiple writings

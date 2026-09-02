@@ -307,6 +307,52 @@ await sleep(40);
     : fail('a board does not know where it goes, so a reload cannot place it');
 }
 
+// ------------------------- a handed-in answer is not a picture of a live page
+//
+// Reported from the board, twice, in different words: "my writing from one
+// section is wrong and came from a later section" and then "the very latest few
+// board recordings are just repeats of my earliest".
+//
+// A dormant board was a picture of a SLATE PAGE, taken now -- and a slate page
+// is live: it gets written on again, cleared, cloned, reused. Measured on the
+// real lesson: the answer to one question was handed in off page 7 with 279
+// strokes and page 7 now holds one; another came off page 9 with 279 and page 9
+// holds a different 228. Every frozen answer was correct and distinct the whole
+// time. The boards were pointing at a moving target.
+{
+  const q9 = card('0009', 'question', 'Exercise 3.4', 9);
+  // Handed in off a page with three strokes on it...
+  slate.load({ w: 1130, h: 1514, strokes: [ink(1), ink(2), ink(3)] });
+  const page = slate.at();
+  const sent = { id: 't0009', rev: 1, kind: 'ink', answers: '0009', t: t0 + 900,
+                 page: page + 1, strokes: 3,
+                 png: '/answers/t0009-r1.png', ink: '/answers/t0009-r1.json' };
+  es.onmessage({ data: lesson([q1, q9], [sent]) });
+  await sleep(40);
+
+  // ...and then a later question reuses that sheet, leaving one stroke on it.
+  slate.load({ w: 1130, h: 1514, strokes: [ink(7)] });
+  const q11 = card('0011', 'question', 'Exercise 3.6', 11);
+  es.onmessage({ data: lesson([q1, q9, q11], [sent]) });
+  await sleep(60);
+
+  const slot = doc.querySelector('[data-slot^="0009"]');
+  if (!slot) {
+    fail('question 0009 has no board at all');
+  } else {
+    const shot = slot.querySelector('.board-shot');
+    shot && shot.getAttribute('src') === '/answers/t0009-r1.png'
+      ? ok('a board whose page has been reused shows the answer that was handed '
+           + 'in, which cannot move')
+      : fail('the board still shows the live page (' + (shot && shot.getAttribute('src'))
+             + '), so it is showing somebody else\'s writing');
+    /^.*handed in/.test(slot.querySelector('.board-hint').textContent)
+      ? ok('and says that is what it is')
+      : fail('it shows the frozen answer without saying so: '
+             + slot.querySelector('.board-hint').textContent);
+  }
+}
+
 console.log(errors.length ? '\n' + errors.length + ' FAILURES'
                           : '\nan exercise is a chain of boards, and every one of them stays');
 process.exit(errors.length ? 1 : 0);
