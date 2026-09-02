@@ -498,6 +498,156 @@ const lift = () => {
            + (shot && shot.getAttribute('src')) + ')');
 }
 
+// ------------- a carried-over copy is the student's, and erasing it means it
+//
+// The next attempt of a question opens on a COPY of the one that was handed in.
+// So it begins life holding every stroke of that answer while never having been
+// the sheet the answer came off -- and "has this sheet lost its answer" was asked
+// of it anyway, because an answer is keyed by question and a question has as many
+// boards as it took attempts. Erase the copy, which is the first thing anybody
+// does with one, and the board concluded the answer had been destroyed and handed
+// it back on a page of its own, under the pen.
+//
+// Reported from the iPad: "I got a new board to answer the next prompt, and I
+// elected to erase my copied over previous board work, and started writing new
+// work. Then all of a sudden, the old previous board work showed up again and the
+// new work I started on got wiped."
+{
+  const q17 = card('0017', 'question', 'Exercise 6.1', 17);
+  es.onmessage({ data: lesson([q1, q17], []) });
+  await sleep(40);
+  const p17 = mapping()['0017#0'] ? mapping()['0017#0'].p : slate.at();
+  slate.go(p17);
+  const many = [];
+  for (let i = 0; i < 12; i++) many.push(ink(i));
+  slate.load({ w: 1130, h: 1514, strokes: many });
+  const sent17 = { id: 't0017', rev: 1, kind: 'ink', answers: '0017', t: t0 + 1700,
+                   page: p17 + 1, strokes: 12,
+                   png: '/answers/t0017-r1.png', ink: '/answers/t0017-r1.json' };
+  frozen['/answers/t0017-r1.json'] = { w: 1130, h: 1514, strokes: many };
+
+  // Handed in, and answered underneath: this attempt is finished with, and the
+  // next opens on a copy of it.
+  const fb17 = card('0018', 'note', 'try the third line again', 18);
+  es.onmessage({ data: lesson([q1, q17, fb17], [sent17]) });
+  await sleep(60);
+  lift();
+
+  const copy = mapping()['0017#1'] && mapping()['0017#1'].p;
+  copy !== undefined && copy !== p17 && slate.inkOn(copy) === 12
+    ? ok('the next attempt opens on a copy of what was handed in')
+    : fail('no second attempt on a copy of the answer (page ' + copy + ')');
+
+  if (copy !== undefined) {
+    // Erased, and then written on. Two payloads, because the reported failure
+    // needed only one to land in between.
+    slate.go(copy);
+    slate.clear();
+    es.onmessage({ data: lesson([q1, q17, fb17], [sent17]) });
+    await sleep(60);
+    lift();
+    slate.go(copy);
+    slate.load({ w: 1130, h: 1514, strokes: [ink(50), ink(51)] });
+    es.onmessage({ data: lesson([q1, q17, fb17], [sent17]) });
+    await sleep(60);
+    lift();
+
+    slate.at() === copy
+      ? ok('erasing a carried-over copy and writing on it leaves you on it')
+      : fail('the pen was moved from the copy (page ' + copy + ') to page '
+             + slate.at() + ' — the old answer handed back over new working');
+    slate.inkOn(copy) === 2
+      ? ok('and the new working is what is on it')
+      : fail('the copy holds ' + slate.inkOn(copy) + ' strokes, not the 2 just '
+             + 'written: the answer was put back over them');
+    mapping()['0017#1'] && mapping()['0017#1'].p === copy
+      ? ok('and the board still points at the sheet the working is on')
+      : fail('the board was moved off the working to page '
+             + (mapping()['0017#1'] || {}).p);
+    // The answer itself is not lost by any of this: it is on disk, and the
+    // attempt it came off still points at the sheet it came off.
+    slate.inkOn(p17) === 12
+      ? ok('while the attempt that was handed in keeps what was handed in')
+      : fail('the first attempt lost its ink (' + slate.inkOn(p17) + ' strokes)');
+
+    // AND COMING BACK TO IT.
+    //
+    // The judgement is made when a board is opened, so the interesting moment is
+    // the next opening -- a reload, or walking away and tapping it again. The
+    // copy is by then a sheet holding two strokes where the record says twelve
+    // were handed in, which is exactly the shape of a board whose answer has
+    // gone. It is not one: this board never held that answer, and the board that
+    // did still points at it.
+    const q20 = card('0020', 'question', 'Exercise 6.2', 20);
+    es.onmessage({ data: lesson([q1, q17, fb17, q20], [sent17]) });
+    await sleep(60);
+    lift();
+    const back = doc.querySelector('[data-slot="0017#1"]');
+    if (!back) {
+      fail('the erased attempt has no board to come back to');
+    } else {
+      const tap = new window.Event('pointerdown', { bubbles: true, cancelable: true });
+      Object.assign(tap, { pointerId: 91, pointerType: 'pen', pressure: 0.5,
+                           clientX: 200, clientY: 200, isPrimary: true });
+      tap.getCoalescedEvents = () => [tap];
+      back.dispatchEvent(tap);
+      await sleep(80);
+      slate.at() === copy && slate.inkOn(copy) === 2
+        ? ok('and coming back to it opens what you wrote, not what you erased')
+        : fail('coming back to the erased copy opened page ' + slate.at()
+               + ' with ' + slate.inkOn(slate.at()) + ' strokes — the old answer '
+               + 'put back over working that was never it');
+      lift();
+    }
+  }
+}
+
+// ------------------ a sheet that is gaining ink is a sheet somebody is using
+//
+// The other half of the same report, on the board the answer really did come off.
+// Somebody who clears their own answer's sheet to start it over is on that sheet.
+// Between ruling the answer gone and being able to act on it there are two waits
+// -- the frozen strokes have to be fetched, and a hand has to come off the glass
+// -- and the judgement used to be re-made from scratch after them, by which time
+// there was new working underneath it to be orphaned.
+{
+  const q19 = card('0019', 'question', 'Exercise 7.1', 19);
+  es.onmessage({ data: lesson([q1, q19], []) });
+  await sleep(40);
+  const p19 = mapping()['0019#0'] ? mapping()['0019#0'].p : slate.at();
+  slate.go(p19);
+  const lot = [];
+  for (let i = 0; i < 12; i++) lot.push(ink(60 + i));
+  slate.load({ w: 1130, h: 1514, strokes: lot });
+  const sent19 = { id: 't0019', rev: 1, kind: 'ink', answers: '0019', t: t0 + 1900,
+                   page: p19 + 1, strokes: 12,
+                   png: '/answers/t0019-r1.png', ink: '/answers/t0019-r1.json' };
+  frozen['/answers/t0019-r1.json'] = { w: 1130, h: 1514, strokes: lot };
+  es.onmessage({ data: lesson([q1, q19], [sent19]) });
+  await sleep(40);
+  lift();
+
+  // Cleared to start over, and a payload lands in the gap -- which is the moment
+  // the answer is ruled gone, and the moment the sheet is empty.
+  slate.go(p19);
+  slate.clear();
+  es.onmessage({ data: lesson([q1, q19], [sent19]) });
+  await sleep(60);
+  lift();
+  // And then the new version of the answer starts going down.
+  slate.go(p19);
+  slate.load({ w: 1130, h: 1514, strokes: [ink(90), ink(91), ink(92)] });
+  es.onmessage({ data: lesson([q1, q19], [sent19]) });
+  await sleep(60);
+  lift();
+
+  slate.at() === p19 && slate.inkOn(p19) === 3
+    ? ok('clearing your own answer to start it over leaves you on the sheet')
+    : fail('the send was handed back over a fresh start (page ' + slate.at()
+           + ' of ' + slate.pages() + ', ' + slate.inkOn(p19) + ' strokes on '
+           + p19 + ')');
+}
+
 console.log(errors.length ? '\n' + errors.length + ' FAILURES'
                           : '\nan exercise is a chain of boards, and every one of them stays');
 process.exit(errors.length ? 1 : 0);

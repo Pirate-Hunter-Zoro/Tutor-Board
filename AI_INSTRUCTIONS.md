@@ -411,6 +411,22 @@ tutorboard/
   height, so it occupies nothing until it decodes. Everything after `holdAnchor` either leaves the
   page alone or says explicitly where it should go, and both of those are decisions — content
   appearing above somebody is not.
+- **A record keyed to a QUESTION must never be applied to a board the record is not about.** A
+  question has as many boards as it took attempts, and the next attempt opens on a COPY of the one
+  that was handed in — so it holds every stroke of that answer without ever having been the sheet
+  the answer came off. `lostAnswer` asked "has this sheet lost its answer" of it anyway, so erasing
+  the copy, which is the first thing anybody does with one, made the board hand the old answer back
+  under the pen over the new working. The guard is `repairPages`'s, which is why `repairPages` never
+  had the bug: if a board of the question already holds what the record names, there is nothing to
+  repair and nothing to reclaim.
+- **"Has this board lost its answer" is asked when a board is OPENED, never while somebody is
+  sitting on it.** It is a question about a board you are coming back to and finding changed. Asked
+  on every render of the live board it means: clear your own answer's sheet to write it again — an
+  ordinary thing to do — and the next payload rules the answer destroyed and puts it back over your
+  fresh start. `reclaimSeen`/`reclaimOwed` make it once per board per opening, and OWED until a
+  judgement is actually reached, because fetching the frozen strokes and waiting for a hand to come
+  off the glass are not decisions. And a sheet that has GAINED ink since the ruling is a sheet
+  somebody is using: abandon, do not re-judge. `test/chain.js` holds all three and each fails alone.
 - **NEWS IS A CARD. THE STUDENT'S OWN ANSWER IS NOT NEWS.** `anythingNew` in `render` is the whole
   basis of the reveal at the foot of it, and the only reveal it can lead to is `revealNewest` — the
   top of the newest thing the TUTOR wrote, which with a question open sits directly ABOVE the

@@ -46,6 +46,47 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 2 September 2026
 >
+> **A carried-over copy is the student's, and erasing it means what it says.** Reported from the
+> iPad: *"I got a new board to answer the next prompt, and I elected to erase my copied over
+> previous board work, and started writing new work. Then all of a sudden, the old previous board
+> work showed up again and the new work I started on got wiped."*
+>
+> Nothing was wiped, and that is the only good news here: `adoptInk` cuts a new page rather than
+> writing over one, so the new working was still on disk — on a sheet with nothing pointing at it,
+> which from behind a pen is the same thing.
+>
+> **Two rules keyed to the record were being applied to a board the record is not about.** An answer
+> is keyed by QUESTION, and a question has as many boards as it took attempts. The next attempt
+> opens on a **copy** of the one that was handed in — that is what carrying the working forward
+> means — so it begins life holding every stroke of that answer while never having been the sheet
+> the answer came off. Ask "has this sheet lost its answer" of it and the reply is nonsense: erase
+> the copy, which is the first thing anybody does with one, and the board concludes the answer has
+> been destroyed and hands it back, on a page of its own, under the pen. The record says which sheet
+> the answer came off, so the test is whether this board is on it — and if some *other* board of the
+> question is, the answer is accounted for and this one is a copy. That is the same guard
+> `repairPages` has always applied before it moves anything, which is why `repairPages` never had
+> this bug.
+>
+> **And the question was being asked in the wrong place entirely.** "Has this board's sheet lost
+> what was handed in off it" is about a board you are coming BACK to and finding changed — the
+> defect below this one, where touching a past board opened the sheet as it is now. It is not about
+> the board under your hand, and asking it on every render of the board somebody is sitting on is
+> how the send came back over a fresh start: clear your own answer's sheet to write it again, which
+> is an ordinary thing to do, and the next payload ruled the answer destroyed. It is now judged once
+> per board per **opening** — when the live board changes, and stayed owed until a judgement is
+> actually reached, because fetching the frozen strokes and waiting for a hand to come off the glass
+> are not decisions. Once judged, nothing the student then does to that sheet re-opens it.
+>
+> A third guard came with them, for the gap between ruling an answer gone and being able to act on
+> it: a sheet that has GAINED ink since the ruling is a sheet somebody is using, and the reclaim is
+> abandoned rather than re-judged against working that has appeared underneath it.
+>
+> `test/chain.js` holds all three, and each one fails on its own: erasing a copy and writing on it,
+> coming back to that board later and finding what you wrote, and clearing your own answer to start
+> it again. The behaviour the reclaim exists for is unchanged and still checked — a reused sheet
+> still gives its answer back under the pen, on a page of its own, and an answer being edited still
+> leaves you on the sheet you are editing. Shell version `board-shell-v76`.
+>
 > **Where a hand lands stopped deciding whether it writes.** Reported in three parts, and the
 > middle one is the interesting one: *"annotating is STILL sluggish as hell. And on the side of the
 > screen — the far left and right — I can't write/annotate there because it scrolls. I don't want

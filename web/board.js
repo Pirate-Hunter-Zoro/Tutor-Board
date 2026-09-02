@@ -2525,9 +2525,43 @@ function sentAnswers() {
    to put back. */
 function lostAnswer(key, share) {
   if (!writer || !writer.pages) return null;
-  var answer = sentAnswers()[slotQ(key)];
+  var q = slotQ(key);
+  var answer = sentAnswers()[q];
   if (!answer) return null;
   var page = pageOf(key);
+  /* AND ONLY THE BOARD IT WAS HANDED IN OFF.
+
+     An answer is keyed by QUESTION, and a question has as many boards as it took
+     attempts. The next attempt opens on a COPY of the one that was handed in --
+     that is what carrying the working forward means -- so it starts life holding
+     every stroke of that answer while never having been the sheet the answer came
+     off. Ask this of it and the reply is nonsense: erase the copy, which is the
+     first thing anybody does with it, and the board concludes its answer has been
+     destroyed and hands it back, on a page of its own, under the pen.
+
+     Reported from the iPad, in exactly that shape: "I got a new board to answer
+     the next prompt, and I elected to erase my copied over previous board work,
+     and started writing new work. Then all of a sudden, the old previous board
+     work showed up again and the new work I started on got wiped." Nothing was
+     lost -- `adoptInk` cuts a new page rather than writing over one -- but the
+     new working was orphaned on a sheet with nothing pointing at it, which from
+     behind a pen is the same thing.
+
+     The record says which sheet the answer came off, so the test is whether this
+     board is on it. If some OTHER board of this question is, the answer is
+     accounted for and this one is a copy: it is the student's, and erasing it
+     means what it says. The guard is the same one `repairPages` applies before it
+     moves anything -- if a board of the question already holds what the record
+     names, there is nothing to repair and nothing to reclaim. Where NO board
+     holds it the record has genuinely rotted, and the old behaviour is right. */
+  if (typeof answer.page === "number") {
+    var from = answer.page - 1;
+    if (page !== from) {
+      var held = false;
+      slotsOf(q).forEach(function (k) { if (pageOf(k) === from) held = true; });
+      if (held) return null;
+    }
+  }
   if (page === undefined || page >= writer.pages()) return answer;
   if (typeof answer.strokes === "number" && writer.inkOn
       && writer.inkOn(page) < answer.strokes * (share === undefined ? 1 : share)) {
@@ -2577,8 +2611,30 @@ function frozenFor(url) {
    the sheet that had been reused keeps whatever is on it and belongs to whoever
    is using it now. */
 var reclaimed = {};
+/* What the sheet held when its answer was first ruled gone. See below. */
+var reclaimFrom = {};
+/* ASKED WHEN A BOARD IS OPENED, NOT WHILE SOMEBODY IS SITTING ON IT.
+
+   This is a question about a board you are coming BACK to and finding changed --
+   "touching one opened the sheet as it is now, cleared or reused, so an evening's
+   working appeared to go". It is not a question about the board under your hand,
+   and asking it there is how the answer came back over a fresh start: clear your
+   own answer's sheet to write it again, which is an ordinary thing to do, and the
+   next render ruled the answer destroyed and handed it back on a page of its own.
+   Reported from the iPad alongside the carried-over copy: "I elected to erase my
+   ... board work, and started writing new work. Then all of a sudden, the old
+   previous board work showed up again and the new work I started on got wiped."
+
+   So the judgement is made once per board per opening. `reclaimSeen` is the slot
+   that was live last time round; when it changes, the new one is OWED a
+   judgement, and it stays owed until one is actually reached -- the frozen
+   strokes have to be fetched first, and a hand has to come off the glass, and
+   neither of those is a decision. Once judged, nothing the student then does to
+   that sheet re-opens the question. */
+var reclaimSeen = null;
+var reclaimOwed = null;
 function reclaimAnswer(key) {
-  if (!writer || !writer.adoptInk || reclaimed[key]) return;
+  if (!writer || !writer.adoptInk || reclaimed[key]) { reclaimOwed = null; return; }
   /* A HALF of what was handed in, where showing the frozen picture asks only for
      one stroke fewer -- and the difference is deliberate. Showing a picture is
      reversible and costs nothing when it is wrong. Moving the page under the pen
@@ -2588,11 +2644,35 @@ function reclaimAnswer(key) {
      handful of strokes out of hundreds; an edited one holds nearly all of them.
      Only the first is a board whose answer has gone. */
   var answer = lostAnswer(key, 0.5);
-  if (!answer || !answer.ink) return;
+  /* Judged: the answer is where it was handed in, or there is nothing frozen to
+     put back. Either way the question is closed until this board is opened
+     again. */
+  if (!answer || !answer.ink) { delete reclaimFrom[key]; reclaimOwed = null; return; }
+  /* A SHEET THAT IS GAINING INK IS A SHEET SOMEBODY IS USING.
+
+     Between ruling the answer gone and being able to act on it there are two
+     waits -- the frozen strokes have to be fetched, and a hand has to come off
+     the glass -- and a person does not stand still through them. Somebody who
+     clears a sheet and starts writing on it has answered the question this was
+     about: the sheet is theirs and they are on it. Moving the pen to a fresh
+     copy of the send then orphans exactly the working they are in the middle
+     of, which is the second half of what was reported.
+
+     So the judgement is made once, against what the sheet held when it was
+     first ruled gone, and abandoned if the sheet has grown since. It never
+     comes back for that board, because the count it is compared against does
+     not rise -- which is right: there is nothing here that has to happen, and
+     the frozen answer is still on disk, still drawn on the dormant board, and
+     still one tap away. */
+  var at = pageOf(key);
+  var now = (at !== undefined && writer.inkOn) ? writer.inkOn(at) : 0;
+  if (reclaimFrom[key] === undefined) reclaimFrom[key] = now;
+  if (now > reclaimFrom[key]) { reclaimOwed = null; return; }
   var ink = frozenFor(answer.ink);
   if (!ink) return;                 /* the fetch renders again when it lands */
   if (writer.writing && writer.writing()) { renderSoon(); return; }
   reclaimed[key] = true;
+  reclaimOwed = null;
   boardPage[key].p = writer.adoptInk(ink);
   savePages();
   loadedTurn = null;
@@ -3171,7 +3251,12 @@ function restoreAnswer() {
 
   /* Before anything decides which page goes under the pen: if this board's sheet
      no longer holds the answer that came off it, the answer comes back first. */
-  if (liveSlot && boardPage[liveSlot]) reclaimAnswer(liveSlot);
+  /* And it is asked when a board is OPENED, not on every render of the board
+     somebody is sitting on. See `reclaimOwed`. */
+  if (liveSlot !== reclaimSeen) { reclaimSeen = liveSlot; reclaimOwed = liveSlot; }
+  if (liveSlot && boardPage[liveSlot] && reclaimOwed === liveSlot) {
+    reclaimAnswer(liveSlot);
+  }
 
   if (liveSlot && boardPage[liveSlot] && writer.fresh) {
     var rec = boardPage[liveSlot];
