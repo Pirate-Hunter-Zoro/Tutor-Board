@@ -659,7 +659,10 @@ body.tools-out { padding-bottom: 5.5rem; }
 .board-shot {
   display: block; width: 100%;
   object-fit: cover; object-position: top left;
-  background: #101114;
+  /* The paper the surface is set to, which the board sets from the slate --
+     see `paintBoards`. The fallback is the slate black, which is what this was
+     before it could follow the setting. */
+  background: var(--shot-bg, #101114);
 }
 .board { cursor: pointer; touch-action: none; }
 .board-send {

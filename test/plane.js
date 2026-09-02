@@ -43,11 +43,16 @@ const W = 900, H = 500;
 // — and framing a page above its own writing is what made a board full of work
 // read as an empty one.
 window.__transforms = [];
+// Every other call is counted by name. Without a canvas backend, counting how
+// many times the surface asked to draw a line is the only way to ask how much
+// work a gesture costs -- which is the whole question behind a pen that answers
+// late after erasing.
+window.__paints = {};
 window.HTMLCanvasElement.prototype.getContext = () =>
   new Proxy({}, {
     get: (t, k) => (k === 'setTransform'
       ? (a, b, c, d, e, f) => { window.__transforms.push({ k: a, ox: e, oy: f }); }
-      : () => {}),
+      : function () { window.__paints[k] = (window.__paints[k] || 0) + 1; }),
     set: () => true,
   });
 window.HTMLCanvasElement.prototype.toDataURL = () => 'data:image/png;base64,';
@@ -404,6 +409,275 @@ const heelSwipe = (id, x, y, dx, dy) => {
       ? ok('and one fast swipe takes all of them, gaps between samples included')
       : fail('a fast swipe left ' + slate.strokes() + ' of 10 behind — the '
              + 'rubber is still testing points instead of the line between them');
+  }
+
+  // ...and rubbing out a word does not repaint the page.
+  //
+  // Every erase sample used to throw the whole cache away, so a page holding an
+  // evening's proof repainted every stroke on it, several times a frame, for a
+  // gesture that touched one word. That is the main thread gone, and from behind
+  // a pen it reads as the surface answering late -- reported as a delay on
+  // putting the pen down, "especially if I've just erased something", and as a
+  // scroll that stutters just afterwards.
+  {
+    slate.tool('pen');
+    slate.clear();
+    // Sixty words, spread down a page far longer than the glass -- which is what
+    // a worked exercise is. Only a few of them are anywhere near the rubber.
+    const many = [];
+    for (let i = 0; i < 60; i++) {
+      many.push({ c: '#eee', w: 3,
+                  pts: [[60, 60 + i * 90], [90, 60 + i * 90], [140, 70 + i * 90]] });
+    }
+    slate.load({ w: 1130, h: 60 * 90 + 200, strokes: many });
+    await new Promise((r) => setTimeout(r, 5));
+
+    slate.tool('erase');
+    window.__paints = {};
+    pen('pointerdown', 70, 70, 21);
+    for (let i = 1; i <= 8; i++) pen('pointermove', 70 + i * 4, 70 + i, 21);
+    pen('pointerup', 104, 78, 21);
+    await new Promise((r) => setTimeout(r, 20));
+    const during = window.__paints.stroke || 0;
+
+    // What a full repaint of that page costs, for comparison: the same surface,
+    // told the whole cache is stale.
+    slate.tool('pen');
+    window.__paints = {};
+    slate.fitInk();
+    await new Promise((r) => setTimeout(r, 20));
+    const full = window.__paints.stroke || 0;
+
+    during > 0
+      ? ok('rubbing out repaints the hole it made')
+      : fail('erasing painted nothing at all, so the ink is still on screen');
+    during * 3 < full
+      ? ok('and not the rest of the page with it (' + during + ' line calls, '
+           + 'where a full repaint is ' + full + ')')
+      : fail('an erase still costs a whole-page repaint (' + during + ' of '
+             + full + ' line calls), which is the pause that was reported');
+    slate.tool('pen');
+    slate.clear();
+  }
+
+  // An undo step is the LIST of strokes, not a copy of the page.
+  //
+  // It used to be `JSON.stringify(page().strokes)`, taken on every pen lift and
+  // on every touch of the rubber -- three hundred kilobytes of JSON built at the
+  // exact moment a hand is asking the surface for something, and sixty of them
+  // on the stack. Reported as the first stroke of the rubber being slow, and as
+  // a general lateness in putting the pen down.
+  //
+  // What makes a shallow list correct is that a stroke on the page is never
+  // changed in place, and that is what is actually checked here: erase, drag,
+  // and then walk the undo stack back and see the working return.
+  {
+    slate.tool('pen');
+    slate.clear();
+    slate.load({ w: 1130, h: 900, strokes: [
+      { c: '#eee', w: 3, pts: [[200, 200], [260, 200], [300, 240]] },
+      { c: '#eee', w: 3, pts: [[200, 400], [260, 400], [300, 440]] },
+    ] });
+    await new Promise((r) => setTimeout(r, 10));
+
+    // No copy of the page is made when the rubber goes down.
+    const realStringify = window.JSON.stringify;
+    let strung = 0;
+    window.JSON.stringify = function () {
+      strung++;
+      return realStringify.apply(window.JSON, arguments);
+    };
+    slate.tool('erase');
+    pen('pointerdown', 950, 950, 61);            // nowhere near the ink
+    window.JSON.stringify = realStringify;
+    pen('pointerup', 950, 950, 61);
+    strung === 0
+      ? ok('putting the rubber down copies nothing')
+      : fail('the rubber still serialises the whole page before it has removed '
+             + 'anything (' + strung + ' times), which is the pause reported on '
+             + 'the first erase after switching tool');
+
+    // And the undo it recorded still undoes.
+    const before = slate.strokes();
+    pen('pointerdown', 200, 200, 62);
+    pen('pointermove', 300, 240, 62);
+    pen('pointerup', 300, 240, 62);
+    await new Promise((r) => setTimeout(r, 10));
+    slate.strokes() < before
+      ? ok('and the rubber still takes ink out')
+      : fail('nothing was erased, so the undo below proves nothing');
+    const undoBtn = slate.bar.querySelector('button[title="undo"]');
+    undoBtn ? undoBtn.onclick() : fail('the toolbar has no undo button');
+    await new Promise((r) => setTimeout(r, 10));
+    slate.strokes() === before
+      ? ok('undo brings the erased working back')
+      : fail('undo restored ' + slate.strokes() + ' strokes of ' + before);
+  }
+
+  // ...and dragging a selection still undoes, which is the half that could go
+  // silently wrong: a shallow undo step is only correct because nothing on the
+  // page is ever changed in place. A drag that moved the very points an earlier
+  // step is holding would leave that step "undoing" to the moved position, and
+  // nothing about the screen would say so.
+  {
+    slate.tool('pen');
+    slate.clear();
+    slate.load({ w: 1130, h: 900, strokes: [
+      { c: '#eee', w: 3, pts: [[300, 300], [340, 300], [380, 340], [300, 340]] },
+    ] });
+    await new Promise((r) => setTimeout(r, 10));
+    const at = () => { const v = slate.view(); return (lx, ly) =>
+      [lx * v.k + v.ox, ly * v.k + v.oy]; };
+    const box0 = slate.pngBox();
+
+    // A loop right round it.
+    slate.tool('lasso');
+    const to = at();
+    const ring = [[240, 240], [440, 240], [440, 400], [240, 400], [240, 250]];
+    let first = to(ring[0][0], ring[0][1]);
+    pen('pointerdown', first[0], first[1], 71);
+    for (const q of ring.slice(1)) {
+      const xy = to(q[0], q[1]);
+      pen('pointermove', xy[0], xy[1], 71);
+    }
+    pen('pointerup', first[0], first[1], 71);
+    await new Promise((r) => setTimeout(r, 10));
+
+    const grab = to(340, 320), drop = to(440, 320);
+    pen('pointerdown', grab[0], grab[1], 72);
+    pen('pointermove', drop[0], drop[1], 72);
+    pen('pointerup', drop[0], drop[1], 72);
+    await new Promise((r) => setTimeout(r, 10));
+    const box1 = slate.pngBox();
+
+    if (Math.abs(box1.x0 - box0.x0) < 20) {
+      ok('drag not exercised in this harness (no selection was made)');
+    } else {
+      ok('a selection can be dragged');
+      const undoBtn = slate.bar.querySelector('button[title="undo"]');
+      undoBtn.onclick();
+      await new Promise((r) => setTimeout(r, 10));
+      Math.abs(slate.pngBox().x0 - box0.x0) < 2
+        ? ok('and undo puts it back where it was, so the step it took is intact')
+        : fail('undo left the selection at ' + Math.round(slate.pngBox().x0)
+               + ' instead of ' + Math.round(box0.x0) + ': the drag moved the '
+               + 'very points the undo step was holding');
+    }
+    slate.tool('pen');
+    slate.clear();
+  }
+
+  // The nib leaves its mark on the frame the pen goes down.
+  //
+  // The curve needs three samples before it can produce a single point of
+  // resampled line, and samples closer together than MIN_STEP are dropped -- so
+  // a pen put down and moved slowly, which is how a letter starts, painted
+  // nothing until it had travelled a pixel or two. The surface was silent while
+  // the hand waited to see its own ink.
+  {
+    slate.tool('pen');
+    slate.clear();
+    await new Promise((r) => setTimeout(r, 20));
+    window.__paints = {};
+    const realRaf = window.requestAnimationFrame;
+    window.requestAnimationFrame = (fn) => fn();
+    pen('pointerdown', 300, 250, 31);
+    window.requestAnimationFrame = realRaf;
+    (window.__paints.arc || 0) > 0 || (window.__paints.stroke || 0) > 0
+      ? ok('a pen put down marks the page before it has moved anywhere')
+      : fail('nothing was painted until the pen moved, which is the delay that '
+             + 'was reported on tapping to write');
+    pen('pointerup', 300, 250, 31);
+  }
+
+  // A picture of the page is not encoded under a hand.
+  //
+  // `toPNG` repaints the whole page onto an offscreen canvas and PNG-encodes it,
+  // and every save did it -- about a second after every stroke. It is the same
+  // defect this repository already fixed in the annotation layer, in the place
+  // where it costs more: a page holds four hundred strokes by the end of an
+  // exercise, and the encode lands right about when a hand comes back to write.
+  //
+  // A send must still carry it: it is copied into live/answers/ as the frozen
+  // answer, and that has to be what was handed in.
+  {
+    const bodies = [];
+    const realFetch = window.fetch;
+    window.fetch = (u, opts) => {
+      if (/slate\/save/.test(String(u))) {
+        bodies.push(JSON.parse(opts.body));
+        return Promise.resolve({ json: () => Promise.resolve({ ok: true, rev: 1 }) });
+      }
+      return new Promise(() => {});
+    };
+    const root4 = doc.createElement('div');
+    doc.body.appendChild(root4);
+    const s4 = window.Slate.create({ root: root4, compact: false });
+    const sheet4 = root4.querySelector('canvas.sl-sheet');
+    const pen4 = (type, x, y) => {
+      const ev = new window.Event(type, { bubbles: true, cancelable: true });
+      Object.assign(ev, { pointerId: 51, pointerType: 'pen', pressure: 0.6,
+                          clientX: x, clientY: y, isPrimary: true });
+      ev.getCoalescedEvents = () => [ev];
+      sheet4.dispatchEvent(ev);
+    };
+    await new Promise((r) => setTimeout(r, 10));
+
+    pen4('pointerdown', 120, 120);
+    for (let i = 0; i < 8; i++) pen4('pointermove', 120 + i * 7, 120 + i * 5);
+    pen4('pointerup', 190, 165);
+    await s4.save(false);                       /* the hand is still on the glass */
+    const auto = bodies[bodies.length - 1];
+    auto && !auto.png
+      ? ok('an autosave under a hand carries the strokes and no picture')
+      : fail('an autosave still encodes a picture of the whole page, which is '
+             + 'the main thread the next stroke needed');
+    auto && auto.strokes && auto.strokes.length === 1
+      ? ok('and the strokes are what it carries, which is what a reload restores')
+      : fail('an autosave carried no strokes');
+
+    // ...and a scroll of the LESSON counts as a hand too. The board is part of a
+    // page that scrolls with a finger, so "is a hand busy" cannot be answered
+    // from the writing surface alone. Reported as scrolling up to read earlier
+    // replies being laggy just after writing.
+    await new Promise((r) => setTimeout(r, 2600));      /* the pen goes stale */
+    bodies.length = 0;
+    window.dispatchEvent(new window.Event('scroll'));
+    await s4.save(false);
+    const scrolled = bodies[bodies.length - 1];
+    scrolled && !scrolled.png
+      ? ok('and a page being scrolled defers it as surely as a pen does')
+      : fail('a picture is still encoded in the middle of a scroll');
+
+    await s4.save(true);
+    const sent = bodies[bodies.length - 1];
+    sent && sent.send && sent.png
+      ? ok('and a send carries the picture, because it is frozen as the answer')
+      : fail('a send no longer carries the picture that becomes the answer');
+    window.fetch = realFetch;
+  }
+
+  // The paper is remembered, because every board on the page is drawn with it.
+  //
+  // It was not, and a reload therefore repainted a whole sitting in the other
+  // scheme: the live surface and a dozen photographs of past boards, all of them
+  // the paper this was last set to. Reported from the iPad as boards whose
+  // "color is inverted".
+  {
+    window.localStorage.setItem('tutor-board.slate.paper', 'white');
+    window.localStorage.setItem('tutor-board.slate.rule', 'lines');
+    const root5 = doc.createElement('div');
+    doc.body.appendChild(root5);
+    const s5 = window.Slate.create({ root: root5, compact: false });
+    s5.paper() === 'white/lines'
+      ? ok('a reload comes back on the paper it was left on')
+      : fail('the paper was forgotten (' + s5.paper() + '), so every board on '
+             + 'the page is drawn in the other scheme after a reload');
+    root5.dataset.paper === 'white'
+      ? ok('and the chrome around it agrees')
+      : fail('the surface and its chrome disagree about the paper');
+    window.localStorage.removeItem('tutor-board.slate.paper');
+    window.localStorage.removeItem('tutor-board.slate.rule');
   }
 
   // A pen is never a palm, whatever its id says. Pointer ids are small integers

@@ -2375,6 +2375,102 @@ function syncSlots(qids, runEndOf, turns) {
    them from wherever it is read. */
 var lastTurns = [];
 
+/* The answer each question actually handed in, newest revision of it. */
+function sentAnswers() {
+  var out = {};
+  (lastTurns || []).forEach(function (t) {
+    if (!t || t.kind !== "ink" || !t.answers || !t.png) return;
+    var have = out[t.answers];
+    if (!have || (t.t || 0) >= (have.t || 0)) out[t.answers] = t;
+  });
+  return out;
+}
+
+/* Has the page this board points at stopped being the answer that came off it?
+
+   Fewer strokes than were handed in is the test, and it is the honest one: a
+   page can only lose strokes by being cleared, reused or cloned over, and any of
+   those means it is somebody else's sheet now. MORE strokes is the ordinary case
+   of carrying on writing after sending, and the live page is then the better
+   picture -- it holds the answer and the work since.
+
+   Returns the answer that came off it, which is the thing to show and the thing
+   to put back. */
+function lostAnswer(key, share) {
+  if (!writer || !writer.pages) return null;
+  var answer = sentAnswers()[slotQ(key)];
+  if (!answer) return null;
+  var page = pageOf(key);
+  if (page === undefined || page >= writer.pages()) return answer;
+  if (typeof answer.strokes === "number" && writer.inkOn
+      && writer.inkOn(page) < answer.strokes * (share === undefined ? 1 : share)) {
+    return answer;
+  }
+  return null;
+}
+
+/* The frozen strokes of an answer, by the URL the turn carries.
+
+   `live/answers/<turn>.json` is written once, beside the picture, and never
+   touched again -- so unlike the slate page it came off, it cannot move. It is
+   what a past board is DRAWN from, and what comes back under the pen when the
+   sheet it was written on has been reused since.
+
+   Fetched once per URL. A failure is remembered as a failure rather than
+   retried, because the board falls back to the picture and a board that re-asks
+   for a file that is not there on every render is a board that spends the
+   evening asking. */
+var frozenInk = {};
+function frozenFor(url) {
+  if (!url) return null;
+  if (Object.prototype.hasOwnProperty.call(frozenInk, url)) {
+    var have = frozenInk[url];
+    return have === "asking" ? null : have;
+  }
+  frozenInk[url] = "asking";
+  fetch(url).then(function (r) { return r.json(); }).then(function (d) {
+    frozenInk[url] = (d && d.strokes && d.strokes.length) ? d : null;
+    if (lastLive) render(lastLive);
+  }).catch(function () { frozenInk[url] = null; });
+  return null;
+}
+
+/* A board whose sheet no longer holds what was handed in off it, given that
+   answer back on a page of its own.
+
+   Without this, touching such a board opened the sheet as it is NOW -- cleared,
+   or reused by a later question -- so the working vanished and the pen landed on
+   what read as a brand new surface. Reported from the iPad: the boards whose
+   colour was wrong were the same boards that "clear everything to be a new
+   writing surface" when you write on them, and they are the same boards for the
+   same reason: both halves were the frozen answer being shown by a picture
+   drawn for somebody else, over a page that had moved on.
+
+   Once per board per sitting, and never over ink: `adoptInk` cuts a new page, so
+   the sheet that had been reused keeps whatever is on it and belongs to whoever
+   is using it now. */
+var reclaimed = {};
+function reclaimAnswer(key) {
+  if (!writer || !writer.adoptInk || reclaimed[key]) return;
+  /* A HALF of what was handed in, where showing the frozen picture asks only for
+     one stroke fewer -- and the difference is deliberate. Showing a picture is
+     reversible and costs nothing when it is wrong. Moving the page under the pen
+     is neither: somebody who sends an answer and then rubs two lines out of it
+     is on that sheet, editing it, and cutting a fresh copy from the send would
+     orphan the very edit they are making. A cleared or reused sheet holds a
+     handful of strokes out of hundreds; an edited one holds nearly all of them.
+     Only the first is a board whose answer has gone. */
+  var answer = lostAnswer(key, 0.5);
+  if (!answer || !answer.ink) return;
+  var ink = frozenFor(answer.ink);
+  if (!ink) return;                 /* the fetch renders again when it lands */
+  if (writer.writing && writer.writing()) { renderSoon(); return; }
+  reclaimed[key] = true;
+  boardPage[key].p = writer.adoptInk(ink);
+  savePages();
+  loadedTurn = null;
+}
+
 /* Which page a question sits on, taken back from the record when the record in
    this browser has rotted.
 
@@ -2593,12 +2689,20 @@ function paintBoards(qids, liveKey, off) {
      What was handed in cannot move: it is written once, into live/answers/, and
      never touched again. So a board whose page no longer holds the answer that
      came off it shows the answer instead. */
-  var sentInk = {};
-  (lastTurns || []).forEach(function (t) {
-    if (!t || t.kind !== "ink" || !t.answers || !t.png) return;
-    var have = sentInk[t.answers];
-    if (!have || (t.t || 0) >= (have.t || 0)) sentInk[t.answers] = t;
-  });
+  var sentInk = sentAnswers();
+  /* Every photograph is keyed by the paper it was taken on as well as by what is
+     on it. The paper is a device setting -- one tap turns the whole sitting from
+     slate to white -- and without it in the key the pictures kept the old scheme
+     until something else happened to change them. */
+  var skin = writer && writer.paper ? writer.paper() : "";
+  /* And the box each picture sits in is painted the same colour as the paper.
+     It was #101114 in the stylesheet -- the slate's own black -- which is right
+     until somebody chooses white paper, and then every board that has nothing on
+     it yet is a black rectangle in a run of white ones. */
+  if (skin && window.Slate && window.Slate.paperBg) {
+    document.documentElement.style.setProperty(
+      "--shot-bg", window.Slate.paperBg(skin.split("/")[0]));
+  }
 
   /* Every board in the lesson, in reading order, with which attempt of its
      question it is. */
@@ -2641,26 +2745,43 @@ function paintBoards(qids, liveKey, off) {
     slot.querySelector(".board-hint").textContent = which + " · tap to write";
     var page = rec.p;
 
-    /* Has this page stopped being the answer that came off it?
-   
-       Fewer strokes than were handed in is the test, and it is the honest one:
-       a page can only lose strokes by being cleared, reused or cloned over, and
-       any of those means it is somebody else's sheet now. MORE strokes is the
-       ordinary case of carrying on writing after sending, and the live page is
-       then the better picture -- it contains the answer and the work since. */
-    var answer = sentInk[it.qid];
-    var lost = !!answer
-            && (page === undefined
-                || page >= writer.pages()
-                || (typeof answer.strokes === "number" && writer.inkOn
-                    && writer.inkOn(page) < answer.strokes));
-    if (lost) {
+    var answer = lostAnswer(it.key);
+    if (answer) {
       slot.querySelector(".board-hint").textContent = which + " · as it was handed in";
       var frozen = slot.querySelector(".board-shot");
-      if (slot.dataset.shot !== answer.png) {
-        frozen.src = answer.png;
-        frozen.alt = "the answer handed in for question " + it.qid;
-        slot.dataset.shot = answer.png;
+      /* Drawn from the frozen STROKES, by the slate, on the paper in hand.
+
+         It used to be the answer's own PNG, and that file is written for a
+         different reader: always dark ink on white, cropped to the writing,
+         because its job is to be legible to whatever agent opens it. Among the
+         boards it read as exactly what it is -- a white sheet in a run of black
+         ones, at a magnification of its own. "The color is inverted", from the
+         iPad, mid-proof. The strokes were on disk beside it the whole time, so
+         a past board can be drawn by the same code as a live one and is then
+         indistinguishable from it, which is the rule every board here follows.
+
+         The picture stays as the fallback for an answer with no frozen strokes
+         -- one handed in before they were kept -- because an inverted board
+         still shows the working, and a blank one does not. */
+      var ink = frozenFor(answer.ink);
+      var mark = "frozen:" + (answer.ink || answer.png) + ":" + skin
+               + ":" + (ink ? "ink" : "png");
+      if (slot.dataset.shot !== mark) {
+        var drawn = "";
+        if (ink && writer.previewInk) {
+          var fb = slot.getBoundingClientRect();
+          drawn = writer.previewInk(ink,
+                                    Math.round(fb.width) || 900,
+                                    Math.round(frozen.getBoundingClientRect().height) || 420);
+        }
+        /* Nothing to show yet: the strokes are on their way. Leave the board as
+           it is rather than flashing the inverted picture up and swapping it a
+           moment later. */
+        if (drawn || !ink) {
+          frozen.src = drawn || answer.png;
+          frozen.alt = "the answer handed in for question " + it.qid;
+          slot.dataset.shot = mark;
+        }
       }
       paintCarry(slot.querySelector(".board-carry"), it.key);
       return;
@@ -2691,7 +2812,7 @@ function paintBoards(qids, liveKey, off) {
     }
     paintCarry(slot.querySelector(".board-carry"), it.key);
     /* Redrawn only when the page it is a picture of has actually changed. */
-    var mark = page + ":" + (writer.inkOn ? writer.inkOn(page) : 0);
+    var mark = page + ":" + (writer.inkOn ? writer.inkOn(page) : 0) + ":" + skin;
     if (slot.dataset.shot === mark) return;
     var shot = slot.querySelector(".board-shot");
     var box = slot.getBoundingClientRect();
@@ -2881,6 +3002,11 @@ function makeWriter(then) {
           restoreAnswer();
           if (lastLive) render(lastLive);
         },
+        /* The paper is a device setting and every board on the page is drawn
+           with it, so one tap has to repaint the photographs too -- otherwise
+           the live surface turns white and a dozen dormant boards stay on
+           slate. */
+        onPaper: function () { if (lastLive) render(lastLive); },
       });
       window.__writerDebug = writer.debug;
       if (then) then();
@@ -2915,6 +3041,10 @@ function restoreAnswer() {
   /* The pages have only just become knowable, and this is the first thing to
      read the mapping when they do. */
   repairPages();
+
+  /* Before anything decides which page goes under the pen: if this board's sheet
+     no longer holds the answer that came off it, the answer comes back first. */
+  if (liveSlot && boardPage[liveSlot]) reclaimAnswer(liveSlot);
 
   if (liveSlot && boardPage[liveSlot] && writer.fresh) {
     var rec = boardPage[liveSlot];

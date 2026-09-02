@@ -56,9 +56,21 @@ window.HTMLElement.prototype.getBoundingClientRect = function () {
 window.Element.prototype.scrollIntoView = function () {};
 window.Element.prototype.setPointerCapture = function () {};
 window.Element.prototype.releasePointerCapture = function () {};
-window.fetch = (u) => (/slate\/state/.test(String(u))
-  ? Promise.resolve({ json: () => Promise.resolve({ pages: [] }) })
-  : new Promise(() => {}));
+// The frozen ink of an answer is a real file, served the way the board serves
+// it: `live/answers/<turn>.json`, written once beside the picture and never
+// touched again. A past board is DRAWN from it, so a harness that cannot answer
+// for it cannot see what a past board looks like.
+const frozen = {};
+window.fetch = (u) => {
+  const url = String(u);
+  if (/slate\/state/.test(url)) {
+    return Promise.resolve({ json: () => Promise.resolve({ pages: [] }) });
+  }
+  if (frozen[url]) {
+    return Promise.resolve({ json: () => Promise.resolve(frozen[url]) });
+  }
+  return new Promise(() => {});
+};
 window.renderMathInElement = () => {};
 window.requestAnimationFrame = (fn) => setTimeout(fn, 0);
 window.scrollTo = function () {};
@@ -319,38 +331,171 @@ await sleep(40);
 // strokes and page 7 now holds one; another came off page 9 with 279 and page 9
 // holds a different 228. Every frozen answer was correct and distinct the whole
 // time. The boards were pointing at a moving target.
+const mapping = () =>
+  JSON.parse(window.localStorage.getItem('board.pages:Galois Theory:-') || '{}');
+// The pen goes back on the glass for each of these, and comes off again: a
+// synthetic pointerdown with no lift leaves the surface believing a hand is on
+// it, and the board will not move a page under a hand.
+const lift = () => {
+  const ev = new window.Event('pointerup', { bubbles: true, cancelable: true });
+  Object.assign(ev, { pointerId: 91, pointerType: 'pen', pressure: 0,
+                      clientX: 200, clientY: 200, isPrimary: true });
+  doc.querySelector('#writer canvas.sl-sheet').dispatchEvent(ev);
+};
+
 {
   const q9 = card('0009', 'question', 'Exercise 3.4', 9);
-  // Handed in off a page with three strokes on it...
+  // Handed in off the board's own page, with three strokes on it.
+  es.onmessage({ data: lesson([q1, q9], []) });
+  await sleep(40);
+  const p9 = mapping()['0009#0'] ? mapping()['0009#0'].p : slate.at();
+  slate.go(p9);
   slate.load({ w: 1130, h: 1514, strokes: [ink(1), ink(2), ink(3)] });
-  const page = slate.at();
   const sent = { id: 't0009', rev: 1, kind: 'ink', answers: '0009', t: t0 + 900,
-                 page: page + 1, strokes: 3,
+                 page: p9 + 1, strokes: 3,
                  png: '/answers/t0009-r1.png', ink: '/answers/t0009-r1.json' };
+  frozen['/answers/t0009-r1.json'] =
+    { w: 1130, h: 1514, strokes: [ink(1), ink(2), ink(3)] };
   es.onmessage({ data: lesson([q1, q9], [sent]) });
   await sleep(40);
+  lift();
 
-  // ...and then a later question reuses that sheet, leaving one stroke on it.
+  // ...and then that sheet is reused, leaving one stroke on it. The mapping is
+  // perfectly healthy -- the board points where the record says the answer came
+  // from -- and the sheet simply is not that answer any more.
+  slate.go(p9);
   slate.load({ w: 1130, h: 1514, strokes: [ink(7)] });
   const q11 = card('0011', 'question', 'Exercise 3.6', 11);
   es.onmessage({ data: lesson([q1, q9, q11], [sent]) });
   await sleep(60);
+  lift();
 
   const slot = doc.querySelector('[data-slot^="0009"]');
   if (!slot) {
     fail('question 0009 has no board at all');
   } else {
     const shot = slot.querySelector('.board-shot');
-    shot && shot.getAttribute('src') === '/answers/t0009-r1.png'
+    const src = (shot && shot.getAttribute('src')) || '';
+    /^data:image\/png/.test(src)
       ? ok('a board whose page has been reused shows the answer that was handed '
            + 'in, which cannot move')
-      : fail('the board still shows the live page (' + (shot && shot.getAttribute('src'))
-             + '), so it is showing somebody else\'s writing');
+      : fail('the board shows ' + src + ', so it is showing somebody else\'s writing');
+    // And it is DRAWN, not the answer's own PNG. That file is written for a
+    // different reader -- always dark ink on white, cropped to the writing --
+    // and dropped into the run of boards it reads as a white sheet among black
+    // ones. "The color is inverted", from the iPad, mid-proof.
+    src !== '/answers/t0009-r1.png'
+      ? ok('drawn by the slate, on the paper in hand, like every other board')
+      : fail('the board shows the answer PNG, which is dark ink on white however '
+             + 'dark the surface is: an inverted board in a run of black ones');
     /^.*handed in/.test(slot.querySelector('.board-hint').textContent)
       ? ok('and says that is what it is')
       : fail('it shows the frozen answer without saying so: '
              + slot.querySelector('.board-hint').textContent);
   }
+
+  // ------------------------------------------- and writing on it writes on IT
+  //
+  // The same boards, reported in the same breath: "the color is inverted and
+  // when I try to write on them, it clears everything to be a new writing
+  // surface". Both halves are one defect: the board pointed at a sheet that no
+  // longer held the answer, so touching it opened that sheet AS IT IS NOW --
+  // reused, or cleared -- and an evening's working appeared to go.
+  //
+  // What was handed in cannot move, so it is what comes back under the pen.
+  if (slot) {
+    const before = slate.pages();
+    const ev = new window.Event('pointerdown', { bubbles: true, cancelable: true });
+    Object.assign(ev, { pointerId: 91, pointerType: 'pen', pressure: 0.5,
+                        clientX: 200, clientY: 200, isPrimary: true });
+    ev.getCoalescedEvents = () => [ev];
+    slot.dispatchEvent(ev);
+    await sleep(60);
+
+    slate.inkOn(slate.at()) === 3
+      ? ok('touching it puts the answer that was handed in back under the pen')
+      : fail('the pen landed on a page with ' + slate.inkOn(slate.at())
+             + ' strokes on it — the reused sheet, not the answer, which is the '
+             + '"it clears everything to be a new writing surface" report');
+    slate.pages() === before + 1
+      ? ok('on a page of its own, so the sheet it was reusing keeps its own ink')
+      : fail('the answer came back over the top of a page somebody else is using');
+    slate.inkOn(p9) === 1
+      ? ok('and the sheet that reused it is untouched')
+      : fail('the reused page changed (' + slate.inkOn(p9) + ' strokes)');
+    lift();
+  }
+}
+
+// ------------------------ an answer being EDITED is not an answer that is gone
+//
+// The other side of the same rule, and the reason the two tests are not the same
+// test: somebody who sends an answer and then rubs a line out of it is on that
+// sheet, editing it. Cutting them a fresh copy of what was sent would orphan the
+// edit they are in the middle of making.
+{
+  const q15 = card('0015', 'question', 'Exercise 5.1', 15);
+  es.onmessage({ data: lesson([q1, q15], []) });
+  await sleep(40);
+  const p15 = mapping()['0015#0'] ? mapping()['0015#0'].p : slate.at();
+  slate.go(p15);
+  slate.load({ w: 1130, h: 1514, strokes: [ink(1), ink(2), ink(3), ink(4)] });
+  const sent15 = { id: 't0015', rev: 1, kind: 'ink', answers: '0015', t: t0 + 1500,
+                   page: p15 + 1, strokes: 4,
+                   png: '/answers/t0015-r1.png', ink: '/answers/t0015-r1.json' };
+  frozen['/answers/t0015-r1.json'] =
+    { w: 1130, h: 1514, strokes: [ink(1), ink(2), ink(3), ink(4)] };
+  es.onmessage({ data: lesson([q1, q15], [sent15]) });
+  await sleep(40);
+  lift();
+
+  // One line rubbed out of four, on the same sheet.
+  slate.go(p15);
+  slate.load({ w: 1130, h: 1514, strokes: [ink(1), ink(2), ink(3)] });
+  const pages15 = slate.pages();
+  es.onmessage({ data: lesson([q1, q15], [sent15]) });
+  await sleep(60);
+
+  slate.pages() === pages15 && slate.at() === p15
+    ? ok('rubbing a line out of an answer leaves you on the sheet you are editing')
+    : fail('the board cut a fresh copy of what was sent and moved the pen to it, '
+           + 'which orphans the edit being made (page ' + slate.at() + ' of '
+           + slate.pages() + ')');
+  slate.inkOn(p15) === 3
+    ? ok('and the edit stands')
+    : fail('the edited page was written back over (' + slate.inkOn(p15) + ' strokes)');
+  lift();
+}
+
+// ------------------------------- an answer from before the strokes were frozen
+//
+// The picture is the fallback and has to stay one: an inverted board still shows
+// the working, and a blank board does not.
+{
+  const q13 = card('0013', 'question', 'Exercise 4.1', 13);
+  es.onmessage({ data: lesson([q1, q13], []) });
+  await sleep(40);
+  const p13 = mapping()['0013#0'] ? mapping()['0013#0'].p : slate.at();
+  slate.go(p13);
+  slate.load({ w: 1130, h: 1514, strokes: [ink(4), ink(5)] });
+  const older = { id: 't0013', rev: 1, kind: 'ink', answers: '0013', t: t0 + 1300,
+                  page: p13 + 1, strokes: 2, png: '/answers/t0013-r1.png' };
+  es.onmessage({ data: lesson([q1, q13], [older]) });
+  await sleep(40);
+  lift();
+  slate.go(p13);
+  slate.clear();                                   /* the sheet is wiped */
+  const q14 = card('0014', 'question', 'Exercise 4.2', 14);
+  es.onmessage({ data: lesson([q1, q13, q14], [older]) });
+  await sleep(60);
+  lift();
+
+  const slot = doc.querySelector('[data-slot^="0013"]');
+  const shot = slot && slot.querySelector('.board-shot');
+  shot && shot.getAttribute('src') === '/answers/t0013-r1.png'
+    ? ok('an answer with no frozen strokes still shows its picture')
+    : fail('a board with no strokes to draw from shows nothing at all ('
+           + (shot && shot.getAttribute('src')) + ')');
 }
 
 console.log(errors.length ? '\n' + errors.length + ' FAILURES'

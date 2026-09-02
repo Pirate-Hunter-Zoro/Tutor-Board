@@ -25,6 +25,11 @@
    Pages written elsewhere are scaled to fit the width on arrival. */
 
 var AUTOSAVE_MS = 1200;
+/* How long after the last mark the page's PICTURE is encoded. Longer than the
+   autosave on purpose: the strokes are what a reload restores and they go at
+   once, and the picture is a hundred-odd milliseconds of main thread that must
+   never land under a pen. See `save`. */
+var PICTURE_MS = 4000;
 var LIVE_IDLE_MS = 3000;
 var LIVE_MIN_GAP_MS = 15000;
 var UNDO_DEPTH = 60;
@@ -64,10 +69,29 @@ var PNG_PAD = 26;           /* logical units of margin around the ink */
 var FIT_PAD = 32;           /* ...and above it, when framing a page to open it */
 var PNG_MAX_EDGE = 2000;    /* longest side of the image, in pixels */
 var PNG_MAX_AREA = 2600 * 2600;
+/* And the smaller cap an AUTOSAVE's picture is drawn to.
+
+   The picture a SEND carries is what the tutor reads and what is frozen as the
+   answer, and it keeps every pixel of the cap above. The one an autosave leaves
+   on disk has no reader in the loop -- it is there so `board slate` and the
+   archive have the handwriting of a page nobody sent -- and encoding it is a
+   deflate over a couple of million pixels, on the main thread, in a gap between
+   two things somebody is doing. At this cap that is about a quarter of the work
+   and still a legible page of handwriting. */
+var PNG_IDLE_EDGE = 1100;
 
 /* Remembered per device, because it is a property of how somebody works and of
    what they are holding, not of a lesson. */
 var STORE_KEY = "tutor-board.slate.finger";
+/* And so is the paper. It is not a property of a lesson either -- it is what
+   this person, on this device, in this light, can read their own handwriting on
+   -- and it was the one such setting that forgot itself on every reload. That
+   is not a cosmetic slip: EVERY board on the page is drawn with it, the live
+   surface and the dozen photographs alike, so a reload silently repainted the
+   whole sitting in the other scheme. Reported from the iPad mid-proof, as
+   boards whose "color is inverted". */
+var PAPER_KEY = "tutor-board.slate.paper";
+var RULE_KEY = "tutor-board.slate.rule";
 
 function remembered(key, fallback) {
   try {
@@ -244,8 +268,17 @@ function create(opts) {
      app is opened before the Pencil is picked up (the latch is a variable, so it
      resets on every load), and somebody with no stylus at all has no way to say
      so. Nebo asks the question once and remembers the answer; so does this. */
-  var tool = { mode: "pen", color: PALETTE_DARK[0], width: 3.2,
-               paper: "black", rule: "plain", live: false,
+  /* The paper this device was last set to, and an ink that can be seen on it.
+     Colour has to come with it: the dark palette's first ink is near-white, and
+     opening remembered white paper with it is a page you can write on and not
+     read. */
+  var paper0 = remembered(PAPER_KEY, "black");
+  if (PAPER_ORDER.indexOf(paper0) === -1) paper0 = "black";
+  var rule0 = remembered(RULE_KEY, "plain");
+  if (RULE_ORDER.indexOf(rule0) === -1) rule0 = "plain";
+  var tool = { mode: "pen", width: 3.2,
+               color: (paper0 === "black" ? PALETTE_DARK : PALETTE_LIGHT)[0],
+               paper: paper0, rule: rule0, live: false,
                finger: remembered(STORE_KEY, "scroll") === "write" ? "write" : "scroll" };
   var drawing = null, lasso = null, sel = null, dragging = null;
   var dirty = false, lastLiveSend = 0;
@@ -265,6 +298,9 @@ function create(opts) {
      from under the nib. Touch panning is therefore ignored for a moment after
      any pen activity -- which is what palm rejection actually is. */
   var lastPenAt = 0;
+  /* When a finger last did something -- panning, pinching, resting. Only used to
+     keep expensive work out of the way of a gesture. */
+  var lastHandAt = 0;
   var PALM_MS = 500;
   /* Is the nib on the glass right now. A timer alone was not enough: `lastPenAt`
      only moves when the pen REPORTS, and a pen held still mid-stroke -- which is
@@ -300,6 +336,21 @@ function create(opts) {
   function handAtWork() {
     var since = Date.now() - lastPenAt;
     return (penDown && since < PEN_STALE) || since < PALM_MS;
+  }
+
+  /* Is a hand in the middle of something, generously. The board asks before it
+     moves the page under somebody, and `save` asks before it spends a hundred
+     milliseconds encoding a picture. The tail is long on purpose: the gap
+     between two words of a proof is longer than it feels. */
+  function handBusy() {
+    return !!drawing || !!lasso || !!dragging || penDown ||
+           (Date.now() - lastPenAt < 2500) ||
+           /* A finger too. It is not writing, but it is panning and pinching --
+              and a hundred milliseconds of PNG encoding landing in the middle of
+              that is a scroll that stutters. Reported straight after the pen
+              delay: "scrolling via finger on the writing pad is a little delayed
+              after erasing, too". */
+           (Date.now() - lastHandAt < 1200);
   }
 
   /* A PEN is never a palm, whatever the id says.
@@ -504,19 +555,49 @@ function create(opts) {
     };
   }
 
+  /* A step on the undo stack is the LIST of strokes, not a copy of them.
+
+     It used to be `JSON.stringify(page().strokes)` -- the whole page serialised,
+     on every pen lift and on every touch of the rubber. On a page holding an
+     evening's proof that is three hundred kilobytes of JSON built at the exact
+     moment a hand is asking the surface to do something, and sixty of them on
+     the stack is eighteen megabytes of strings on a tablet. Reported as the
+     first stroke of the rubber being slow, and as a general lateness on putting
+     the pen down: the lift of one stroke was paying for a copy of the page
+     before the next one could start.
+
+     What makes a shallow list correct is that a stroke on the page is never
+     changed in place. Anything that would change one -- dragging a selection,
+     recolouring it -- replaces it with a copy first and changes THAT (`fork`
+     below), so a step taken before the change still points at what was there.
+     `dense` and `_bb` are caches rather than content and may be dropped on any
+     stroke at any time. Break that rule and undo silently stops undoing. */
   function snapshot() {
-    undoStack.push(JSON.stringify(page().strokes));
+    undoStack.push(page().strokes.slice());
     if (undoStack.length > UNDO_DEPTH) undoStack.shift();
     redoStack.length = 0;
   }
 
   function restoreFrom(from, to) {
     if (!from.length) return;
-    to.push(JSON.stringify(page().strokes));
-    page().strokes = JSON.parse(from.pop());
+    to.push(page().strokes.slice());
+    page().strokes = from.pop();
     clearSelection();
     invalidate();
     markDirty();
+  }
+
+  /* One stroke, replaced by a copy of itself, so it can be changed without
+     changing what the undo stack is holding. Returns the copy, which is now the
+     one on the page. */
+  function fork(i) {
+    var p = page();
+    var s = p.strokes[i];
+    if (!s) return null;
+    var c = { c: s.c, w: s.w, hl: !!s.hl,
+              pts: s.pts.map(function (q) { return q.slice(); }) };
+    p.strokes[i] = c;
+    return c;
   }
 
   /* Where the writing actually is, over the whole page.
@@ -679,8 +760,29 @@ function create(opts) {
     return rectAt;
   }
   function dropRect() { rectAt = null; }
-  window.addEventListener("scroll", dropRect, true);
+  /* A scroll is a hand at work, wherever on the page it started.
+
+     The lesson scrolls with a finger and the board is only part of that page, so
+     "is a hand busy" cannot be answered from the writing surface alone -- and
+     the answer matters, because a hundred milliseconds of PNG encoding landing
+     in the middle of a flick is a lesson that stutters as it goes past.
+     Reported in exactly that shape: "after I've erased or written on the board,
+     trying to scroll up outside of the board to see earlier tutor-responses is
+     laggy". Every one of these is one assignment; the work they defer is four
+     orders of magnitude more than that. */
+  function handMoved() { lastHandAt = Date.now(); }
+  window.addEventListener("scroll", function () {
+    dropRect();
+    handMoved();
+  }, true);
   window.addEventListener("resize", dropRect);
+  ["touchstart", "touchmove", "pointerdown"].forEach(function (t) {
+    try {
+      document.addEventListener(t, handMoved, { capture: true, passive: true });
+    } catch (e) {
+      document.addEventListener(t, handMoved, true);
+    }
+  });
 
   function toLogical(ev) {
     var r = sheetRect();
@@ -788,10 +890,117 @@ function create(opts) {
     cacheCtx.clearRect(0, 0, cache.width, cache.height);
     cacheCtx.setTransform(d * view.k, 0, 0, d * view.k, d * view.ox, d * view.oy);
     paintPaper(cacheCtx, p, view.k);
-    var dark = tool.paper === "black";
-    p.strokes.forEach(function (s) { if (s.hl) paintStroke(cacheCtx, s, dark); });
-    p.strokes.forEach(function (s) { if (!s.hl) paintStroke(cacheCtx, s, dark); });
+    paintStrokes(cacheCtx, p, seenBox(), tool.paper === "black");
     cacheValid = true;
+    repairBox = null;                 /* everything is fresh; nothing is owed */
+  }
+
+  /* What the rubber took out, in logical units, waiting to be repaired out of
+     the cache. Erasing used to throw the whole cache away for every sample the
+     hardware reported -- so a page holding an evening's proof repainted several
+     hundred strokes, several times a frame, for a gesture that touched a word.
+     That is the main thread gone, and from behind a pen it reads as the surface
+     answering late: the samples were all captured, and nothing could paint them.
+     Reported as a delay on putting the pen down, "especially if I've just erased
+     something". */
+  var repairBox = null;
+
+  /* Where one stroke is, cached on the stroke.
+
+     Cheap to compute and asked for on every repaint, which is why it is kept:
+     the alternative is walking every point of every stroke on the page, sixty
+     times a second, to decide what not to draw. Cleared wherever points MOVE --
+     which is dragging a selection and pasting one, and nowhere else, because
+     every other route replaces the stroke object outright. */
+  function boxOf(s) {
+    if (s._bb) return s._bb;
+    if (!s.pts || !s.pts.length) return null;
+    var pad = (s.w || 1) * (s.hl ? 3.5 : 1.5) + 2;
+    var x0 = s.pts[0][0], y0 = s.pts[0][1], x1 = x0, y1 = y0;
+    for (var i = 1; i < s.pts.length; i++) {
+      var q = s.pts[i];
+      if (q[0] < x0) x0 = q[0];
+      if (q[0] > x1) x1 = q[0];
+      if (q[1] < y0) y0 = q[1];
+      if (q[1] > y1) y1 = q[1];
+    }
+    s._bb = { x0: x0 - pad, y0: y0 - pad, x1: x1 + pad, y1: y1 + pad };
+    return s._bb;
+  }
+
+  function widen(box, s) {
+    var b = boxOf(s);
+    if (!b) return box;
+    if (!box) return { x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1 };
+    if (b.x0 < box.x0) box.x0 = b.x0;
+    if (b.y0 < box.y0) box.y0 = b.y0;
+    if (b.x1 > box.x1) box.x1 = b.x1;
+    if (b.y1 > box.y1) box.y1 = b.y1;
+    return box;
+  }
+
+  /* Slack around a cull, in logical units. A stroke is bounded by its own
+     samples; the curve drawn through them is allowed to bow outside that hull,
+     and the line has width. Being generous here costs a stroke or two painted
+     just off the edge of the glass and buys never culling one that would have
+     shown. */
+  var CULL_PAD = 64;
+
+  function overlaps(box, s) {
+    var b = boxOf(s);
+    return !!b && b.x0 - CULL_PAD <= box.x1 && b.x1 + CULL_PAD >= box.x0
+                && b.y0 - CULL_PAD <= box.y1 && b.y1 + CULL_PAD >= box.y0;
+  }
+
+  /* The strokes of a page, highlighter first so a marker sits under the ink it
+     is marking, and only the ones that can be SEEN.
+
+     A page is a plane and grows downward as it is worked, so by the end of an
+     exercise most of what is on it is a screen or more away -- and every full
+     repaint used to draw all of it. That is the cost of a pan: one finger moving
+     changes the view, the view is baked into the cache, so the cache is rebuilt,
+     and rebuilding it drew four hundred strokes to show forty. Reported as
+     scrolling being delayed after erasing, which is the same repaint from the
+     other side. */
+  function paintStrokes(g, p, box, dark) {
+    p.strokes.forEach(function (s) {
+      if (s.hl && (!box || overlaps(box, s))) paintStroke(g, s, dark);
+    });
+    p.strokes.forEach(function (s) {
+      if (!s.hl && (!box || overlaps(box, s))) paintStroke(g, s, dark);
+    });
+  }
+
+  /* What is on the glass right now, in logical units. */
+  function seenBox() {
+    var x0 = -view.ox / view.k, y0 = -view.oy / view.k;
+    return { x0: x0, y0: y0,
+             x1: x0 + wrap.clientWidth / view.k,
+             y1: y0 + wrap.clientHeight / view.k };
+  }
+
+  /* Repaint one rectangle of the cache instead of all of it.
+
+     Erasing removes whole strokes, so the area that has to be redrawn is the
+     union of what those strokes covered -- usually a word, occasionally a line,
+     and only in the worst case the page, where this costs what the old code cost
+     every time. Clipped, so the paper and the surviving strokes inside the box
+     paint over the hole and nothing outside it is touched. */
+  function repairCache(box) {
+    var p = page();
+    if (!p || !box) return;
+    var d = dpr();
+    cacheCtx.setTransform(1, 0, 0, 1, 0, 0);
+    cacheCtx.save();
+    var x = box.x0 * view.k + view.ox, y = box.y0 * view.k + view.oy;
+    cacheCtx.beginPath();
+    cacheCtx.rect(x * d, y * d,
+                  (box.x1 - box.x0) * view.k * d, (box.y1 - box.y0) * view.k * d);
+    cacheCtx.clip();
+    cacheCtx.setTransform(d * view.k, 0, 0, d * view.k, d * view.ox, d * view.oy);
+    paintPaper(cacheCtx, p, view.k);
+    paintStrokes(cacheCtx, p, box, tool.paper === "black");
+    cacheCtx.restore();
   }
 
   function invalidate() { cacheValid = false; schedule(); }
@@ -822,9 +1031,19 @@ function create(opts) {
       draw();
       return;
     }
-    if (!drawing.dense || drawing.dense.length <= livePainted + 1) return;
+    if (!drawing.dense || !drawing.dense.length) return;
     var d = dpr();
     ctx.setTransform(d * view.k, 0, 0, d * view.k, d * view.ox, d * view.oy);
+    /* The single point the pen landed on, on the first frame of the stroke.
+       `paintStroke` draws a one-point stroke as the dot it is. */
+    if (!drawing._dot) {
+      drawing._dot = true;
+      if (drawing.dense.length === 1) {
+        paintStroke(ctx, drawing, tool.paper === "black");
+        return;
+      }
+    }
+    if (drawing.dense.length <= livePainted + 1) return;
     paintStroke(ctx, drawing, tool.paper === "black", livePainted + 1);
     livePainted = drawing.dense.length - 1;
   }
@@ -832,6 +1051,7 @@ function create(opts) {
   function draw() {
     if (!page()) return;
     if (!cacheValid) rebuildCache();
+    else if (repairBox) { repairCache(repairBox); repairBox = null; }
     var d = dpr();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, sheet.width, sheet.height);
@@ -926,16 +1146,32 @@ function create(opts) {
        Against the segment rather than against a string of sampled points on it,
        which is both exact and cheaper. */
     var a = rubbedFrom || pt;
+    var took = null;
     p.strokes = p.strokes.filter(function (s) {
       for (var i = 0; i < s.pts.length; i++) {
         if (distToSeg(s.pts[i][0], s.pts[i][1], a.x, a.y, pt.x, pt.y) < r * r) {
+          took = widen(took, s);
           return false;
         }
       }
       return true;
     });
     rubbedFrom = pt;
-    if (p.strokes.length !== before) { invalidate(); markDirty(); }
+    if (p.strokes.length !== before) {
+      /* Only where the ink was. `repairBox` is drained once a frame, not once a
+         sample, so a swipe that reports twenty samples costs one repaint of the
+         area it covered rather than twenty repaints of the page. */
+      if (took) {
+        repairBox = repairBox ? { x0: Math.min(repairBox.x0, took.x0),
+                                  y0: Math.min(repairBox.y0, took.y0),
+                                  x1: Math.max(repairBox.x1, took.x1),
+                                  y1: Math.max(repairBox.y1, took.y1) } : took;
+        schedule();
+      } else {
+        invalidate();
+      }
+      markDirty();
+    }
   }
 
   function clearSelection() { sel = null; lasso = null; selbar.hidden = true; }
@@ -975,6 +1211,7 @@ function create(opts) {
     try { sheet.setPointerCapture(ev.pointerId); } catch (e) { /* not fatal */ }
 
     if (ev.pointerType === "touch") {
+      lastHandAt = Date.now();
       /* Condemned for life ONLY when the nib is actually on the glass, which is
          the one case there is no doubt about: a contact that lands while a
          stroke is being drawn is a hand.
@@ -1025,10 +1262,28 @@ function create(opts) {
                 pts: [[pt.x, pt.y, pt.p]], _sx: pt.x, _sy: pt.y, _sp: pt.p,
                 _touch: ev.pointerType === "touch" };
     livePainted = 0;     /* nothing of this stroke is on the canvas yet */
+    /* Except the nib's own mark, which goes down NOW.
+
+       The curve needs three samples before it can produce a single point of
+       resampled line, and samples closer together than `MIN_STEP` are dropped --
+       so a pen put down and moved slowly, which is what starting a letter looks
+       like, painted nothing at all until it had travelled a pixel or two. From
+       behind a pen that is indistinguishable from the surface being slow to
+       answer, and it is the other half of what was reported as a delay on
+       tapping to write. The dot is where the pen is; the curve catches up on the
+       frames after it.
+
+       Seeded rather than left to `extendLive`, which pushes exactly this point
+       as the first thing it does -- so this is the same first point, one frame
+       earlier, and nothing is drawn twice. */
+    drawing.dense = [[pt.x, pt.y, pt.p]];
+    drawing._built = 0;
+    schedule(true);
   });
 
   sheet.addEventListener("pointermove", function (ev) {
     if (ev.pointerType === "pen") lastPenAt = Date.now();
+    else if (ev.pointerType === "touch") lastHandAt = Date.now();
     if (isPalm(ev)) return;
     if (touches[ev.pointerId]) {
       var prev = touches[ev.pointerId];
@@ -1062,12 +1317,16 @@ function create(opts) {
       var q = toLogical(ev);
       var dx = q.x - dragging.x, dy = q.y - dragging.y;
       dragging = { x: q.x, y: q.y };
-      var p = page();
       sel.idx.forEach(function (i) {
-        var s = p.strokes[i];
+        /* Forked once, on the first frame of the drag: after that these are
+           copies nothing else is holding, and moving them is free. */
+        var s = dragging.forked ? page().strokes[i] : fork(i);
+        if (!s) return;
         s.dense = null;
+        s._bb = null;                 /* it has moved; so has its box */
         for (var n = 0; n < s.pts.length; n++) { s.pts[n][0] += dx; s.pts[n][1] += dy; }
       });
+      dragging.forked = true;
       invalidate();
       return;
     }
@@ -1172,6 +1431,7 @@ function create(opts) {
     if (drawing !== "erasing" && drawing.pts.length) {
       snapshot();
       delete drawing._sx; delete drawing._sy; delete drawing._sp;
+      delete drawing._dot;
       drawing.pts = polish(drawing.pts, POLISH);
       drawing.dense = null;
       delete drawing._built;
@@ -1226,6 +1486,7 @@ function create(opts) {
       var p = page(), start = p.strokes.length;
       JSON.parse(JSON.stringify(clipboard)).forEach(function (s) {
         s.dense = null;
+        s._bb = null;
         s.pts.forEach(function (q) { q[0] += 30; q[1] += 30; });
         p.strokes.push(s);
       });
@@ -1235,8 +1496,10 @@ function create(opts) {
     duplicate: function () { ACTIONS.copy(); ACTIONS.paste(); },
     colour: function () {
       snapshot();
-      var p = page();
-      sel.idx.forEach(function (i) { p.strokes[i].c = tool.color; });
+      sel.idx.forEach(function (i) {
+        var s = fork(i);
+        if (s) s.c = tool.color;
+      });
       invalidate(); markDirty();
     },
     "delete": function () {
@@ -1269,13 +1532,15 @@ function create(opts) {
      if that is still large. Cost is proportional to how much was written, not to
      how far the canvas reaches, which is what makes the infinite canvas free to
      hand in. */
-  function pngBox(p) {
+  function pngBox(p, edge) {
+    var cap = edge || PNG_MAX_EDGE;
     var b = inkBoxOf(p);
     if (!b) return { x0: 0, y0: 0, w: Math.max(1, p.w), h: Math.max(1, p.h), s: 1 };
     var x0 = b.x0 - PNG_PAD, y0 = b.y0 - PNG_PAD;
     var w = (b.x1 - b.x0) + PNG_PAD * 2, h = (b.y1 - b.y0) + PNG_PAD * 2;
-    var s = Math.min(1, PNG_MAX_EDGE / Math.max(w, h));
-    if (w * s * h * s > PNG_MAX_AREA) s = Math.sqrt(PNG_MAX_AREA / (w * h));
+    var s = Math.min(1, cap / Math.max(w, h));
+    var area = PNG_MAX_AREA * (cap / PNG_MAX_EDGE) * (cap / PNG_MAX_EDGE);
+    if (w * s * h * s > area) s = Math.sqrt(area / (w * h));
     return { x0: x0, y0: y0, w: w, h: h, s: s };
   }
 
@@ -1298,8 +1563,8 @@ function create(opts) {
     return x1 > x0 ? { x0: x0, y0: y0, x1: x1, y1: y1 } : null;
   }
 
-  function toPNG(p) {
-    var box = pngBox(p);
+  function toPNG(p, edge) {
+    var box = pngBox(p, edge);
     var c = document.createElement("canvas");
     c.width = Math.max(1, Math.round(box.w * box.s));
     c.height = Math.max(1, Math.round(box.h * box.s));
@@ -1340,6 +1605,8 @@ function create(opts) {
   function markDirty() {
     dirty = true;
     dirtyPages[current] = true;
+    pictureOwed[current] = true;
+    armPicture();
     pageSeq[current] = (pageSeq[current] || 0) + 1;
     changeSeq++;
     dropInk();          /* the writing moved, so its extent did */
@@ -1372,6 +1639,37 @@ function create(opts) {
      changed since the body went out. */
   var saving = null;
   var changeSeq = 0;
+
+  /* Which pages owe the disk a fresh PICTURE, as opposed to fresh strokes.
+
+     Every save used to encode one: `toPNG` builds an offscreen canvas of the
+     whole page, repaints every stroke on it and PNG-encodes the result, and that
+     ran about a second after every stroke, for a page that by the end of an
+     exercise holds four hundred of them. It is the same defect this repository
+     already fixed in the annotation layer, in the place where it costs more --
+     hundreds of milliseconds of blocked main thread, arriving one second after
+     the pen stopped, which is roughly when a hand comes back to write the next
+     line. Reported as a delay on putting the pen down.
+
+     Nothing needs it that soon. What a reload restores is the strokes; the
+     picture is read by `board slate`, by the archive, and -- the one that must
+     be exact -- by a send, which copies it as the frozen answer. So a send
+     always encodes, and an autosave encodes only once the hand is off the
+     glass. */
+  var pictureOwed = {};
+  var pictureTimer = null;
+  var leaving = false;
+
+  function armPicture() {
+    clearTimeout(pictureTimer);
+    pictureTimer = setTimeout(function () {
+      pictureTimer = null;
+      /* Still writing: come back. A page whose picture is owed is a page whose
+         strokes are already safely on disk, so there is nothing to hurry. */
+      if (handBusy()) return armPicture();
+      for (var k in pictureOwed) { save(false, true, Number(k)); }
+    }, PICTURE_MS);
+  }
 
   /* Retrying a save the network refused. One timer, because every page that is
      owed is in `dirtyPages` and one round drains all of them; and a backoff,
@@ -1421,9 +1719,18 @@ function create(opts) {
     if (!p) return Promise.resolve();
     var at = pageSeq[idx] || 0;
     savedTag.classList.add("busy");
+    /* A send has to carry the picture -- it is copied into `live/answers/` as
+       the frozen answer, and that must be what was handed in. Leaving carries it
+       too, because there is no later moment to encode it in. Otherwise: only
+       when the hand is off the glass. */
+    var withPicture = !!send || leaving || !handBusy();
+    if (withPicture) delete pictureOwed[idx];
+    else armPicture();
     var body = { page: idx + 1, w: p.w, h: p.h,
                  strokes: p.strokes.map(stripDense),
-                 png: toPNG(p), send: !!send, pages: pages.length };
+                 png: withPicture ? toPNG(p, send ? 0 : PNG_IDLE_EDGE) : "",
+                 send: !!send,
+                 pages: pages.length };
     /* Which turn this is, and which question it answers. The host decides --
        the component knows about ink, not about a lesson. */
     var ctx = opts.context ? opts.context() : null;
@@ -1559,6 +1866,7 @@ function create(opts) {
   paperBtns.forEach(function (b) {
     b.onclick = function () {
       tool.paper = b.dataset.paper;
+      remember_(PAPER_KEY, tool.paper);
       selectOne(paperBtns, b);
       root.dataset.paper = tool.paper;
       renderPalette();
@@ -1567,16 +1875,21 @@ function create(opts) {
       if (PALETTE_DARK.concat(PALETTE_LIGHT).indexOf(tool.color) !== -1) {
         pickInk(list[0], inkButtons[0]);
       }
+      /* Repaint, and nothing more. This used to mark the page dirty, which is a
+         whole page re-encoded and posted for a change that is not ON the page:
+         the paper is a property of this device, the file holds `w`, `h` and
+         strokes, and the PNG is white whatever the screen shows. */
       invalidate();
-      markDirty();
+      if (opts.onPaper) opts.onPaper(tool.paper);
     };
   });
   ruleBtns.forEach(function (b) {
     b.onclick = function () {
       tool.rule = b.dataset.rule;
+      remember_(RULE_KEY, tool.rule);
       selectOne(ruleBtns, b);
       invalidate();
-      markDirty();
+      if (opts.onPaper) opts.onPaper(tool.paper);
     };
   });
   bLive.onclick = function () {
@@ -1619,6 +1932,19 @@ function create(opts) {
     fitPage();
   }
 
+  /* Anything a hand does to the surface or to its toolbar pushes the picture
+     back. Switching tools is a tap, and a tap followed immediately by a
+     hundred milliseconds of PNG encoding is a toolbar that feels stuck --
+     reported in those words: "after I erase, and tap to switch to pen, it's
+     laggy". Nothing here has to happen in any particular second. */
+  [root, barHost].forEach(function (host) {
+    if (!host || !host.addEventListener) return;
+    host.addEventListener("pointerdown", function () {
+      lastHandAt = Date.now();
+      if (pictureTimer) armPicture();
+    }, true);
+  });
+
   /* ---------------------------------------------------------------- boot */
   root.dataset.tool = "pen";
   root.dataset.paper = tool.paper;
@@ -1631,7 +1957,9 @@ function create(opts) {
   if (ro) ro.observe(wrap);
   window.addEventListener("resize", function () { layout(); fitPage(); });
   window.addEventListener("beforeunload", function () {
+    leaving = true;
     var owed = nextDirty();
+    if (owed === null) { for (var k in pictureOwed) { owed = Number(k); break; } }
     if (owed !== null) save(false, true, owed);
   });
 
@@ -1731,10 +2059,7 @@ function create(opts) {
      page: a card arriving while somebody is drawing a diagram is not a reason to
      scroll the diagram out from under them. The tail is generous on purpose --
      the gap between two words of a proof is longer than it feels. */
-  api.busy = function () {
-    return !!drawing || !!lasso || !!dragging || penDown ||
-           (Date.now() - lastPenAt < 2500);
-  };
+  api.busy = function () { return handBusy(); };
   /* Which tool is in hand. Reading it is for the chrome; setting it is for
      tests, which otherwise have to reach into the toolbar and click a button to
      exercise the rubber. */
@@ -1859,6 +2184,42 @@ function create(opts) {
      live one frames a page it has just opened. */
   api.preview = function (n, cssW, cssH) {
     var p = pages[n];
+    if (!p) return "";
+    var url = shoot(p, cssW, cssH);
+    /* Painting a stroke caches its resampled curve. On the page in hand that is
+       the point; on a page being photographed once it is memory held for nothing,
+       and the pages not in hand are all of them. */
+    if (n !== current) p.strokes.forEach(function (st) { st.dense = null; });
+    return url;
+  };
+
+  /* And a picture of ink that is not a page of this slate at all: the frozen
+     copy of an answer, as it was handed in.
+
+     A board under an old question used to show the answer's PNG, and that file
+     is written for a different reader -- it is always dark ink on white, cropped
+     to the writing, because its whole job is to be legible to whatever agent
+     opens it. Dropped into the run of boards it read as exactly what it is: a
+     white sheet among black ones, at the wrong magnification. "The color is
+     inverted", from the iPad, mid-proof.
+
+     The strokes were on disk the whole time (`live/answers/<turn>.json`, frozen
+     beside the picture), so there is no need to show a picture drawn for
+     somebody else. Drawn here by the same code, on the same paper, framed the
+     same way, a frozen board is indistinguishable from a live one -- which is
+     the whole rule this file's boards are built on. */
+  api.previewInk = function (ink, cssW, cssH) {
+    if (!ink || !ink.strokes || !ink.strokes.length) return "";
+    var p = { w: ink.w || cssW, h: ink.h || cssH, strokes: ink.strokes };
+    var url = shoot(p, cssW, cssH);
+    p.strokes.forEach(function (st) { st.dense = null; });
+    return url;
+  };
+
+  /* The one photographer. `preview` and `previewInk` differ in where the page
+     comes from and in nothing else, and the moment they differ in anything else
+     a frozen board stops matching the live one. */
+  function shoot(p, cssW, cssH) {
     if (!p || !(cssW > 0) || !(cssH > 0)) return "";
     var c = document.createElement("canvas");
     c.width = Math.round(cssW);
@@ -1898,17 +2259,39 @@ function create(opts) {
       }
       g.stroke();
     }
-    var dark = tool.paper === "black";
-    p.strokes.forEach(function (s) { if (s.hl) paintStroke(g, s, dark); });
-    p.strokes.forEach(function (s) { if (!s.hl) paintStroke(g, s, dark); });
+    paintStrokes(g, p, { x0: x0, y0: y0, x1: x1, y1: y1 }, tool.paper === "black");
     var url = "";
     try { url = c.toDataURL("image/png"); } catch (e) { url = ""; }
-    /* Painting a stroke caches its resampled curve. On the page in hand that is
-       the point; on a page being photographed once it is memory held for nothing,
-       and the pages not in hand are all of them. */
-    if (n !== current) p.strokes.forEach(function (st) { st.dense = null; });
     c.width = c.height = 1;             /* let the pixels go now, not eventually */
     return url;
+  }
+
+  /* Which paper every board on the page is currently drawn on. The host keys its
+     photographs by it: a picture taken on slate is wrong the moment the paper
+     turns white, and it has no other way to know that anything changed. */
+  api.paper = function () { return tool.paper + "/" + tool.rule; };
+
+  /* Ink from somewhere else, as a page of its own.
+
+     For a board whose sheet no longer holds what was handed in off it -- cleared,
+     reused, or cloned over. The answer itself cannot move; this is how it comes
+     back onto the surface so it can be written on again instead of the pen
+     landing on whatever happened to that sheet since. Marked dirty, because a
+     page that exists only in memory is a page a reload turns back into nothing. */
+  api.adoptInk = function (ink) {
+    var copy = blankPage();
+    if (ink && ink.w) copy.w = ink.w;
+    if (ink && ink.h) copy.h = ink.h;
+    copy.strokes = ((ink && ink.strokes) || []).map(function (st) {
+      var c = {};
+      for (var k in st) { if (k !== "dense") c[k] = st[k]; }
+      c.pts = (st.pts || []).map(function (q) { return q.slice(); });
+      return c;
+    });
+    pages.push(copy);
+    goTo(pages.length - 1);
+    markDirty();
+    return current;
   };
 
   /* The live canvas, for a board going live under a pen that has already landed
@@ -1941,6 +2324,10 @@ function create(opts) {
 window.Slate = {
   create: create,
   forPaper: forPaper,
+  /* What colour a paper is. The board paints the box a dormant picture sits in,
+     and a black box behind a white sheet is the same inconsistency the pictures
+     themselves had. */
+  paperBg: function (name) { return (PAPERS[name] || PAPERS.black).bg; },
   /* One question, one answer, both surfaces. The lesson's annotation layer had
      its own copy of the old pen-seen latch, so a finger drew on a card even
      after the slate had been told not to let it. */

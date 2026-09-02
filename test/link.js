@@ -31,8 +31,18 @@ const dom = new JSDOM(fs.readFileSync(path.join(WEB, 'board.html'), 'utf8'), {
 });
 const { window } = dom;
 
+// Every 2d call is a no-op, and each one is counted by name: without a canvas
+// backend, counting the calls is the only way to ask whether anything was
+// actually painted -- which is the whole question behind "there is a delay when
+// I tap to write".
+window.__paints = {};
 window.HTMLCanvasElement.prototype.getContext = () =>
-  new Proxy({}, { get: () => () => {}, set: () => true });
+  new Proxy({}, {
+    get: (t, k) => function () {
+      window.__paints[k] = (window.__paints[k] || 0) + 1;
+    },
+    set: () => true,
+  });
 window.HTMLCanvasElement.prototype.toDataURL = () => 'data:image/png;base64,';
 Object.defineProperty(window.HTMLElement.prototype, 'clientWidth', { get: () => 900 });
 Object.defineProperty(window.HTMLElement.prototype, 'clientHeight', { get: () => 500 });
@@ -498,6 +508,112 @@ if (es && window.Annotate) {
     if (last && last.pr && last.pr.length * 2 === last.p.length)
       ok('pressure is recorded, so the line varies in width');
     else fail('no pressure was recorded; every stroke is a constant-width line');
+
+    // The nib leaves its mark on the frame the pen goes down.
+    //
+    // A Catmull-Rom segment needs three samples before it yields one point of
+    // curve, and samples closer together than MIN_STEP are dropped -- so a pen
+    // put down and moved slowly, which is how a letter starts, painted nothing
+    // at all until it had travelled a pixel or two. Reported as a delay on
+    // tapping to write, and it is one: the surface was silent while the hand
+    // waited to see its own ink.
+    // Deferred by a tick, and then the frame is taken synchronously: what is
+    // being asked is whether the pen's own mark is painted on the FIRST frame of
+    // the stroke, which a test that waits cannot tell from the third -- and the
+    // frame already queued by the strokes above has to be let go of first, or
+    // this one is folded into it and nothing is measured at all.
+    setTimeout(function () {
+      window.Annotate.setTool('pen');
+      window.Annotate.clear('0003');
+      window.__paints = {};
+      var realRaf = window.requestAnimationFrame;
+      window.requestAnimationFrame = function (fn) { fn(); };
+      ink('pointerdown', 300, 90, 0.5);
+      window.requestAnimationFrame = realRaf;
+      if ((window.__paints.arc || 0) > 0 || (window.__paints.stroke || 0) > 0)
+        ok('a pen put down on a card marks it before it has moved anywhere');
+      else fail('nothing was painted until the pen moved, which is the delay '
+                + 'that was reported');
+      ink('pointerup', 300, 90, 0.5);
+    }, 10);
+
+    // A card nobody has marked does not hold a canvas the size of the card.
+    //
+    // Every card in the lesson has an ink layer, because that layer is what
+    // takes the pen while annotate mode is on -- and it was allocated at the
+    // card's full size in device pixels as soon as the card appeared. Twenty
+    // cards of that on a retina tablet is the canvas budget the dormant boards
+    // were turned into photographs to stay inside of, spent on nothing. The box
+    // is still the card's, or a stroke begun between two cards lands on prose;
+    // it is the bitmap that waits for the first mark.
+    {
+      var bare = doc.createElement('div');
+      bare.dataset.card = 'unmarked';
+      doc.getElementById('cards').appendChild(bare);
+      window.Annotate.attach(bare);
+      var bareLayer = bare.querySelector('canvas.ann-layer');
+      if (bareLayer && bareLayer.width <= 1 && bareLayer.height <= 1)
+        ok('a card with no marks on it holds no bitmap');
+      else fail('an unmarked card allocated a ' + (bareLayer && bareLayer.width)
+                + '×' + (bareLayer && bareLayer.height) + ' canvas');
+      if (bareLayer && parseFloat(bareLayer.style.height || '0') > 0)
+        ok('and still covers the card, so the pen has somewhere to land');
+      else fail('the layer of an unmarked card has no box, so a stroke begun on '
+                + 'it lands on the prose');
+      bare.remove();
+    }
+
+    // A payload does not redraw the whole lesson.
+    //
+    // `load` is called on every payload -- every card the tutor writes, every
+    // heartbeat -- and it redrew every card in the lesson each time: a forced
+    // layout and a full repaint each, arriving in the middle of somebody
+    // writing. Reported as annotated writing being "hella laggy" after the
+    // autosave's picture had already been taken out of the way.
+    {
+      var laidOut = 0;
+      var realCardRect = card.getBoundingClientRect;
+      card.getBoundingClientRect = function () {
+        laidOut++;
+        return { left: 0, top: 0, width: W, height: H, right: W, bottom: H };
+      };
+      window.Annotate.load({ '0009': [] });      /* a payload naming other cards */
+      card.getBoundingClientRect = realCardRect;
+      laidOut === 0
+        ? ok('a payload leaves the cards it says nothing about alone')
+        : fail('every payload measured and repainted a card it had nothing new '
+               + 'for (' + laidOut + ' times), mid-stroke as often as not');
+    }
+
+    // And erasing does not ask the card for its rectangle on every sample.
+    //
+    // `size` reads the card's bounding box, and reading it forces the browser to
+    // lay out the document -- over a lesson full of typeset mathematics that is
+    // not free. Once per stroke is nothing; once per erase sample is the main
+    // thread, and it is why the pen and the scroll both answered late just after
+    // erasing.
+    window.Annotate.setTool('pen');
+    ink('pointerdown', 200, 100, 0.5);
+    for (var m = 0; m < 10; m++) ink('pointermove', 200 + m * 6, 100 + m * 3, 0.5);
+    ink('pointerup', 260, 130, 0.5);
+
+    var measured = 0;
+    var realRect = card.getBoundingClientRect;
+    card.getBoundingClientRect = function () {
+      measured++;
+      return { left: 0, top: 0, width: W, height: H, right: W, bottom: H };
+    };
+    window.Annotate.setTool('erase');
+    ink('pointerdown', 200, 100, 0.5);
+    for (var e2 = 0; e2 < 12; e2++) ink('pointermove', 200 + e2 * 5, 100 + e2 * 2, 0.5);
+    ink('pointerup', 260, 124, 0.5);
+    card.getBoundingClientRect = realRect;
+    window.Annotate.setTool('pen');
+
+    if (measured <= 2)
+      ok('and an erase sweep measures the card once, not once a sample');
+    else fail('the card was measured ' + measured + ' times during one erase '
+              + 'sweep, and each one is a forced layout of the whole lesson');
 
     var padded = parseFloat(layer.style.width || '0');
     if (padded > W) ok('the layer is larger than the card, so there is room to overshoot');

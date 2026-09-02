@@ -46,6 +46,119 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 2 September 2026
 >
+> **A past board was a photograph taken for somebody else, and it could not be written on.**
+> Reported from the iPad, mid-Galois: *"Some of the boards on my current Galois-Theory lesson are
+> fucked. The color is inverted and when I try to write on them, it clears everything to be a new
+> writing surface. I hate this. I want consistent board renderings even on a reload."*
+>
+> Three symptoms, and the first two are one defect. A board whose sheet no longer holds the answer
+> that came off it shows **the answer** — the fix immediately below this one, and it is right — and
+> it showed it as the answer's own PNG. That file is written for a different reader: always dark
+> ink on white, cropped to the ink, because its only job is to be legible to whatever agent opens
+> it. Dropped into
+> a run of boards it reads as exactly what it is, a white sheet among black ones at a magnification
+> of its own. And the same boards pointed at a page that had been cleared or reused, so touching one
+> opened that sheet **as it is now** — which from behind a pen is an evening's working replaced by a
+> blank surface.
+>
+> The strokes were on disk beside the picture the whole time — `live/answers/<turn>.json`, written
+> once with it and never touched again — and nothing was reading them. So a past board is now
+> **drawn**, by the slate, from those strokes, on the paper in hand and framed the way the live
+> surface frames a page: indistinguishable from a live board, which is the rule every board here is
+> built on. And touching one puts that same frozen answer back under the pen, on a page of its own,
+> so the sheet that had been reused keeps whatever is on it.
+>
+> **The two thresholds are deliberate and the difference is the interesting part.** Showing the
+> frozen answer asks only for one stroke fewer than was handed in. Moving the page under the pen
+> asks for half, because somebody who sends an answer and then rubs two lines out of it is *editing
+> that sheet* — and cutting them a fresh copy of the send would orphan the edit they are making.
+> Display is reversible; the pen is not. `test/chain.js` holds both, including the edit case.
+>
+> **And the paper was forgotten on every reload**, which is the third symptom and the reason the
+> ask was for consistency *on a reload*. Whether the paper is slate, white or cream is a property of
+> the device — of this person, on this screen, in this light — and it was the one such setting that
+> did not remember itself, while `finger` beside it did. Every board on the page is drawn with it,
+> so a reload silently repainted a whole sitting in the other scheme. It is remembered now, with
+> an ink colour that can be seen on it; every photograph is keyed by the paper as well as by what
+> is on it, so one tap repaints the lot; the box a picture sits in is painted the paper's own
+> colour rather than a hard-coded `#101114`; and choosing a paper no longer marks the page dirty,
+> because the paper is not on the page.
+>
+> **Then the pen answered late, and there were four causes.** Reported in two messages: *"Sometimes
+> there's a bit of a delay when I tap to write with the pen, especially if I've just erased
+> something"*, and *"scrolling via finger on the writing pad is a little delayed after erasing,
+> too."*
+>
+> - **Nothing was painted until the pen had moved.** A Catmull-Rom segment needs three samples
+>   before it yields a single point of curve, and samples closer together than `MIN_STEP` are
+>   dropped — so a nib put down and moved slowly, which is how a letter starts, marked the page only
+>   after it had travelled a pixel or two. The surface was silent while the hand waited to see its
+>   own ink. The landing point is painted as a dot now, on the frame the pen goes down, on both
+>   surfaces.
+> - **Every erase sample threw the whole cache away.** Rubbing out a word on a page holding four
+>   hundred strokes repainted all four hundred, several times a frame. It repairs the rectangle it
+>   emptied instead — the union of what the removed strokes covered, clipped, drained once a frame
+>   rather than once a sample. Measured in `test/plane.js`: 336 line calls where a full repaint is
+>   2,832, on a fixture a fraction of a real page's size.
+> - **And a full repaint drew the whole plane.** A page grows downward as it is worked, so most of
+>   an evening is a screen or more away; strokes are culled against the visible box now, which is
+>   what a pan costs — one finger moving rebuilds the cache, and that is the scroll that stuttered.
+> - **The autosave was encoding a picture nobody needed yet.** `toPNG` repaints the page offscreen
+>   and PNG-encodes it, on **every** save — about a second after every stroke. This is precisely the
+>   defect fixed in the annotation layer earlier the same evening, still present in the place where
+>   it costs more. A send still encodes, because that picture is frozen as the answer; an autosave
+>   encodes only once the hand is off the glass — and a *finger* counts, which is why the scroll
+>   was late too.
+>   The strokes reach disk at once either way, and they are what a reload restores.
+>
+> Three more came out of being told it was *still* laggy, and two of them are the interesting ones.
+>
+> - **Every undo step was a copy of the whole page.** `JSON.stringify(page().strokes)` — three
+>   hundred kilobytes of JSON, built on every pen lift and on every touch of the rubber, at the
+>   exact moment a hand is asking the surface for something, with sixty of them on the stack. A
+>   step is now the LIST of strokes rather than a copy of them, which is correct only because
+>   nothing on a page is ever changed in place: dragging a selection and recolouring one replace
+>   the strokes they touch with copies first. `test/plane.js` drags a selection and undoes it, and
+>   fails if that copy-on-write goes away — the failure mode otherwise is an undo that silently
+>   stops undoing.
+> - **Every card in the lesson held a canvas the size of the card.** The ink layer has to exist on
+>   every card, because it is what takes the pen while annotate mode is on — and it was allocated at
+>   the card's full size in *device* pixels the moment the card appeared. Twenty or thirty cards of
+>   that on a retina tablet is several hundred megabytes of backing store for canvases almost none
+>   of which will ever be drawn on: the same budget the dormant boards were turned into photographs
+>   to stay inside of, spent on nothing. The box stays the card's, plus the overhang that makes two
+>   adjacent layers meet; the bitmap now waits for the first mark.
+> - **And every payload redrew all of them.** `Annotate.load` runs on every card the tutor writes
+>   and every heartbeat, and it called `redrawAll` unconditionally — a forced layout and a full
+>   repaint per card, arriving in the middle of somebody writing. It redraws the marks it actually
+>   adopted, which after a reload is the point and at any other time is nothing.
+>
+> Annotation had two of the first four as well: no mark until the pen moved, and `draw` asking the
+> card for its rectangle on every erase sample, which forces a layout of a lesson full of typeset
+> mathematics. And three smaller things, from being told that a *tap* after erasing was late and
+> then that scrolling up to read earlier replies was: an autosave's picture is drawn to a smaller
+> cap than a send's (the one a send carries is what the tutor reads and what is frozen as the
+> answer, and it keeps every pixel); any tap on the surface or its toolbar pushes the picture pass
+> back; and **a scroll of the lesson counts as a hand at work**, which it always should have —
+> the board is part of a page that scrolls with a finger, so "is a hand busy" cannot be answered
+> from the writing surface alone. Nothing about a picture has to happen in a particular second.
+> `test/plane.js` and `test/link.js` count all of it. Shell version `board-shell-v73`.
+>
+> **And one thing found on the way that is worth more than the fixes: a diagnostic destroyed a page
+> of somebody's proof.** `live/slate/page-07.json` in the Galois lesson holds exactly one stroke —
+> `#eee`, two pixels wide, from (10,10) to (20,20), on a 1130×1514 page — and so does `page-99`,
+> written at 10:59 and 12:52. That is nobody's handwriting. It is a probe payload POSTed to
+> `/slate/save` on the **running** board, and page 7 is the sheet question 6's answer was handed in
+> off: 279 strokes, replaced by a fixture. The entry below reads that page as "cleared, reused or
+> cloned over" and it was neither — it was overwritten by a session checking whether saving worked.
+>
+> Nothing is lost, because what was handed in cannot move: the answer is intact in
+> `live/answers/t0003-r1.json`, and the fix above is what brings it back onto the surface. The file
+> is deliberately left as it is rather than repaired by hand — the board holds its own copy of every
+> page in memory and would write over any repair on its next autosave, and writing into a live
+> lesson's slate is the whole of what went wrong here. **A board with somebody on it is not a test
+> fixture.** Drive a temporary course, the way every suite in `test/` does.
+>
 > **A past board was a picture of a live page, and a live page moves.** Reported twice in
 > different words — *"my writing from one section is wrong and came from a later section"*, and
 > then *"the very latest few board recordings are just repeats of my earliest"* — and the second

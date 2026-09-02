@@ -222,6 +222,15 @@ tutorboard/
   The board carries the three things worth saying about it — ready to check, need help, confused —
   and only opens a keyboard for the two that need a sentence. A free-text box that invites
   conversation is the thing this must never drift into.
+- **Never write to a board somebody is using.** Reading a live board is fine — `/health`,
+  `/live`, `board_json`. WRITING to one is not: a probe POSTed to `/slate/save` on the running
+  Galois board on 2 September 2026 replaced page 7 — the sheet an answer had been handed in off,
+  279 strokes — with a two-point `#eee` fixture, and the same payload is still on disk as
+  `page-99`. It read afterwards as the board having cleared or reused the page, which sent the
+  next session looking for a bug that was not there. Every suite in `test/` drives a temporary
+  course for this reason; there is no diagnostic worth a page of somebody's proof. And when the
+  file is the thing, read the file: `board_json` caps a response at 1 MB and a slate is bigger
+  than that, so the endpoint will tell you a full slate has no pages at all.
 - **The slate never loses ink.** Strokes are saved as vectors on an idle timer and again on page
   change and unload. A change that can drop a stroke is a change that must not ship — the student
   is writing a proof, not doodling. **A save is addressed to a page by number**, and `dirtyPages`
@@ -231,7 +240,57 @@ tutorboard/
   never move the page under a pen that is down; `api.writing()` is how the board asks.
 - **The PNG is for reading, not for looking pretty.** It is always dark ink on white with the
   paper rules dropped almost to invisible, whatever the screen is showing, because its only job is
-  to be legible to whatever agent opens it.
+  to be legible to whatever agent opens it. **Which is exactly why it is never what a board
+  shows.** A past board is drawn from the frozen STROKES beside it — `live/answers/<turn>.json`,
+  written once with the picture and never touched again — by the same code, on the same paper, and
+  framed the same way as the live surface. Showing the file instead put a white sheet, cropped to
+  its own ink, in a run of black ones: reported from the iPad as boards whose "color is inverted".
+  The picture stays as the fallback for an answer handed in before the strokes were kept, because
+  an inverted board still shows the working and a blank one does not. `test/chain.js`.
+- **A board whose sheet no longer holds its answer gets the answer back, not a blank page.** The
+  test for "no longer holds it" is fewer strokes than were handed in — a page can only lose them by
+  being cleared, reused or cloned over. Showing the frozen answer takes one stroke fewer as
+  evidence; MOVING the page under the pen takes half, because somebody who sends an answer and then
+  rubs two lines out of it is editing that sheet, and cutting them a fresh copy of the send would
+  orphan the edit. Reversible display, irreversible pen: they are allowed different thresholds and
+  the reason belongs in the code beside them.
+- **The paper is a property of the device, and it is remembered.** Every board on the page is drawn
+  with it — the live surface and every photograph — so forgetting it on a reload repaints a whole
+  sitting in the other scheme, and a photograph keyed only by what is on it never notices. The key
+  carries the paper; the picture box is painted the paper's own colour; and nothing about the paper
+  is a page property, so choosing it must never mark a page dirty.
+- **Nothing expensive happens under a hand.** The picture of a page — `toPNG`, which repaints the
+  whole page offscreen and PNG-encodes it — is a hundred-odd milliseconds of main thread, and it
+  used to run on every autosave, about a second after every stroke. A send encodes it, because it
+  is frozen as the answer; an autosave encodes it only once the hand is off the glass — and the
+  glass is the whole PAGE, not the writing surface: a pen, a finger on the sheet, a tap on the
+  toolbar and a scroll of the lesson all defer it, because the board is part of a page somebody
+  scrolls with a finger. The strokes go to disk at once either way. This is the same defect the annotation
+  layer already had, and the rule generalises: when you add work to a save, a stroke or a frame,
+  ask what is holding the glass while it runs.
+- **An undo step is the list of strokes, not a copy of them** — and that is only correct because a
+  stroke on a page is never changed in place. Anything that would change one (dragging a selection,
+  recolouring it) replaces it with a copy and changes that; `dense` and `_bb` are caches and may be
+  dropped on anything at any time. Break the rule and undo silently stops undoing, which no
+  screenshot will show you. It used to serialise the whole page on every pen lift and every touch
+  of the rubber. `test/plane.js` drags and undoes.
+- **An ink layer's BOX is the card's; its bitmap waits for the first mark.** Every card carries one,
+  because it is what takes the pen while annotate mode is on, and allocating each at the card's
+  size in device pixels is hundreds of megabytes over a long lesson — the budget the dormant boards
+  exist to stay inside of. The box keeps the 18px overhang either way, because two adjacent layers
+  must MEET or a stroke begun in the gap between cards lands on the prose. And `Annotate.load`
+  redraws what it adopted, never the whole lesson: it runs on every payload.
+- **A repaint draws what can be SEEN.** A page is a plane that grows downward as it is worked, so
+  most of an evening's strokes are a screen or more away — and a full repaint is what a pan, a
+  pinch, a zoom and every erased stroke used to cost. Strokes are culled against the visible box
+  (their own boxes cached on them, cleared wherever points MOVE), and rubbing out repairs the
+  rectangle it emptied rather than the page. Measured in `test/plane.js`, which fails if an erase
+  goes back to costing a whole-page repaint.
+- **The nib marks the page on the frame it lands.** The curve needs three samples before it yields
+  a point, and samples closer together than `MIN_STEP` are dropped, so a pen put down and moved
+  slowly painted nothing until it had travelled a pixel or two — reported as a delay on tapping to
+  write. The landing point is painted as a dot, on both surfaces. A change to the ink pipeline that
+  quietly reintroduces the wait fails `test/plane.js` and `test/link.js`.
 - **Userspace Tailscale only.** The node has no root and no TUN device, and it must stay that
   way: `--tun=userspace-networking`, binaries and state under `~/.local`. A change that needs
   `sudo` is a change that cannot be deployed here.
