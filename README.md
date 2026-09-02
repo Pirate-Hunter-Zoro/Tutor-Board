@@ -123,9 +123,32 @@ which kind of subject it is and the board adapts.
 > turn the reader is actually looking at and where on the glass it sits, and puts it back once the
 > lesson has been rebuilt around it. Everything below that either leaves the page alone or says
 > explicitly where it should go, and both of those are decisions; content appearing above somebody
-> is not. The late picture compensates on its own `load`. `test/interactive.js` carries a small
-> layout engine for the transcript and fails on the old behaviour by 300 pixels. Shell version
-> `board-shell-v74`.
+> is not. The late picture compensates on its own `load`.
+>
+> **And then it still did it, because the board was deciding to.** Reported again in the same
+> words: *"after I submit my response, it still glitch-scrolls me up to above the board."* Nothing
+> was shifting by then. `render` ends by asking whether anything arrived worth reading, and if so
+> aims the page at `revealNewest` — the top of the newest thing the TUTOR has written, which with a
+> question open sits directly **above** the writing surface. And "anything arrived" counted a fresh
+> *turn*. So the payload the send itself provoked, carrying nothing but the student's own answer,
+> read as news, and the board threw the page up to the card above the board they had just written
+> on. News is a card. Your own answer is not news: a turn already has its own answer to where the
+> page should be, and it is `revealSent`.
+>
+> That is the whole of the intermittency, too. The branch is gated on `!penBusy()`, whose tail runs
+> 2.5 seconds past the last pen sample and 1.2 past the last touch anywhere on the page — so
+> whether the payload beat the tail decided whether the page jumped, and when it lost, the board
+> offered a jump *button* to the same wrong place instead. And it reads as a *glitch* rather than a
+> move because `revealSentSettling` re-lands on the surface's foot 300ms and 900ms after a send: a
+> payload arriving inside that window is yanked up and dragged back.
+>
+> **The first test for this was blind to it**, and that is the lesson worth keeping. It measured the
+> shift and passed while the board was overriding the anchor one line later, because `scrollTo` is a
+> no-op in the harness and nothing was looking at it. It now watches for a deliberate aim as well as
+> a shift — and it is held back 2.7 seconds, because a render driven straight after a stroke is
+> inside `penBusy`'s tail and reaches the jump button instead of the scroll, which is half the
+> behaviour going untested. `test/interactive.js` carries a small layout engine for the transcript
+> and fails on the old rule twice over. Shell version `board-shell-v75`.
 >
 > **A past board was a photograph taken for somebody else, and it could not be written on.**
 > Reported from the iPad, mid-Galois: *"Some of the boards on my current Galois-Theory lesson are

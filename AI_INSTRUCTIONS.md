@@ -410,8 +410,21 @@ tutorboard/
   under renders a whole board's height above the surface; and the frozen picture has a width and no
   height, so it occupies nothing until it decodes. Everything after `holdAnchor` either leaves the
   page alone or says explicitly where it should go, and both of those are decisions — content
-  appearing above somebody is not. `test/interactive.js` carries a small layout engine for the
-  transcript and fails on the old behaviour.
+  appearing above somebody is not.
+- **NEWS IS A CARD. THE STUDENT'S OWN ANSWER IS NOT NEWS.** `anythingNew` in `render` is the whole
+  basis of the reveal at the foot of it, and the only reveal it can lead to is `revealNewest` — the
+  top of the newest thing the TUTOR wrote, which with a question open sits directly ABOVE the
+  writing surface. It counted a fresh *turn*, so the payload the send itself provoked threw the page
+  up to the card above the board just written on, and when `penBusy`'s tail won the race it offered
+  a jump button to the same wrong place instead. A turn has its own answer to where the page should
+  be and it is `revealSent`. Never count one here.
+- **A test for a scroll must watch for a deliberate aim, not only for a shift.** The first test for
+  the two above measured the shift and passed while the board overrode the anchor one line later,
+  because `scrollTo` is a no-op in the harness and nothing was looking at it. Spy on `scrollTo` as
+  well as `scrollBy` — and hold the render back past `penBusy`'s tail (2.5s from the last pen
+  sample, 1.2s from the last touch anywhere on the page), or it reaches the jump button and never
+  the scroll, which is half the behaviour untested. `test/interactive.js` carries a small layout
+  engine for the transcript and fails on the old rules twice over.
 - **What the tutor gets is the ink and the card, not a picture of the lesson.** It wrote the
   card and can read it back off disk. Flattening rendered HTML and KaTeX into an image needs
   fonts inlined per send and cannot be verified without a browser; do not add it.

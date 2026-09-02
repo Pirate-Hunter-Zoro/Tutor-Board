@@ -360,6 +360,15 @@ setTimeout(() => setTimeout(() => {
 
     // ---- nothing that arrives above the reader may move the reader --------
     //
+    // Held back nearly three seconds, and that is load-bearing. The branch that
+    // aims the page is gated on `penBusy()`, whose tail runs 2.5s past the last
+    // pen sample and 1.2s past the last touch anywhere on the page -- so a test
+    // that renders straight after driving a stroke reaches the jump BUTTON and
+    // never the scroll, and half of what is being asserted here goes untested.
+    // Which is also the whole reason the reported jump was intermittent: it was
+    // a race between the payload and that tail.
+    return setTimeout(function () {
+    //
     // Reported from the device: "intermittently, after I submit a response, it
     // glitches and scrolls me up above the last board I wrote my response on."
     // Nothing scrolled. The answer became a turn and was rendered into the
@@ -372,8 +381,22 @@ setTimeout(() => setTimeout(() => {
     // jsdom has no layout engine either, so here is just enough of one for the
     // transcript: every child of #cards is a fixed height, stacked in order,
     // and the window has a scroll offset that `scrollBy` moves.
+    // And the page has to be watched for a DELIBERATE move as well as a shift.
+    // The first version of this test only measured the shift, and passed while
+    // the board was throwing the page up to the newest card a line later --
+    // because `scrollTo` is a no-op in this harness and nothing was looking at
+    // it. `revealNewest` aims at the top of the newest thing the TUTOR wrote,
+    // which with a question open sits directly above the writing surface, so
+    // that is the reported jump exactly: "after I submit my response, it still
+    // glitch-scrolls me up to above the board."
     const ROW = 300;
     window.__scroll = 0;
+    const aimed = [];
+    window.scrollTo = function (a) {
+      var t = (a && typeof a === 'object') ? a.top : arguments[1];
+      aimed.push(t);
+      window.__scroll = t || 0;
+    };
     window.scrollBy = function (x, y) { window.__scroll += y; };
     window.HTMLElement.prototype.getBoundingClientRect = function () {
       const p = this.parentNode;
@@ -399,11 +422,26 @@ setTimeout(() => setTimeout(() => {
     // Scrolled so the aside is the first thing on the glass: that is what is
     // being read, and it is what must not move.
     window.__scroll = idxOf(c2) * ROW;
+    aimed.length = 0;
+    doc.getElementById('jump').hidden = true;
     window.__render({ state: { course: 'X', mode: 'math' },
                       cards: [qA, noteB], messages: [], slate: [], uploads: [],
                       turns: [{ id: 't9', rev: 1, kind: 'ink', answers: '0001',
                                 t: now + 25, t0: now + 25,
                                 png: '/answers/t9-r1.png', strokes: 9 }] });
+    // Two ways the board can say "something arrived worth reading", and after
+    // your own answer it must say neither: it must not aim the page at the
+    // newest card, and it must not offer to take you there. Which of the two it
+    // reaches depends on whether a hand is still counted as busy, which is a
+    // race against the payload — and is exactly why the jump was intermittent.
+    if (!aimed.length)
+      ok('your own answer arriving is not news, so nothing aims the page anywhere');
+    else fail('the payload the send provoked threw the page to ' + aimed.join(', ')
+              + ' — the newest CARD, which sits above the board just written on');
+    if (doc.getElementById('jump').hidden)
+      ok('and nothing offers to jump you to it either');
+    else fail('the board offered a jump to the newest card because your own '
+              + 'answer came back in the payload the send provoked');
     const c2b = doc.querySelector('[data-card="0002"]');
     const turnNode = doc.querySelector('.mine[data-turn="t9"]');
     if (turnNode && c2b && idxOf(turnNode) >= 0 && idxOf(turnNode) < idxOf(c2b))
@@ -416,6 +454,7 @@ setTimeout(() => setTimeout(() => {
               + moved + 'px with it');
 
     done();
+    }, 2700);
   }
   return;
 }, 60), 60);

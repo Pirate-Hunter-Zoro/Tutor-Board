@@ -654,7 +654,32 @@ function render(data) {
   items.forEach(function (item) {
     var stamp = item.key + (item.turn ? ":r" + (item.turn.rev || 1) : "");
     var fresh = !firstPaint && !seenIds[stamp];
-    if (fresh) anythingNew = true;
+    /* NEWS IS A CARD. YOUR OWN ANSWER IS NOT NEWS.
+
+       `anythingNew` is the whole basis of the decision at the foot of this
+       function, and the only reveal it can lead to is `revealNewest` -- the top
+       of the newest thing the TUTOR has written, which on a board with a
+       question open sits directly ABOVE the writing surface. So counting a
+       fresh turn here means: the moment your own answer appears in the payload
+       the send provoked, the page is thrown up to the card above the board you
+       just wrote on.
+       Reported twice, the second time after the transcript had been stopped from
+       shifting underneath anybody: "after I submit my response, it still
+       glitch-scrolls me up to above the board." Nothing was shifting by then.
+       This was the board deciding, on its own, that something had arrived worth
+       reading -- and the something was the student.
+
+       Intermittent because it is gated on `!penBusy()`, whose tail is about a
+       second after the last touch: whether the payload beat the tail decided
+       whether the page jumped. And the jump is a GLITCH rather than a move
+       because `revealSentSettling` re-lands on the surface's foot 300ms and
+       900ms after a send, so a payload arriving inside that window is yanked up
+       and dragged back.
+
+       A turn appearing has its own answer to where the page should be, and it is
+       `revealSent`: the foot of the surface, where the receipt is. Nothing about
+       a turn belongs here. */
+    if (fresh && item.card) anythingNew = true;
     seenIds[stamp] = true;
 
     /* The key is identity plus version: a card edited in place, or a turn
