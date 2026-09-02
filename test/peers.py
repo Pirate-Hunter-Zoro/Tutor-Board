@@ -111,6 +111,48 @@ check("a netmap that grows without warning cannot freeze the follower again",
 check("and the ceiling is a handful of machines, not a fleet",
       2 <= boardlib.PEER_WALK_LIMIT <= 24)
 
+# ---- and the machine that has gone home ------------------------------------
+#
+# `tailnet_peers` only offers machines that are up, but the configured node is a
+# name out of a config file and outlives the machine being awake. Knocking on it
+# is the most expensive way to learn nothing -- four ports, a socket timeout
+# each, then the SOCKS proxy, measured at 6.1s against this tailnet's sleeping
+# compute node -- and the follower does that walk three times a tick. A tap paid
+# for all of it: 18 seconds to move the address to a course on THIS machine,
+# because the answer had to come back from a node that was not there.
+
+up = status(peer("compute-node.ts.net", os_="linux"))
+down = status(peer("compute-node.ts.net", online=False, os_="linux"))
+
+check("a machine the tailnet says is up is knocked on",
+      boardlib.peer_is_down("compute-node.ts.net", up) is False)
+check("a machine the tailnet says is off is not",
+      boardlib.peer_is_down("compute-node.ts.net", down) is True)
+check("and the short name is the same machine as the long one",
+      boardlib.peer_is_down("compute-node", down) is True)
+check("as is the same name shouted",
+      boardlib.peer_is_down("COMPUTE-NODE", down) is True)
+check("an address is a machine too",
+      boardlib.peer_is_down("100.64.0.9", status(
+          peer("", online=False, os_="linux", ips=["100.64.0.9"]))) is True)
+
+# The one that must not become a rule. "I cannot tell" has to mean "knock
+# anyway": a machine wrongly written off is a lesson that cannot be reached from
+# anywhere, which is a far worse failure than a slow tick.
+check("a machine the tailnet has never heard of is not written off",
+      boardlib.peer_is_down("somewhere-else", up) is None)
+check("nor is anything at all when there is no netmap to read",
+      boardlib.peer_is_down("compute-node", {}) is None)
+check("and a nameless host is nobody, rather than somebody who is up",
+      boardlib.peer_is_down("", up) is None)
+
+check("the follower treats a node that has gone home as no node at all",
+      "if node and boardlib.peer_is_down(node):"
+      in open(os.path.join(ROOT, "bin", "follow"), encoding="utf-8").read())
+check("and a course is not looked for on a machine that is not there",
+      "if peer_is_down(host):"
+      in open(os.path.join(ROOT, "boardlib.py"), encoding="utf-8").read())
+
 # ---- the escape hatch, which the suite depends on --------------------------
 
 os.environ["BOARD_NO_TAILNET"] = "1"

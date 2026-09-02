@@ -495,7 +495,20 @@ def egress_ok(timeout=12):
     return False
 
 
+_TS_CACHE = [0.0, None]
+TS_CACHE_TTL = 3.0
+
+
 def _ts_status():
+    """The netmap, as `tailscale status --json` gives it.
+
+    Cached for a few seconds. One tick of the follower asks who is up, who the
+    node is, and what this machine is called; that was three subprocesses for
+    one answer that cannot meaningfully change in between.
+    """
+    now = time.time()
+    if _TS_CACHE[1] is not None and now - _TS_CACHE[0] < TS_CACHE_TTL:
+        return _TS_CACHE[1]
     prefix, _ = tailscale_cli()
     if not prefix:
         return {}
@@ -503,9 +516,42 @@ def _ts_status():
     try:
         p = subprocess.run(prefix + ["status", "--json"], stdout=subprocess.PIPE,
                            stderr=subprocess.DEVNULL, timeout=20)
-        return json.loads(p.stdout.decode("utf-8", "replace")) or {}
+        st = json.loads(p.stdout.decode("utf-8", "replace")) or {}
     except (OSError, ValueError, subprocess.SubprocessError):
         return {}
+    _TS_CACHE[0], _TS_CACHE[1] = now, st
+    return st
+
+
+def peer_is_down(name, status=None):
+    """Does the tailnet say this machine is off? True, False, or None for "no idea".
+
+    Asked before knocking, because knocking on a machine that is not there is
+    the most expensive way to learn nothing: four ports, a socket timeout each,
+    and again through the SOCKS proxy -- 6.1s measured against this tailnet's
+    compute node while it was asleep. The follower does that walk three times a
+    tick, so a node that had gone home turned every re-decision into twenty
+    seconds, and a tap on the iPad waited all of it.
+
+    Tailscale already knows. It is the one question it can answer instantly.
+
+    None rather than True when the answer is not known -- an empty netmap, no
+    tailscale, a name that is not a peer -- because "I cannot tell" must mean
+    "knock anyway". A machine wrongly assumed down is a lesson that cannot be
+    reached, which is far worse than a slow tick.
+    """
+    if not name:
+        return None
+    st = status if status is not None else _ts_status()
+    peers = st.get("Peer") or {}
+    if not peers:
+        return None
+    want = str(name).split(".")[0].lower()
+    for peer in peers.values():
+        label = (peer.get("DNSName") or "").rstrip(".").split(".")[0].lower()
+        if label == want or str(name) in (peer.get("TailscaleIPs") or []):
+            return not peer.get("Online")
+    return None
 
 
 def tailnet_addresses():
@@ -899,6 +945,10 @@ def locate_course(name, skip_local=False, hosts=(), timeout=2.0):
         if not host or host in seen:
             continue
         seen.add(host)
+        # `tailnet_peers` only offers machines that are up, but a host named by
+        # the caller comes out of a config file and may have gone home.
+        if peer_is_down(host):
+            continue
         port = find_board(host, name, timeout=timeout)
         if port:
             return (host, port)

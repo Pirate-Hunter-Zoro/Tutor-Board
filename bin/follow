@@ -259,6 +259,12 @@ def node_choice(node, cands):
     # address stayed where it was while `/health` on both machines said plainly
     # that somebody had asked for the other course.
     hosts += [h for h in boardlib.tailnet_peers() if h != node]
+    # And not a machine the tailnet says has gone home. `node` is a name out of a
+    # config file, so it long outlives the machine being up, and every course in
+    # `cands` is then knocked on at a port that cannot answer -- the walk above
+    # is deliberately exhaustive, which makes an absent node the most expensive
+    # host on the list. Six seconds per course, three walks a tick.
+    hosts = [h for h in hosts if not boardlib.peer_is_down(h)]
     # Whoever answered last, first: an ordinary tick is then one request.
     if _ASKED[0] and _ASKED[1]:
         health = probe(_ASKED[0], _ASKED[1], timeout=1.5)
@@ -379,6 +385,12 @@ def remote_target(node, cands, want=None, hint=None):
     course's own board record and is the only one that can know it.
     """
     by_name = dict((c["dir"], c) for c in cands)
+    # A node the tailnet says is off is not a node. Every probe below would time
+    # out and the walk of the tailnet at the end is the honest answer anyway --
+    # and on the evening this was written the configured node was asleep, so all
+    # a tap got for its twenty seconds was the same None from a longer route.
+    if node and boardlib.peer_is_down(node):
+        node = None
     if not node:
         # No configured node is not the same as no other machine. The tailnet
         # knows who is up; ask it before giving up on the far side entirely.
