@@ -31,6 +31,12 @@ PORT_BASE = 8780
 PORT_SPAN = 512
 PORT_TRIES = 4
 
+# How many other machines one walk of the tailnet may knock on. A person teaches
+# on a handful of machines; anything past this is a fleet that arrived in the
+# netmap by itself, and the walk costs four ports and a socket timeout each. See
+# `tailnet_peers` for the evening this ceiling is here to prevent.
+PEER_WALK_LIMIT = 12
+
 
 def port_sequence(name):
     """The ports this course will try to bind, in order.
@@ -610,13 +616,34 @@ def tailnet_peers(status=None):
         # into a minute of waiting. Ask the ones that could plausibly answer.
         if (peer.get("OS") or "").lower() in ("ios", "android", "tvos", "watchos"):
             continue
+        # Nor is a tagged device. That is the same lesson as the iPads, at a
+        # scale that stops being a slow tick and becomes a follower that never
+        # decides anything again: a Mullvad exit-node subscription puts its whole
+        # fleet in the netmap as online peers -- 544 of them here -- and they
+        # carry no `OS`, so the filter above waved every one of them through.
+        # Measured on this machine: 6.1s to knock on one exit node across the
+        # four ports, so 55 minutes for one walk, while the follower is bounced
+        # every fifteen. Not one tick ever finished. The address kept whatever
+        # course was seeded at startup, a tap in the hub could not move it, and
+        # the board looked healthy throughout -- because it was. Only the
+        # deciding was dead.
+        #
+        # Tags are the right test rather than `ExitNodeOption`: a person's own
+        # machine may advertise itself as an exit node and still be the machine
+        # the lesson is on, whereas a tagged node belongs to infrastructure and
+        # nobody teaches on it.
+        if peer.get("Tags"):
+            continue
         name = (peer.get("DNSName") or "").rstrip(".")
         if not name:
             ips = peer.get("TailscaleIPs") or []
             name = ips[0] if ips else ""
         if name:
             out.append(name)
-    return out
+    # And a ceiling, because the filters above are a list of surprises that have
+    # already happened and the next one should cost a slow tick rather than a
+    # follower that never decides again.
+    return out[:PEER_WALK_LIMIT]
 
 
 def socks_proxy():

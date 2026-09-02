@@ -557,6 +557,28 @@ check("and a named machine decides the address, above every preference, but "
       "only among boards serving the course that was chosen too",
       "def wanted_host(" in follow_src and "if want_host:" in follow_src)
 
+# A tap that is recorded and then waited on is a tap that did not work. The
+# follower re-decides on an interval because asking the other machine costs a
+# walk of the tailnet, but noticing that somebody chose something is one `stat`,
+# and thirty seconds of nothing happening after a tap is the difference between
+# switching courses and wondering whether the board is broken.
+check("a tap does not wait out the follower's interval",
+      "def _choice_stamp(" in follow_src
+      and "if _choice_stamp() != stamp:" in follow_src)
+check("and it is the choice being written that breaks the wait, not a timer",
+      "os.stat(boardlib.CHOSEN)" in follow_src)
+check("while re-deciding still costs the interval, because asking is not free",
+      "while waited < interval:" in follow_src)
+
+# The proxy is bounced with `kickstart -k` on every pulled fix, and a socket in
+# TIME_WAIT beat the replacement to the bind: exit 1, launchd again, and the log
+# a person reads to find out where the address went filled with tracebacks.
+check("the proxy survives its own restart",
+      "class Listener(socketserver.ThreadingTCPServer):" in follow_src
+      and "allow_reuse_address = True" in follow_src)
+check("and a port somebody else holds is one line, not a traceback",
+      "leaving the follower that has it alone" in follow_src)
+
 check("a board publishes whether it has a tutor at all",
       '"tutor": agent.get("state") or None' in serve_src)
 check("and the follower prefers a board with one over an empty room",

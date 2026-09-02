@@ -600,6 +600,20 @@ class Target:
             return self._host, self._port
 
 
+class Listener(socketserver.ThreadingTCPServer):
+    """The proxy's socket, which must survive its own restart.
+
+    `SO_REUSEADDR` is the whole of it. This job is bounced with `kickstart -k`
+    every time a fix is pulled, and without this the replacement raced the dying
+    socket's TIME_WAIT and lost -- exit 1, launchd tries again, and the log fills
+    with `Address already in use` tracebacks around the one line that says where
+    the address actually went.
+    """
+
+    allow_reuse_address = True
+    daemon_threads = True
+
+
 class Proxy(socketserver.BaseRequestHandler):
     def handle(self):
         host, port = self.server.target.get()
@@ -659,6 +673,19 @@ def ensure_serve(listen):
         pass
 
 
+def _choice_stamp():
+    """When the record a tap writes was last written, or None if never.
+
+    One `stat`, so it can be polled every second without costing anything --
+    which is the point: deciding is expensive and must stay on the interval, but
+    NOTICING is cheap and should not have to wait for it.
+    """
+    try:
+        return os.stat(boardlib.CHOSEN).st_mtime_ns
+    except OSError:
+        return None
+
+
 def follower(target, node, cands, log, prefer="local", secret=None):
     """Re-decide where the address points, and act only when it changes.
 
@@ -687,7 +714,21 @@ def follower(target, node, cands, log, prefer="local", secret=None):
             log("serving %s at %s:%d" % (where, now[0], now[1]))
             target.set(now[0], now[1])
             was = now
-        time.sleep(interval)
+        # Wait out the interval -- but not through a person's tap. Thirty seconds
+        # is nothing while a lesson is running and a very long time with a finger
+        # on the iPad: the hub records the choice immediately and then the
+        # address has to catch up, so the wait was the whole of "I tapped
+        # Probability and nothing happened". Break it the moment `chosen.json`
+        # changes, which is exactly the event that can change the answer, and go
+        # round again. Everything else still waits the full interval, because
+        # re-deciding means asking the other machine and that is not free.
+        stamp = _choice_stamp()
+        waited = 0.0
+        while waited < interval:
+            time.sleep(min(1.0, interval - waited))
+            waited += 1.0
+            if _choice_stamp() != stamp:
+                break
 
 
 def log(line):
@@ -742,9 +783,20 @@ def main(argv):
     if not _flag(argv, "--listen"):
         ensure_serve(listen)
 
-    server = socketserver.ThreadingTCPServer((host, port), Proxy)
+    try:
+        server = Listener((host, port), Proxy)
+    except OSError as exc:
+        # Somebody is already on it. Almost always us: `tutor` restarts this job
+        # with `launchctl kickstart -k`, and a new instance can reach the bind
+        # before the old socket has left TIME_WAIT. `Listener` sets SO_REUSEADDR
+        # for that case; what is left is a genuine second follower, and the right
+        # thing then is to say so in one line and get out of its way rather than
+        # print twenty lines of traceback into the log a person reads to find out
+        # why the address is on the wrong course.
+        log("%s is already served (%s); leaving the follower that has it alone"
+            % (listen, exc))
+        return 0
     server.target = target
-    server.daemon_threads = True
     log("preferring %s; following %s, listening on %s"
         % ("this machine" if prefer != "node" else "the compute node",
            node or "(no node configured)", listen))

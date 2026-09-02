@@ -58,6 +58,13 @@ def check(m, cond):
 box = tempfile.mkdtemp()
 os.environ["BOARD_STATE_DIR"] = box
 os.environ["BOARD_NODE_NAME"] = "test-node"
+# And no real tailnet. `follow.probe` is stubbed below, which was assumed to be
+# every way out of this file -- it is not: `choose_target` reaches the network a
+# second way, through `boardlib.locate_course`, and that one knocks on every peer
+# the netmap lists. With a Mullvad exit-node subscription on the tailnet that is
+# 544 machines, so `bash test/all.sh` stopped here and never came back. The whole
+# suite hung on a unit test about arithmetic over `/health` documents.
+os.environ["BOARD_NO_TAILNET"] = "1"
 
 import boardlib                                              # noqa: E402
 
