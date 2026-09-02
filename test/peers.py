@@ -34,7 +34,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
-import boardlib                                              # noqa: E402
+from tutorboard.net import boards, tailscale
 
 fails = []
 
@@ -66,29 +66,29 @@ def status(*peers):
 # ---- the machine a lesson might actually be on -----------------------------
 
 check("an ordinary machine on the tailnet is somewhere to look",
-      boardlib.tailnet_peers(status(peer("compute-node.ts.net", os_="linux")))
+      tailscale.tailnet_peers(status(peer("compute-node.ts.net", os_="linux")))
       == ["compute-node.ts.net"])
 check("a machine that is not online is not somewhere to look",
-      boardlib.tailnet_peers(
+      tailscale.tailnet_peers(
           status(peer("compute-node.ts.net", online=False, os_="linux"))) == [])
 check("and a peer with no name is reached at its address rather than skipped",
-      boardlib.tailnet_peers(
+      tailscale.tailnet_peers(
           status(peer("", os_="linux", ips=["100.64.0.9"]))) == ["100.64.0.9"])
 
 # ---- the two fleets that must not be walked --------------------------------
 
 check("a phone is not a machine that runs boards",
-      boardlib.tailnet_peers(status(peer("ipad.ts.net", os_="iOS"))) == [])
+      tailscale.tailnet_peers(status(peer("ipad.ts.net", os_="iOS"))) == [])
 check("nor is a tagged device, whatever it says its OS is",
-      boardlib.tailnet_peers(
+      tailscale.tailnet_peers(
           status(peer("se-sto-wg-001.mullvad.ts.net", os_="",
                       tags=["tag:mullvad-exit-node"]))) == [])
 check("which is the whole of the 55-minute walk: a fleet of them costs nothing",
-      boardlib.tailnet_peers(status(*[
+      tailscale.tailnet_peers(status(*[
           peer("wg-%03d.mullvad.ts.net" % i, os_="", tags=["tag:mullvad-exit-node"])
           for i in range(544)])) == [])
 check("and the machine teaching the lesson is still found in among them",
-      boardlib.tailnet_peers(status(*(
+      tailscale.tailnet_peers(status(*(
           [peer("wg-%03d.mullvad.ts.net" % i, os_="", tags=["tag:mullvad-exit-node"])
            for i in range(544)]
           + [peer("compute-node.ts.net", os_="linux")])))
@@ -98,18 +98,18 @@ check("and the machine teaching the lesson is still found in among them",
 # machine the lesson is on. Tags are what separates infrastructure from a desk;
 # being an exit node is not.
 check("a machine of one's own that offers to be an exit node is not infrastructure",
-      boardlib.tailnet_peers(status(
+      tailscale.tailnet_peers(status(
           dict(peer("compute-node.ts.net", os_="linux"), ExitNodeOption=True)))
       == ["compute-node.ts.net"])
 
 # ---- the ceiling -----------------------------------------------------------
 
-many = boardlib.tailnet_peers(status(*[
+many = tailscale.tailnet_peers(status(*[
     peer("machine-%03d.ts.net" % i, os_="linux") for i in range(200)]))
 check("a netmap that grows without warning cannot freeze the follower again",
-      len(many) == boardlib.PEER_WALK_LIMIT)
+      len(many) == tailscale.PEER_WALK_LIMIT)
 check("and the ceiling is a handful of machines, not a fleet",
-      2 <= boardlib.PEER_WALK_LIMIT <= 24)
+      2 <= tailscale.PEER_WALK_LIMIT <= 24)
 
 # ---- and the machine that has gone home ------------------------------------
 #
@@ -125,47 +125,47 @@ up = status(peer("compute-node.ts.net", os_="linux"))
 down = status(peer("compute-node.ts.net", online=False, os_="linux"))
 
 check("a machine the tailnet says is up is knocked on",
-      boardlib.peer_is_down("compute-node.ts.net", up) is False)
+      tailscale.peer_is_down("compute-node.ts.net", up) is False)
 check("a machine the tailnet says is off is not",
-      boardlib.peer_is_down("compute-node.ts.net", down) is True)
+      tailscale.peer_is_down("compute-node.ts.net", down) is True)
 check("and the short name is the same machine as the long one",
-      boardlib.peer_is_down("compute-node", down) is True)
+      tailscale.peer_is_down("compute-node", down) is True)
 check("as is the same name shouted",
-      boardlib.peer_is_down("COMPUTE-NODE", down) is True)
+      tailscale.peer_is_down("COMPUTE-NODE", down) is True)
 check("an address is a machine too",
-      boardlib.peer_is_down("100.64.0.9", status(
+      tailscale.peer_is_down("100.64.0.9", status(
           peer("", online=False, os_="linux", ips=["100.64.0.9"]))) is True)
 
 # The one that must not become a rule. "I cannot tell" has to mean "knock
 # anyway": a machine wrongly written off is a lesson that cannot be reached from
 # anywhere, which is a far worse failure than a slow tick.
 check("a machine the tailnet has never heard of is not written off",
-      boardlib.peer_is_down("somewhere-else", up) is None)
+      tailscale.peer_is_down("somewhere-else", up) is None)
 check("nor is anything at all when there is no netmap to read",
-      boardlib.peer_is_down("compute-node", {}) is None)
+      tailscale.peer_is_down("compute-node", {}) is None)
 check("and a nameless host is nobody, rather than somebody who is up",
-      boardlib.peer_is_down("", up) is None)
+      tailscale.peer_is_down("", up) is None)
 
 check("the follower treats a node that has gone home as no node at all",
-      "if node and boardlib.peer_is_down(node):"
+      "if node and tailscale.peer_is_down(node):"
       in open(os.path.join(ROOT, "bin", "follow"), encoding="utf-8").read())
 check("and a course is not looked for on a machine that is not there",
-      "if peer_is_down(host):"
-      in open(os.path.join(ROOT, "boardlib.py"), encoding="utf-8").read())
+      "if tailscale.peer_is_down(host):"
+      in open(os.path.join(ROOT, "tutorboard", "net", "boards.py"), encoding="utf-8").read())
 
 # ---- the escape hatch, which the suite depends on --------------------------
 
 os.environ["BOARD_NO_TAILNET"] = "1"
 try:
     check("a suite that says so reaches no tailnet at all",
-          boardlib.tailnet_peers(status(peer("compute-node.ts.net", os_="linux")))
+          tailscale.tailnet_peers(status(peer("compute-node.ts.net", os_="linux")))
           == [])
 finally:
     del os.environ["BOARD_NO_TAILNET"]
 
 # `test/limit.py` reasons about which board wins by stubbing `follow.probe`. That
 # is not the only way out: `choose_target` also reaches the network through
-# `boardlib.locate_course`, and with the exit-node fleet in the netmap that made
+# `boards.locate_course`, and with the exit-node fleet in the netmap that made
 # `bash test/all.sh` stop dead on a unit test about arithmetic over `/health`
 # documents. The hatch above is the fix; this is what keeps it there.
 limit_src = open(os.path.join(HERE, "limit.py"), encoding="utf-8").read()

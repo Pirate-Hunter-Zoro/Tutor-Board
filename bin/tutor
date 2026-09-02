@@ -40,7 +40,8 @@ import sys
 
 TOOL = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, TOOL)
-import boardlib  # noqa: E402  -- after the path insert, which is what finds it
+from tutorboard import choice, handoff, limits, machine, paths, processes
+from tutorboard.net import egress
 
 BOARD = os.path.join(TOOL, "bin", "board")
 CONFIG_DIR = os.path.join(
@@ -180,8 +181,7 @@ def read_course(root):
 
 def this_host():
     """What this machine calls itself. One place decides; see boardlib."""
-    import boardlib
-    return boardlib.node_name()
+    return machine.node_name()
 
 
 def missing_command(recipe):
@@ -498,7 +498,7 @@ def chapter_now(root):
 
 def handoff_clause(root):
     """What to tell a tutor about the handoff -- including that there is none."""
-    return (HANDOFF_CLAUSE if boardlib.handoff_applies(root, chapter_now(root))
+    return (HANDOFF_CLAUSE if handoff.handoff_applies(root, chapter_now(root))
             else NO_HANDOFF_CLAUSE)
 
 
@@ -883,8 +883,7 @@ def agent_live(root):
             st = json.load(fh)
     except (OSError, ValueError):
         return None
-    import boardlib
-    return st if boardlib.agent_is_attached(st, this_host()) else None
+    return st if processes.agent_is_attached(st, this_host()) else None
 
 
 def agent_start(cfg, course, agent_name, session=None):
@@ -1128,7 +1127,7 @@ def headless(cfg, course, agent_name, session):
         # turn on it. Asked here rather than on a timer because a turn is the
         # only moment the answer changes anything, and it is a file on this
         # machine either way.
-        if agent_name != wanted and not boardlib.limited_until():
+        if agent_name != wanted and not limits.limited_until():
             log.write("-- the allowance is back; '%s' takes the lesson again\n" % wanted)
             agent_name, spec = wanted, cfg["agents"][wanted]
             recipe, carried = spec.get("headless"), 0
@@ -1175,7 +1174,7 @@ def headless(cfg, course, agent_name, session):
                 # parked as this is read, so a tutor is never handed the last
                 # chapter's unfinished business as though it were this one's.
                 "handoff": (HANDOFF_CLAUSE
-                            if boardlib.handoff_applies(root, chapter_now(root))
+                            if handoff.handoff_applies(root, chapter_now(root))
                             else NO_HANDOFF_CLAUSE)}
         prompt = out.strip() if spec.get("raw_prompt") else template % fill
         cmd = [a.replace("{prompt}", prompt) for a in use]
@@ -1220,9 +1219,9 @@ def headless(cfg, course, agent_name, session):
             # itself answers -- the agent said so in its output, and a provider
             # that could say so is a provider we plainly reached, which settles
             # the egress question at the same time and for free.
-            until = boardlib.reads_as_usage_limit(turn_output(logpath, mark))
+            until = limits.reads_as_usage_limit(turn_output(logpath, mark))
             if until:
-                boardlib.mark_limited(until, agent=agent_name)
+                limits.mark_limited(until, agent=agent_name)
                 log.write("!! '%s' is out of allowance here until %s\n"
                           % (agent_name,
                              time.strftime("%H:%M", time.localtime(until))))
@@ -1273,11 +1272,11 @@ def headless(cfg, course, agent_name, session):
             # Only when a turn has actually failed. Probing on every turn would
             # add a round trip to the internet to every card the student waits
             # for, to answer a question that is almost always yes.
-            if not boardlib.egress_ok():
+            if not egress.egress_ok():
                 log.write("!! nothing can get out from here; the turn may not be "
                           "the tutor's fault\n")
                 agent_state(live, state="listening", last_error="no egress")
-                fixed, detail = boardlib.rotate_exit_node(
+                fixed, detail = egress.rotate_exit_node(
                     log=lambda m: log.write("   %s\n" % m))
                 if fixed:
                     log.write("-- egress repaired via %s; retrying the turn\n" % detail)
@@ -1294,9 +1293,9 @@ def headless(cfg, course, agent_name, session):
             # A turn that worked on the agent we actually want is proof the
             # allowance is back, whatever the record still says. The reset time
             # a provider hands out is a promise, and this is a measurement.
-            if agent_name == wanted and boardlib.limited_until():
+            if agent_name == wanted and limits.limited_until():
                 log.write("-- a turn went through; the allowance is back\n")
-                boardlib.clear_limited()
+                limits.clear_limited()
             agent_state(live, state="listening", last_error=None)
 
     # The last turn, and the only one the student never sees.
@@ -1310,7 +1309,7 @@ def headless(cfg, course, agent_name, session):
         # worth incomparably more than no handoff at all, and this is the exact
         # moment `/handover` produces: the address has moved, and the last thing
         # asked of the machine being left is the one thing it can no longer do.
-        if boardlib.limited_until():
+        if limits.limited_until():
             alt = fallback_agent(cfg, agent_name)
             if alt:
                 log.write("-- '%s' has no allowance left for the handoff; "
@@ -1331,7 +1330,7 @@ def headless(cfg, course, agent_name, session):
             # have opened the next chapter, and an unstamped handoff would then
             # be read as though it belonged to it.
             if wrote:
-                boardlib.stamp_handoff(root, taught_chapter[0])
+                handoff.stamp_handoff(root, taught_chapter[0])
             log.write("handoff written\n" if wrote else "!! no HANDOFF.md was written\n")
         except (subprocess.TimeoutExpired, OSError) as exc:
             log.write("!! handoff failed: %s\n" % exc)
@@ -1360,7 +1359,6 @@ def cmd_restart(cfg, args):
     process is worse than leaving a stale one. The always-on host's proxy is
     bounced too, for the same reason the boards are; `--tutors` adds the daemons.
     """
-    import boardlib
     host = this_host()
     touched, skipped = [], []
     for c in courses(cfg):
@@ -1373,7 +1371,7 @@ def cmd_restart(cfg, args):
         if info.get("node") and info["node"] != host:
             skipped.append("%s (on %s)" % (c["dir"], info["node"]))
             continue
-        if not boardlib.board_is_running(info.get("pid"), c["root"]):
+        if not processes.board_is_running(info.get("pid"), c["root"]):
             continue
         board(c["root"], "stop")
         code, out = board(c["root"], "start")
@@ -1519,18 +1517,16 @@ def remember_course(course):
     course once would go on resuming it for ever, quietly, taking the tailnet
     name with it every time. Naming one is how you say otherwise.
     """
-    import boardlib
-    boardlib.remember_chosen(course["dir"], course["root"])
+    choice.remember_chosen(course["dir"], course["root"])
 
 
 def chosen_course(cfg):
     """(when, course) for the last course a person named, if it still exists."""
-    import boardlib
-    rec = boardlib.chosen_course()
+    rec = choice.chosen_course()
     if not rec:
         return None
     for c in courses(cfg):
-        if boardlib.same_dir(c["root"], rec.get("root")) or c["dir"] == rec.get("dir"):
+        if paths.same_dir(c["root"], rec.get("root")) or c["dir"] == rec.get("dir"):
             return (rec.get("at") or 0, c)
     return None                   # named once, since deleted or renamed
 
@@ -1568,8 +1564,7 @@ def prune_dead_records(cfg, host):
     for a board that is in fact answering would leave a live process nothing can
     find. Returns the courses it swept, for the caller to report.
     """
-    import boardlib
-    held = boardlib.slurm_nodes()
+    held = machine.slurm_nodes()
     if held is None:
         return []
     swept = []
@@ -1643,14 +1638,13 @@ def cmd_resume(cfg, args):
     # one course they came for -- starting every board that an ended allocation
     # left a record of, on a shared login node, is the thing the guard further
     # down exists to prevent.
-    import boardlib
     revived = []
-    if boardlib.machine_shape() != "compute node":
+    if machine.machine_shape() != "compute node":
         for c in found:
             rec = board_record(c["root"]) or {}
             if not rec or rec.get("node") != host:
                 continue
-            if boardlib.board_is_running(rec.get("pid"), c["root"]):
+            if processes.board_is_running(rec.get("pid"), c["root"]):
                 continue
             code, _ = board(c["root"], "start")
             if code == 0:
@@ -1677,8 +1671,7 @@ def cmd_resume(cfg, args):
     # Fast-forward only and never fatal, so it is cheap to run on a timer.
     sync(root, quiet=True)
 
-    import boardlib
-    if on == host and boardlib.board_is_running(info.get("pid"), root):
+    if on == host and processes.board_is_running(info.get("pid"), root):
         # Already serving here. The one thing worth checking is that the tailnet
         # name still points at this port, since that is the part a second board
         # on this node moves out from under it.
@@ -1695,14 +1688,14 @@ def cmd_resume(cfg, args):
         # the repository and never sleeps permanently unable to host it. Bringing
         # a board up here does not stop the other one; the proxy asks it to hand
         # its tutor over as the address moves, which is the other half of this.
-        if boardlib.machine_shape() == "always-on host":
+        if machine.machine_shape() == "always-on host":
             say("%s is recorded on %s; this machine holds the repository, so it "
                 "comes up here" % (course["dir"], on))
         else:
             # A record from another node proves nothing on a shared filesystem, so
             # ask Slurm whether that machine is still a machine you hold. Unknown --
             # no squeue at all -- is not the same as gone, and is left alone.
-            nodes = boardlib.slurm_nodes()
+            nodes = machine.slurm_nodes()
             if nodes is None or on in nodes:
                 say("%s is on %s, which is still yours; leaving it there "
                     "(--force to move it here)" % (course["dir"], on))
@@ -1713,7 +1706,7 @@ def cmd_resume(cfg, args):
     # go to be killed -- and this runs from a login hook, so it will be invited
     # to try. Slurm knows which nodes are actually yours; if there is no Slurm at
     # all this is not a cluster and the question does not arise.
-    mine = boardlib.slurm_nodes()
+    mine = machine.slurm_nodes()
     if mine is not None and host not in mine and not force:
         say("%s is not one of your allocations; not starting a board here" % host)
         return 0
@@ -1758,8 +1751,7 @@ def cmd_where(cfg, args):
                 info = json.load(fh)
             on = info.get("node") or "?"
             if on == host:
-                import boardlib
-                if boardlib.board_is_running(info.get("pid"), c["root"]):
+                if processes.board_is_running(info.get("pid"), c["root"]):
                     board_up = "up :%s" % info.get("port", "?")
                     any_up = True
                 else:
@@ -1771,9 +1763,8 @@ def cmd_where(cfg, args):
         try:
             with open(os.path.join(live, "agent.json"), "r", encoding="utf-8") as fh:
                 st = json.load(fh)
-            import boardlib
             agent = ("%s %s" % (st.get("agent"), st.get("state"))) \
-                if boardlib.agent_is_attached(st, host) else "stale"
+                if processes.agent_is_attached(st, host) else "stale"
         except (OSError, ValueError):
             pass
         print("  %-24s board:%-10s agent:%s" % (c.get("name") or c["dir"], board_up, agent))

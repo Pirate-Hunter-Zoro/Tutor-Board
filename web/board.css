@@ -111,6 +111,11 @@ body { background: var(--paper); min-height: 100vh; min-height: 100dvh; }
 /* The right group keeps its width; the left group is what gives way, because a
    course name can be any length and a control cannot be half a control. */
 .bar-right { display: flex; align-items: center; gap: .25rem; flex: none; }
+/* Same rule as the annotation bar, for the same reason: these are controls. */
+.bar-left, .bar-left *, .bar-right, .bar-right * {
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+}
+.bar-left button, .bar-right button { touch-action: manipulation; }
 .bar-left { overflow: hidden; }
 #bar button, #bar a {
   /* A control must never wrap. When the bar got crowded the save's label broke
@@ -1011,8 +1016,26 @@ body.viewing { overflow: hidden; }
   font-family: var(--ui); font-size: .8rem;
 }
 body.tools-out .annbar { bottom: calc(5.6rem + env(safe-area-inset-bottom)); }
+/* A control is not prose, and on a tablet the difference is not academic.
+   `body.annotating #board *` already refuses selection over the lesson -- and
+   this bar is fixed-position, OUTSIDE #board, so none of it applied here. Press
+   and hold "Pen" and iOS selects the word; the selection then owns the next
+   drag, so the stroke that should have gone to the ink layer goes to the
+   selection instead. Reported as: the word Pen gets highlighted and the
+   annotation "intermittently stops writing".
+
+   `touch-action: manipulation` is the other half: it drops the double-tap-to-
+   zoom wait, which on these buttons is both a delay and a second way to end up
+   selecting something. */
+.annbar,
+.annbar * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
 .annbar button {
   font: inherit; cursor: pointer;
+  touch-action: manipulation;
   padding: .4rem .6rem; border-radius: .4rem;
   border: 1px solid var(--rule); background: var(--paper); color: var(--ink);
 }

@@ -31,7 +31,7 @@ it, `bin/free`'s two attempts both came back the same way, and the loop wrote
 whatever it had at the end.
 
 So there is a second question, asked of voice rather than syntax: is this text
-addressed TO the student or about them? `boardlib.reads_as_reasoning` answers it,
+addressed TO the student or about them? `reasoning.reads_as_reasoning` answers it,
 the chain passes over a model that deliberates, and both gates REFUSE rather than
 edit -- there is nothing to remove when the whole reply is the thought.
 
@@ -75,7 +75,7 @@ box = tempfile.mkdtemp()
 os.environ["BOARD_STATE_DIR"] = box
 os.environ["BOARD_NODE_NAME"] = "test-node"
 
-import boardlib  # noqa: E402
+from tutorboard import reasoning
 
 
 def load(name, path):
@@ -95,34 +95,34 @@ print("\n-- the shapes a leak arrives in --")
 CARD = "---\nkind: question\ntitle: Which subfield is fixed?\n---\n\nTake $L = \\QQ(\\omega)$."
 
 check("a <think> block before the card is gone",
-      boardlib.strip_reasoning(
+      reasoning.strip_reasoning(
           "<think>They confused the fixed field with the subgroup. I should "
           "ask again.</think>\n\n" + CARD) == CARD)
 
 check("an unclosed <think> leaves nothing behind, rather than everything",
-      boardlib.strip_reasoning(
+      reasoning.strip_reasoning(
           "<think>the budget ran out halfway through this thought") == "")
 
 check("a close tag with no open takes what came before it",
-      boardlib.strip_reasoning("deliberating away</think>\n\n" + CARD) == CARD)
+      reasoning.strip_reasoning("deliberating away</think>\n\n" + CARD) == CARD)
 
 check("the harmony channels keep only the final one",
-      boardlib.strip_reasoning(
+      reasoning.strip_reasoning(
           "<|channel|>analysis<|message|>working it out<|end|>"
           "<|start|>assistant<|channel|>final<|message|>" + CARD + "<|return|>") == CARD)
 
 check("an analysis channel with no final channel leaves no markers",
-      "<|" not in boardlib.strip_reasoning(
+      "<|" not in reasoning.strip_reasoning(
           "<|channel|>analysis<|message|>only ever thought<|end|>" + CARD))
 
 check("the bracket form is caught too",
-      boardlib.strip_reasoning("[THINKING]hm[/THINKING]\n\n" + CARD) == CARD)
+      reasoning.strip_reasoning("[THINKING]hm[/THINKING]\n\n" + CARD) == CARD)
 
 check("a card with nothing to strip is returned unchanged",
-      boardlib.strip_reasoning(CARD) == CARD)
+      reasoning.strip_reasoning(CARD) == CARD)
 
 check("a mismatched close does not swallow the card",
-      CARD in boardlib.strip_reasoning("<think>a</thought>\n\n" + CARD))
+      CARD in reasoning.strip_reasoning("<think>a</thought>\n\n" + CARD))
 
 
 # --- the rule that keeps a lesson a lesson ----------------------------------
@@ -132,14 +132,14 @@ PROSE = ("A reasoning model wraps its working in a <think> block, and the "
          "provider is supposed to strip it.\n\nWhy does that matter here?")
 
 check("leading_only leaves prose that merely mentions the tag alone",
-      boardlib.strip_reasoning(PROSE, leading_only=True) == PROSE)
+      reasoning.strip_reasoning(PROSE, leading_only=True) == PROSE)
 
 check("leading_only still strips a block the card opens with",
-      boardlib.strip_reasoning("<think>hm</think>\n\n" + CARD,
+      reasoning.strip_reasoning("<think>hm</think>\n\n" + CARD,
                                leading_only=True) == CARD)
 
 check("the thorough pass is the one that edits mid-text, and only the wire uses it",
-      boardlib.strip_reasoning(PROSE) != PROSE)
+      reasoning.strip_reasoning(PROSE) != PROSE)
 
 
 # --- the parser that turned a preamble into the card ------------------------
@@ -223,10 +223,10 @@ Hmm, wait. The student wrote "no 2-cycles". But <(1234)> contains (13)(24). So t
 Actually, I think the question is asking about transpositions. Neither contains a single transposition. So the question might be poorly posed."""
 
 check("untagged deliberation is recognised for what it is",
-      boardlib.reads_as_reasoning(LEAK))
+      reasoning.reads_as_reasoning(LEAK))
 
 check("and there is nothing in it for the strip to remove, which is the point",
-      boardlib.strip_reasoning(LEAK) == LEAK)
+      reasoning.strip_reasoning(LEAK) == LEAK)
 
 # Real cards, from real lessons. Each of these is a card somebody was taught
 # with, and refusing one mid-lesson is its own kind of damage.
@@ -268,7 +268,7 @@ What would you expect to see on the board if it were?"""),
 ]
 for label, text in REAL:
     check(label + " is not mistaken for thinking",
-          not boardlib.reads_as_reasoning(text))
+          not reasoning.reads_as_reasoning(text))
 
 check("board write refuses a card that is deliberation",
       write_card(LEAK) == "")
@@ -283,23 +283,23 @@ check("a real card still goes straight through",
 # to write its card into `live/cards/` itself, and an agent with file tools does
 # exactly that -- so the READER checks as well: the board, the recap the tutor
 # reads its own lesson back through, and the exported document.
-import document                                                   # noqa: E402
+from tutorboard.course import document              # noqa: E402
 
 check("a card written straight to disk is not read as a lesson",
-      boardlib.card_body(LEAK) == boardlib.THINKING_NOTICE)
+      reasoning.card_body(LEAK) == reasoning.THINKING_NOTICE)
 
 check("and what stands in its place says the turn did not land, rather than "
       "leaving a silence the student waits on",
-      "not shown" in boardlib.card_body(LEAK))
+      "not shown" in reasoning.card_body(LEAK))
 
 check("a real card is handed back exactly as written",
-      boardlib.card_body(REAL[2][1]) == REAL[2][1])
+      reasoning.card_body(REAL[2][1]) == REAL[2][1])
 
 _cards = tempfile.mkdtemp()
 with open(os.path.join(_cards, "0001-leak.md"), "w", encoding="utf-8") as fh:
     fh.write("---\nkind: lesson\n---\n" + LEAK)
 check("the export reads through the same gate",
-      boardlib.THINKING_NOTICE in document.read_cards(_cards)[0]["body"])
+      reasoning.THINKING_NOTICE in document.read_cards(_cards)[0]["body"])
 
 
 print()

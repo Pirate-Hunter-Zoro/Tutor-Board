@@ -25,8 +25,8 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import boardlib  # noqa: E402
-import homework  # noqa: E402
+from tutorboard import tex
+from tutorboard.course import homework  # noqa: E402
 
 fails = []
 
@@ -239,8 +239,8 @@ try:
     # What got pushed was then a `.tex` carrying tonight's proof beside a `.pdf`
     # from last week that does not -- which is worse than no PDF at all, because
     # it looks finished and is silently missing the exercise.
-    tex = os.path.join(prob, "homework", "hw05", "hw05.tex")
-    pdf = os.path.splitext(tex)[0] + ".pdf"
+    tex_path = os.path.join(prob, "homework", "hw05", "hw05.tex")
+    pdf = os.path.splitext(tex_path)[0] + ".pdf"
 
     # Stand in for LaTeX: a build script is honoured before the built-in path,
     # and this test is about WHEN a build happens, not about compiling TeX.
@@ -268,9 +268,9 @@ try:
           code == 0 and "compiling" not in out and os.path.getmtime(pdf) == stamp)
 
     # Write to the source, and it is out of date again.
-    with open(tex, "a", encoding="utf-8") as fh:
+    with open(tex_path, "a", encoding="utf-8") as fh:
         fh.write("\n%% one more agreed exercise\n")
-    os.utime(tex, (stamp + 10, stamp + 10))
+    os.utime(tex_path, (stamp + 10, stamp + 10))
     code, out = run(prob, "push", "and another")
     check("touching the write-up makes the next push rebuild it",
           code == 0 and "compiling" in out)
@@ -278,7 +278,7 @@ try:
     # A LaTeX error must not eat the source. The `.tex` is the record.
     with open(os.path.join(scripts, "build.sh"), "w", encoding="utf-8") as fh:
         fh.write('#!/usr/bin/env bash\necho "! Undefined control sequence."\nexit 1\n')
-    with open(tex, "a", encoding="utf-8") as fh:
+    with open(tex_path, "a", encoding="utf-8") as fh:
         fh.write("\n%% broken\n")
     code, out = run(prob, "push", "with a broken write-up")
     check("a build that fails still pushes the source, which is the record",
@@ -304,7 +304,7 @@ try:
     seen_path = open(os.path.join(prob, "seen-path"), encoding="utf-8").read()
     seen_inputs = open(os.path.join(prob, "seen-inputs"), encoding="utf-8").read()
     check("the course's build script runs with TeX on its PATH",
-          all(d in seen_path.split(os.pathsep) for d in boardlib.tex_bin_dirs()))
+          all(d in seen_path.split(os.pathsep) for d in tex.tex_bin_dirs()))
     check("and with the board's own macros where LaTeX will look for them",
           os.path.join(ROOT, "tex") in seen_inputs.split(os.pathsep))
 

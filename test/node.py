@@ -50,50 +50,51 @@ sandbox = tempfile.mkdtemp(prefix="tutor-node-")
 os.environ["BOARD_STATE_DIR"] = sandbox
 os.environ.pop("BOARD_NODE_NAME", None)
 sys.path.insert(0, ROOT)
-import boardlib  # noqa: E402
+from tutorboard import machine, paths
 
 
 def reload_lib():
-    importlib.reload(boardlib)
+    importlib.reload(paths)          # STATE_DIR is read from the environment
+    importlib.reload(machine)
 
 
 reload_lib()
 
 # --- one form for one machine ----------------------------------------------
 check("a fully qualified name is just the first label",
-      boardlib._normal_node("board.tail0c6c62.ts.net") == "board")
+      machine._normal_node("board.tail0c6c62.ts.net") == "board")
 check("and case is not an identity: Mac-mini and mac-mini are one machine",
-      boardlib._normal_node("Mac-mini") == boardlib._normal_node("mac-mini") == "mac-mini")
+      machine._normal_node("Mac-mini") == machine._normal_node("mac-mini") == "mac-mini")
 check("and nothing at all is not an empty string in a record",
-      boardlib._normal_node("") == "unknown")
+      machine._normal_node("") == "unknown")
 
 # --- pinning ----------------------------------------------------------------
-check("nothing is pinned to start with", boardlib.node_name_pinned() is None)
+check("nothing is pinned to start with", machine.node_name_pinned() is None)
 check("so the name is whatever the system says",
-      boardlib.node_name() == boardlib.system_node_name())
+      machine.node_name() == machine.system_node_name())
 
-boardlib.pin_node_name("mac-mini")
-check("a pinned name reads back", boardlib.node_name_pinned() == "mac-mini")
+machine.pin_node_name("mac-mini")
+check("a pinned name reads back", machine.node_name_pinned() == "mac-mini")
 check("and it is what the machine is called from then on",
-      boardlib.node_name() == "mac-mini")
+      machine.node_name() == "mac-mini")
 
 # The whole point: the system name moving must not move ours.
-real = boardlib.system_node_name
-boardlib.system_node_name = lambda: "something-the-network-decided"
+real = machine.system_node_name
+machine.system_node_name = lambda: "something-the-network-decided"
 check("the network renaming the machine does not rename the board's idea of it",
-      boardlib.node_name() == "mac-mini")
-boardlib.system_node_name = real
+      machine.node_name() == "mac-mini")
+machine.system_node_name = real
 
 check("pinning normalises, so a careless capital cannot fork a machine in two",
-      boardlib.pin_node_name("Mac-Mini") == "mac-mini" and
-      boardlib.node_name() == "mac-mini")
+      machine.pin_node_name("Mac-Mini") == "mac-mini" and
+      machine.node_name() == "mac-mini")
 
 os.environ["BOARD_NODE_NAME"] = "override"
 check("the environment still wins, for a test or a one-off",
-      boardlib.node_name() == "override")
+      machine.node_name() == "override")
 os.environ.pop("BOARD_NODE_NAME")
 check("and removing it falls back to the pin, not to the system",
-      boardlib.node_name() == "mac-mini")
+      machine.node_name() == "mac-mini")
 
 # --- nobody derives it for themselves ---------------------------------------
 # This is the half that actually broke. Two files asked `socket.gethostname()`
@@ -125,8 +126,8 @@ for rel in ("bin/board", "bin/tutor", "bin/follow", "serve.py"):
     check("%s does not ask the system for the hostname itself" % rel,
           not asks_the_system(os.path.join(ROOT, rel)))
 
-check("boardlib is the one place that may",
-      asks_the_system(os.path.join(ROOT, "boardlib.py")) == {"uname"})
+check("tutorboard/machine.py is the one place that may",
+      asks_the_system(os.path.join(ROOT, "tutorboard", "machine.py")) == {"uname"})
 
 board_src = open(os.path.join(ROOT, "bin", "board"), encoding="utf-8").read()
 start_body = board_src[board_src.index("def cmd_start("):]
@@ -155,9 +156,9 @@ board = importlib.util.module_from_spec(bspec)
 bloader.exec_module(board)
 
 check("the launcher and the board call this machine the same thing",
-      tutor.this_host() == board.this_node() == boardlib.node_name())
+      tutor.this_host() == board.this_node() == machine.node_name())
 check("and the server's own record would agree with both",
-      board.socket_hostname() == boardlib.node_name())
+      board.socket_hostname() == machine.node_name())
 
 # --- setting a compute node up ----------------------------------------------
 # `scripts/setup-node.sh` is the thing a person is told to run there, so its
@@ -186,7 +187,7 @@ def script_code(text):
 
 setup_code = script_code(setup_src)
 check("and never pins a name on a cluster, where the machine really does change",
-      "boardlib.pin_node_name(" not in setup_code)
+      "machine.pin_node_name(" not in setup_code)
 check("and never re-registers the tailnet name, which is the iPad's one address",
       "vpn" not in setup_code and "board vpn up --hostname" in setup_src)
 check("and restarts what is running, since a board holds the code it started with",

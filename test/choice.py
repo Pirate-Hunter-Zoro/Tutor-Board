@@ -52,7 +52,8 @@ def check(m, cond):
 # tailnet, where the answer depends on what happens to be running tonight.
 os.environ["BOARD_NO_TAILNET"] = "1"
 
-import boardlib                                              # noqa: E402
+from tutorboard import choice, paths, ports
+from tutorboard.net import boards, tailscale
 import tempfile as _tf                                       # noqa: E402
 
 # And it must not read THIS machine's own record either. Every check below about
@@ -64,10 +65,10 @@ import tempfile as _tf                                       # noqa: E402
 # host, and failed the moment one did. Isolated at the top, before anything
 # decides anything, rather than half way down where it used to be.
 _ISOLATED = _tf.mkdtemp(prefix="tutor-choice-")
-boardlib.CONFIG_DIR = _ISOLATED
-boardlib.CHOSEN = os.path.join(_ISOLATED, "chosen.json")
+paths.CONFIG_DIR = _ISOLATED
+paths.CHOSEN = os.path.join(_ISOLATED, "chosen.json")
 check("the suite decides from a fixture, not from this machine's own record",
-      boardlib.chosen_course() == {})
+      choice.chosen_course() == {})
 
 spec = importlib.util.spec_from_loader(
     "followcli",
@@ -88,23 +89,23 @@ NAMES = ["Algo-Solutions", "Galois-Theory", "Lean-Theorem-Proving",
 
 seen = {}
 for n in NAMES:
-    seen.setdefault(boardlib.default_port(n), []).append(n)
+    seen.setdefault(ports.default_port(n), []).append(n)
 clashes = dict((p, v) for p, v in seen.items() if len(v) > 1)
 check("no two courses on this machine derive the same port", not clashes)
 if clashes:
     print("     " + repr(clashes))
 
 check("Mathematical-Modeling and Research-Journey are no longer the same board",
-      boardlib.default_port("Mathematical-Modeling")
-      != boardlib.default_port("Research-Journey"))
+      ports.default_port("Mathematical-Modeling")
+      != ports.default_port("Research-Journey"))
 
-seq = boardlib.port_sequence("Galois-Theory")
+seq = ports.port_sequence("Galois-Theory")
 check("a name maps to a sequence, so a busy port is not a dead end", len(seq) > 1)
 check("and the sequence has no repeats in it", len(set(seq)) == len(seq))
 check("the first of the sequence is the ordinary port",
-      seq[0] == boardlib.default_port("Galois-Theory"))
+      seq[0] == ports.default_port("Galois-Theory"))
 check("the same name gives the same sequence every time",
-      boardlib.port_sequence("Galois-Theory") == seq)
+      ports.port_sequence("Galois-Theory") == seq)
 check("every port in it is a real one", all(1024 < p < 65536 for p in seq))
 
 # bin/board must agree with boardlib, or the two machines disagree about where a
@@ -126,17 +127,17 @@ GAL = "/home/x/Galois-Theory"
 PRB = "/home/x/Probability"
 CANDS = [{"dir": "Galois-Theory", "root": GAL},
          {"dir": "Probability", "root": PRB}]
-GAL_PORT = boardlib.default_port("Galois-Theory")
-PRB_PORT = boardlib.default_port("Probability")
+GAL_PORT = ports.default_port("Galois-Theory")
+PRB_PORT = ports.default_port("Probability")
 
 check("the fixture matches the real sort order this bug depended on",
       "Galois-Theory" < "Probability")
 
-boards = {}
+answering = {}
 
 
 def fake_probe(host, port, timeout=2.0):
-    return boards.get(int(port))
+    return answering.get(int(port))
 
 
 follow.probe = fake_probe
@@ -151,9 +152,9 @@ def health(name, root, chosen=None, chosen_port=None, at=None):
     return doc
 
 
-# Both boards up, Probability chosen: the proxy must move even though Galois
+# Both answering up, Probability chosen: the proxy must move even though Galois
 # answers first and always will.
-boards = {
+answering = {
     GAL_PORT: health("Galois-Theory", GAL, chosen="Probability", chosen_port=PRB_PORT),
     PRB_PORT: health("Probability", PRB, chosen="Probability", chosen_port=PRB_PORT),
 }
@@ -162,7 +163,7 @@ check("a chosen course is served even when another answers first",
       follow.remote_target("node", CANDS, want)[:2] == ("node", PRB_PORT))
 
 # The choice is the current course: nothing moves.
-boards = {
+answering = {
     GAL_PORT: health("Galois-Theory", GAL, chosen="Galois-Theory", chosen_port=GAL_PORT),
     PRB_PORT: health("Probability", PRB, chosen="Galois-Theory", chosen_port=GAL_PORT),
 }
@@ -173,7 +174,7 @@ check("and when the first to answer is the chosen one, it keeps the address",
 # Chosen course named, but its board is not up. Serve what there is rather than
 # nothing -- an unreachable address is worse than the wrong lesson, because the
 # wrong lesson can be tapped out of.
-boards = {
+answering = {
     GAL_PORT: health("Galois-Theory", GAL, chosen="Probability", chosen_port=PRB_PORT),
 }
 want = "Probability"
@@ -181,13 +182,13 @@ check("a chosen course that is not running falls back to a board that is",
       follow.remote_target("node", CANDS, want)[:2] == ("node", GAL_PORT))
 
 # Nobody has chosen anything yet.
-boards = {GAL_PORT: health("Galois-Theory", GAL)}
+answering = {GAL_PORT: health("Galois-Theory", GAL)}
 want = None
 check("with no choice recorded, whatever is up is served",
       follow.remote_target("node", CANDS, want)[:2] == ("node", GAL_PORT))
 
 # Nothing is up at all.
-boards = {}
+answering = {}
 want = None
 check("and with nothing up, the compute node is not claimed",
       follow.remote_target("node", CANDS, want) is None)
@@ -196,7 +197,7 @@ check("and with nothing up, the compute node is not claimed",
 
 # A board answering on a port that is not its own. Believing the number here is
 # how somebody opens a Galois proof and is shown a probability problem set.
-boards = {
+answering = {
     GAL_PORT: health("Probability", PRB, chosen="Probability", chosen_port=PRB_PORT),
     PRB_PORT: health("Probability", PRB, chosen="Probability", chosen_port=PRB_PORT),
 }
@@ -206,8 +207,8 @@ check("a board on somebody else's port is not mistaken for them",
 
 # The chosen course moved off its usual port -- a start that found it busy walks
 # the sequence. The record on the serving machine knows; the proxy is told.
-moved = boardlib.port_sequence("Probability")[1]
-boards = {
+moved = ports.port_sequence("Probability")[1]
+answering = {
     GAL_PORT: health("Galois-Theory", GAL, chosen="Probability", chosen_port=moved),
     moved: health("Probability", PRB, chosen="Probability", chosen_port=moved),
 }
@@ -216,7 +217,7 @@ check("a course that had to move ports is still found, because it is named not g
       follow.remote_target("node", CANDS, want)[:2] == ("node", moved))
 
 # And if the published port is wrong, the sequence is walked rather than trusted.
-boards = {
+answering = {
     GAL_PORT: health("Galois-Theory", GAL, chosen="Probability", chosen_port=54321),
     moved: health("Probability", PRB, chosen="Probability", chosen_port=54321),
 }
@@ -236,7 +237,7 @@ check("a health document with no identity in it identifies as nobody",
 # inverted: the machine that never sleeps and holds the repository hosts it, and
 # the node is for a course this machine has not got. What must NOT follow from
 # that is an address pointing at nothing -- preference settles a tie between two
-# live boards and decides nothing else.
+# live answering and decides nothing else.
 #
 # Both sides are probed now, so the fixture has to tell them apart.
 
@@ -249,7 +250,7 @@ def two_sided_probe(host, port, timeout=2.0):
 
 follow.probe = two_sided_probe
 follow.active_course = lambda cands: (cands[0] if cands else None)
-follow.local_port = lambda c: boardlib.default_port(c["dir"])
+follow.local_port = lambda c: ports.default_port(c["dir"])
 
 HERE_ = "127.0.0.1"
 NODE_ = "node"
@@ -299,12 +300,12 @@ check("a local board that is not this course does not win on being local",
 # not, on either machine.
 
 _box = _tf.mkdtemp()
-boardlib.CHOSEN = os.path.join(_box, "chosen.json")
-boardlib.CONFIG_DIR = _box
+paths.CHOSEN = os.path.join(_box, "chosen.json")
+paths.CONFIG_DIR = _box
 
 BOTH = [{"dir": "Galois-Theory", "root": GAL}, {"dir": "Probability", "root": PRB}]
 
-boardlib.remember_chosen("Galois-Theory", GAL)         # a person, just now
+choice.remember_chosen("Galois-Theory", GAL)         # a person, just now
 anywhere = {(HERE_, GAL_PORT): health("Galois-Theory", GAL),
             (NODE_, PRB_PORT): health("Probability", PRB,
                                       chosen="Probability", chosen_port=PRB_PORT)}
@@ -315,7 +316,7 @@ check("and it does not take it even on the machine the config prefers",
 
 # The same board, once it IS the chosen course: preference decides again, which
 # is all preference was ever for.
-boardlib.remember_chosen("Probability", PRB)
+choice.remember_chosen("Probability", PRB)
 check("and the moment it is chosen, it is served",
       follow.choose_target(NODE_, BOTH, "local")[0] == (NODE_, PRB_PORT))
 
@@ -327,7 +328,7 @@ check("and the moment it is chosen, it is served",
 # never seen here: the tap started the board, moved nothing, and looked broken.
 # Both records are read now and the newer one is the person's latest word.
 
-boardlib.remember_chosen("Galois-Theory", GAL)
+choice.remember_chosen("Galois-Theory", GAL)
 anywhere = {(HERE_, GAL_PORT): health("Galois-Theory", GAL),
             (NODE_, PRB_PORT): health("Probability", PRB, chosen="Probability",
                                       chosen_port=PRB_PORT, at=time.time() + 60)}
@@ -344,7 +345,7 @@ check("a node too old to publish when it was chosen reads as ancient, not as now
 
 # And the last resort is unchanged: with no choice anywhere, whatever is up wins,
 # because an address with nothing behind it is worse than the wrong lesson.
-os.remove(boardlib.CHOSEN)
+os.remove(paths.CHOSEN)
 anywhere = {(NODE_, PRB_PORT): health("Probability", PRB)}
 check("with nobody having chosen anything, a live board still gets the address",
       follow.choose_target(NODE_, BOTH, "local")[0] == (NODE_, PRB_PORT))
@@ -386,19 +387,19 @@ check("and it defaults to this one", 'or "local"' in src)
 import tempfile                                              # noqa: E402
 
 box = tempfile.mkdtemp()
-boardlib.CHOSEN = os.path.join(box, "chosen.json")
-boardlib.CONFIG_DIR = box
-check("with nothing recorded, nobody has chosen anything", boardlib.chosen_course() == {})
-boardlib.remember_chosen("Probability", "/home/x/Probability")
-rec = boardlib.chosen_course()
+paths.CHOSEN = os.path.join(box, "chosen.json")
+paths.CONFIG_DIR = box
+check("with nothing recorded, nobody has chosen anything", choice.chosen_course() == {})
+choice.remember_chosen("Probability", "/home/x/Probability")
+rec = choice.chosen_course()
 check("a choice is recorded and reads back", rec.get("dir") == "Probability")
 check("and it carries when, so an old name cannot outrank an afternoon's work",
       isinstance(rec.get("at"), float))
 
-with open(boardlib.CHOSEN, "w", encoding="utf-8") as fh:
+with open(paths.CHOSEN, "w", encoding="utf-8") as fh:
     fh.write("{not json")
 check("a corrupt record is nobody's choice rather than a crash",
-      boardlib.chosen_course() == {})
+      choice.chosen_course() == {})
 
 # ---- who is allowed to record a choice -------------------------------------
 # The record is a DECISION, and the whole reason it exists is that it cannot be
@@ -457,7 +458,7 @@ def recorded():
         return None
 
 
-boardlib.remember_chosen.__doc__      # (the record under test is the file, not this process)
+choice.remember_chosen.__doc__      # (the record under test is the file, not this process)
 with open(chosen, "w", encoding="utf-8") as fh:
     json.dump({"dir": "Galois-Theory", "root": os.path.join(courses_dir, "Galois-Theory"),
                "at": 1.0}, fh)
@@ -477,20 +478,47 @@ check("the flag is a flag: the parser knows it, so it is never taken for a cours
 i = src_tutor.index('if sub == "start":')
 check("tutor agent start records the course somebody named",
       "remember_course(course)" in src_tutor[i:i + 1200])
-check("and so does a tap in the hub",
-      "remember_chosen" in open(os.path.join(ROOT, "serve.py"), encoding="utf-8").read())
+def source(*parts):
+    return open(os.path.join(ROOT, *parts), encoding="utf-8").read()
+
+
+# The board is a package now, so "is this rule written down" and "where is it
+# written down" are two different questions and both are worth asking. The
+# second one is asked directly, below; the first reads the server as a whole,
+# because a rule moving from one module to a better one is not a regression.
+SERVER = []
+for _dir, _subs, _files in os.walk(os.path.join(ROOT, "tutorboard")):
+    _subs[:] = [d for d in _subs if d != "__pycache__"]
+    for _f in sorted(_files):
+        if _f.endswith(".py"):
+            SERVER.append(open(os.path.join(_dir, _f), encoding="utf-8").read())
+serve_src = "\n".join(SERVER)
+
+# And where each of them lives, so the organisation is a promise rather than a
+# state of affairs. A route that drifts back into a nine-hundred-line handler
+# fails here rather than being noticed a year later.
+check("the routes are split by what they are about, not piled into one handler",
+      'if path == "/switch":' in source("tutorboard", "server", "routes", "machines.py")
+      and 'if path == "/slate/save":' in source("tutorboard", "server", "routes", "writing.py")
+      and 'if path == "/push":' in source("tutorboard", "server", "routes", "saving.py"))
+check("and the handler keeps the plumbing and the table, nothing else",
+      "def do_GET" in source("tutorboard", "server", "handler.py")
+      and 'if path == "/switch":' not in source("tutorboard", "server", "handler.py"))
+check("the entry point is an entry point",
+      len(source("serve.py").splitlines()) < 40)
+
+check("and so does a tap in the hub", "remember_chosen" in serve_src)
 
 # --- one course, one place ---------------------------------------------------
 print("\n-- a tap does not start a second board, or a second tutor --")
 
-serve_src = open(os.path.join(ROOT, "serve.py"), encoding="utf-8").read()
 follow_src = open(os.path.join(ROOT, "bin", "follow"), encoding="utf-8").read()
 
 check("the choice is recorded whatever else the tap does",
-      'boardlib.remember_chosen(match["repo"], target,' in serve_src)
+      'choice.remember_chosen(match["repo"], target,' in serve_src)
 check("but a second board is only started when nothing else is serving that "
       "course -- asked over the tailnet, not assumed from the machine's role",
-      "elsewhere = None if mine else boardlib.locate_course(" in serve_src
+      "elsewhere = None if mine else boards.locate_course(" in serve_src
       and "if mine or not elsewhere:" in serve_src)
 check("the tailnet name is only taken by a machine that owns it -- otherwise the "
       "follower and the tap re-point it at each other, every tick",
@@ -502,7 +530,7 @@ check("and a tutor is started only where the course is actually served, so one "
 
 check("a board listens on the tailnet as well as loopback, or the other machine "
       "can never see it and the address can only ever point at home",
-      "boardlib.tailnet_addresses()" in serve_src
+      "tailscale.tailnet_addresses()" in serve_src
       and "second.serve_forever" in serve_src)
 # The half that was missed the first time, and missing it made the rest useless.
 #
@@ -514,10 +542,10 @@ check("a board listens on the tailnet as well as loopback, or the other machine 
 # `Galois-Theory` on both sides for a full minute while the address served
 # Probability.
 check("the choice is read from whoever answers, not from a configured hostname",
-      "hosts += [h for h in boardlib.tailnet_peers() if h != node]" in follow_src)
+      "hosts += [h for h in tailscale.tailnet_peers() if h != node]" in follow_src)
 check("and one probe implementation for both machines, so the machine that needs "
       "the SOCKS proxy is not the one asking without it",
-      "health = boardlib.board_health(host, port, timeout=timeout)" in follow_src)
+      "health = boards.board_health(host, port, timeout=timeout)" in follow_src)
 check("the walk covers every course, because the other machine is running the "
       "ones it is running and not the four this one lists first",
       "for c in cands:" in follow_src and "cands[:4]" not in follow_src)
@@ -529,7 +557,7 @@ check("and an ordinary tick is one request, because whoever answered last is "
 #
 # It reads the record off disk, and it is not always reading the same disk view a
 # board is: this process is started by launchd with whatever environment launchd
-# gives it, the boards are started from a session, and when those disagree the
+# gives it, the answering are started from a session, and when those disagree the
 # follower is deciding from a file nobody writes to. Found the hard way -- the
 # address served Probability for ten minutes while every board on both machines
 # published `chosen: Galois-Theory`.
@@ -539,10 +567,10 @@ check("the choice is also taken from a board on this machine, which is the same 
       and "published = local_choice(cands)" in follow_src
       and "want = wanted_course(remote_choice, published)" in follow_src)
 check("and the newest of the three wins, whoever is reporting it",
-      "for rec in (boardlib.chosen_course(), local_published, remote_choice):"
+      "for rec in (choice.chosen_course(), local_published, remote_choice):"
       in follow_src)
 check("and phones are not knocked on at all",
-      '"ios", "android"' in open(os.path.join(ROOT, "boardlib.py"), encoding="utf-8").read())
+      '"ios", "android"' in open(os.path.join(ROOT, "tutorboard", "net", "tailscale.py"), encoding="utf-8").read())
 
 # The host is a choice, and it is the person's.
 #
@@ -562,10 +590,10 @@ check("a course can be started on the machine that has it, from a hub on the "
       "other one",
       'if path == "/start":' in serve_src)
 check("and choosing a course on a named machine records both",
-      'boardlib.remember_chosen(want, "", host=on_host, at=rec_at)' in serve_src)
+      'choice.remember_chosen(want, "", host=on_host, at=rec_at)' in serve_src)
 check("the record carries the host",
       "def remember_chosen(name, root, host=None, at=None):"
-      in open(os.path.join(ROOT, "boardlib.py"), encoding="utf-8").read())
+      in open(os.path.join(ROOT, "tutorboard", "choice.py"), encoding="utf-8").read())
 # And it is PUBLISHED, which is the half that never left the machine it was
 # written on. `wanted_host` reads the host off whichever record is newest,
 # including ones it gets by asking a board -- and a board published the course,
@@ -576,7 +604,7 @@ check("the record carries the host",
 check("and a board publishes the host, or a choice of machine never leaves it",
       '"at": rec.get("at") or 0, "host": rec.get("host") or ""' in serve_src)
 check("and a named machine decides the address, above every preference, but "
-      "only among boards serving the course that was chosen too",
+      "only among answering serving the course that was chosen too",
       "def wanted_host(" in follow_src and "if want_host:" in follow_src)
 
 # A tap that is recorded and then waited on is a tap that did not work. The
@@ -588,7 +616,7 @@ check("a tap does not wait out the follower's interval",
       "def _choice_stamp(" in follow_src
       and "if _choice_stamp() != stamp:" in follow_src)
 check("and it is the choice being written that breaks the wait, not a timer",
-      "os.stat(boardlib.CHOSEN)" in follow_src)
+      "os.stat(paths.CHOSEN)" in follow_src)
 check("while re-deciding still costs the interval, because asking is not free",
       "while waited < interval:" in follow_src)
 
@@ -623,19 +651,19 @@ check("a tap is relayed to every machine that can hear it, not waited for",
 check("and a board has somewhere to receive one",
       'if path == "/chose":' in serve_src)
 check("which records and nothing else -- no board, no tutor, no address",
-      "boardlib.remember_chosen(want, root if os.path.isdir(root) else \"\","
+      "choice.remember_chosen(want, root if os.path.isdir(root) else \"\","
       in serve_src)
 check("every path that records a choice relays it: the hub's own machine,",
       serve_src.count("announce_later(") >= 3)
 check("and the relay keeps the original time, so two clocks cannot disagree "
       "about one tap",
       "at=rec_at" in serve_src and "def remember_chosen(name, root, host=None, at=None):"
-      in open(os.path.join(ROOT, "boardlib.py"), encoding="utf-8").read())
+      in open(os.path.join(ROOT, "tutorboard", "choice.py"), encoding="utf-8").read())
 check("a relay that says what is already recorded rewrites nothing, because "
       "the file's own mtime is what wakes a follower",
       'if have.get("dir") == want and mine_at >= at:' in serve_src)
 check("and a genuinely ancient relay is junk rather than a decision",
-      "at < time.time() - RELAY_STALE" in serve_src)
+      "at < time.time() - machines.RELAY_STALE" in serve_src)
 # What is deliberately NOT there: deciding which of two records is newer by
 # comparing timestamps that came off two different machines' clocks. A relay is
 # sent the instant somebody taps, so arriving at all is the evidence -- and
@@ -644,10 +672,10 @@ check("and a genuinely ancient relay is junk rather than a decision",
 check("and a tap is never refused for what another machine's clock says",
       "if mine_at > at:" not in serve_src)
 check("and a relayed name is a name, never a path",
-      "want != safe_filename(want)" in serve_src)
+      "want != multipart.safe_filename(want)" in serve_src)
 
 # The second: the fast wake watched a file this process may not share. The
-# follower is started by launchd with launchd's environment; the boards are
+# follower is started by launchd with launchd's environment; the answering are
 # started from a session. When those two disagree the stat never changes and
 # every tap waits out the full interval -- which is most of "ten times".
 check("and the wake asks a board as well as reading a file, because those are "
@@ -667,8 +695,8 @@ check("and a probe it could not make does not count as a change",
 # its own live/ constantly, so the course being LEFT went on touching its
 # directory and overtook the recorded choice within seconds of the tap.
 _box2 = _tf.mkdtemp()
-boardlib.CHOSEN = os.path.join(_box2, "chosen.json")
-boardlib.CONFIG_DIR = _box2
+paths.CHOSEN = os.path.join(_box2, "chosen.json")
+paths.CONFIG_DIR = _box2
 for _n in ("Galois-Theory", "Probability"):
     os.makedirs(os.path.join(_box2, _n, "live"), exist_ok=True)
 PAIR = [{"dir": "Galois-Theory", "root": os.path.join(_box2, "Galois-Theory")},
@@ -681,7 +709,7 @@ _spec2 = importlib.util.spec_from_loader(
     importlib.machinery.SourceFileLoader("followcli2", os.path.join(ROOT, "bin", "follow")))
 follow2 = importlib.util.module_from_spec(_spec2)
 _spec2.loader.exec_module(follow2)
-boardlib.remember_chosen("Galois-Theory", PAIR[0]["root"])
+choice.remember_chosen("Galois-Theory", PAIR[0]["root"])
 # Probability's board goes on writing, as a live board does, every second.
 time.sleep(0.02)
 with open(os.path.join(PAIR[1]["root"], "live", "state.json"), "w") as fh:
@@ -691,7 +719,7 @@ check("a course that is merely busy does not overtake the one that was chosen",
 # And with nobody having chosen anything, the most recently worked course is
 # still the honest answer -- it is the only question a modification time can
 # actually answer.
-os.remove(boardlib.CHOSEN)
+os.remove(paths.CHOSEN)
 check("and with no choice recorded, the most recently worked one is served",
       follow2.active_course(PAIR)["dir"] == "Probability")
 
@@ -709,7 +737,7 @@ check("it waits until the address serves what was asked for",
 check("on the machine that was asked for, when one was named",
       "sameHost(h.host, host)" in home_src)
 check("and a board says which machine it is, so that can be checked",
-      '"host": boardlib.tailnet_self() or ""' in serve_src)
+      '"host": tailscale.tailnet_self() or ""' in serve_src)
 check("a second tap while one is in flight is not a second switch",
       "if (moving) return;" in home_src)
 check("and when it does not land, it says so instead of reloading",
@@ -759,7 +787,7 @@ def flaky_probe(host, port, timeout=2.0):
 
 
 follow.probe = flaky_probe
-boardlib.remember_chosen("Galois-Theory", GAL)
+choice.remember_chosen("Galois-Theory", GAL)
 follow.active_course = lambda cands: (cands[0] if cands else None)
 
 # Without a memo, the three questions disagree and the empty board wins. With
@@ -776,8 +804,8 @@ check("one flaky machine cannot make one decision contradict itself",
 # monkeypatched all the way down the file -- so ask the untouched one.
 follow2._HEALTH.clear()
 asked = {"n": 0}
-_real_health = boardlib.board_health
-boardlib.board_health = lambda host, port, timeout=2.0: (asked.update(n=asked["n"] + 1)
+_real_health = boards.board_health
+boards.board_health = lambda host, port, timeout=2.0: (asked.update(n=asked["n"] + 1)
                                                          or NODE_HEALTH)
 try:
     follow2.probe("somewhere", 9999)
@@ -790,7 +818,7 @@ try:
     check("and it is a memo, not a cache: the next decision asks again",
           asked["n"] == 2)
 finally:
-    boardlib.board_health = _real_health
+    boards.board_health = _real_health
     follow2._HEALTH.clear()
 
 # The second cause: even a decision that is internally consistent can disagree

@@ -57,10 +57,9 @@ import time
 
 TOOL = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, TOOL)
-import boardlib
-import homework
-import review
-import document
+from tutorboard import handoff, limits, machine, ports, processes, reasoning, tex
+from tutorboard.net import egress, tailscale
+from tutorboard.course import document, homework, review
 SERVE = os.path.join(TOOL, "serve.py")
 KINDS = ("lesson", "question", "correct", "wrong", "review", "note", "recap")
 
@@ -139,7 +138,7 @@ def this_node():
     renamed this one mid-session and orphaned a running board from every command
     that wanted to restart it.
     """
-    return boardlib.node_name()
+    return machine.node_name()
 
 
 def alive(info):
@@ -154,7 +153,7 @@ def alive(info):
     node = info.get("node")
     if node and node != this_node():
         return False
-    return boardlib.board_is_running(info.get("pid"), info.get("root") or live_root(info))
+    return processes.board_is_running(info.get("pid"), info.get("root") or live_root(info))
 
 
 def live_root(info):
@@ -163,12 +162,12 @@ def live_root(info):
 
 def slurm_nodes():
     """Nodes where this user currently holds an allocation, or None if unknown."""
-    return boardlib.slurm_nodes()
+    return machine.slurm_nodes()
 
 
 def default_port(root):
     """Stable per-repository port so two courses can hold boards at once."""
-    return boardlib.default_port(os.path.basename(root))
+    return ports.default_port(os.path.basename(root))
 
 
 def free_port(root):
@@ -180,7 +179,7 @@ def free_port(root):
     function of the name, so the always-on host can walk the same one looking for
     this course without having to be told anything.
     """
-    seq = boardlib.port_sequence(os.path.basename(root))
+    seq = ports.port_sequence(os.path.basename(root))
     for port in seq:
         if not port_answers(port):
             return port, None
@@ -381,9 +380,9 @@ def cmd_start(live, args):
     # network, so the name that goes into `.board.json` here is one Tailscale or
     # a DHCP lease can change by tomorrow -- and then this board belongs to a
     # machine that no longer exists and nothing will restart it.
-    if not boardlib.node_name_pinned() and boardlib.should_pin_node_name():
+    if not machine.node_name_pinned() and machine.should_pin_node_name():
         print("this machine is now '%s' as far as the board is concerned "
-              "(pinned, so the network cannot change it)" % boardlib.pin_node_name())
+              "(pinned, so the network cannot change it)" % machine.pin_node_name())
 
     install_teaching(live)
     granted = install_permissions(live)
@@ -456,7 +455,7 @@ def cmd_stop(live, args):
     # pointing at a port nothing answers on -- which the other machine then finds
     # and believes.
     if info.get("port"):
-        boardlib.unpublish_board(info["port"])
+        tailscale.unpublish_board(info["port"])
     try:
         os.remove(live.path(".board.json"))
     except OSError:
@@ -551,12 +550,12 @@ def cmd_open(live, args):
     # -- comes back.
     was = live.state().get("chapter") or ""
     if (chapter or "") != was:
-        parked = boardlib.park_handoff(live.root, was)
+        parked = handoff.park_handoff(live.root, was)
         if parked:
             print("  handoff for %s parked at %s"
                   % (was or "the last sitting", os.path.relpath(parked, live.root)))
     cmd_archive(live, [])
-    if (chapter or "") != was and boardlib.restore_handoff(live.root, chapter):
+    if (chapter or "") != was and handoff.restore_handoff(live.root, chapter):
         print("  handoff from the last sitting on this chapter is back")
     live.set_state(course=course, chapter=chapter, session=session or "lecture",
                    finished=None, hw=None,
@@ -688,7 +687,7 @@ def cmd_write(live, args):
     # committed to the transcript. The tutor is expected to have caught this on
     # the wire; this catches the agent that is not ours, and it only strips a
     # block the card OPENS with, because the body of a lesson is not ours to edit.
-    clean = boardlib.strip_reasoning(body, leading_only=True)
+    clean = reasoning.strip_reasoning(body, leading_only=True)
     if clean.strip():
         if clean != body:
             print("board write: dropped a block of model reasoning from the top "
@@ -702,7 +701,7 @@ def cmd_write(live, args):
     #
     # `--force` exists because the judgement is a heuristic and a lesson ABOUT
     # how models reason is a real lesson somebody may one day want to write.
-    if "--force" not in args and boardlib.reads_as_reasoning(body):
+    if "--force" not in args and reasoning.reads_as_reasoning(body):
         print("board write: this reads as deliberation rather than a card -- it "
               "talks about the student instead of to them, or narrates its own "
               "thinking. Nothing was written.\n"
@@ -809,7 +808,7 @@ def hw_build(live, st):
     finished-looking document missing the exercise the evening was spent on, and
     nothing about it says so.
     """
-    tex = os.path.join(live.root, st["rel"])
+    tex_path = os.path.join(live.root, st["rel"])
     script = os.path.join(live.root, "scripts", "build.sh")
     # The same environment the built-in compile gets. A course's own build.sh
     # knows where TeX lives on the machine it was written on and nowhere else --
@@ -819,16 +818,16 @@ def hw_build(live, st):
     # the failure as the document's. `tex_bin_dirs` already knows every place a
     # TeX lives on either machine; there is no reason only half of this file
     # should get to use it.
-    env = boardlib.tex_env([os.path.join(live.root, "latex"),
-                            os.path.join(TOOL, "tex")])
+    env = tex.tex_env([os.path.join(live.root, "latex"),
+                       os.path.join(TOOL, "tex")])
     if os.path.exists(script):
-        p = subprocess.run(["bash", script, tex], cwd=live.root, env=env,
+        p = subprocess.run(["bash", script, tex_path], cwd=live.root, env=env,
                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         out = p.stdout.decode("utf-8", "replace").strip()
         code = p.returncode
     else:
-        out = compile_tex(live, tex)
-        code = 0 if os.path.exists(os.path.splitext(tex)[0] + ".pdf") else 1
+        out = compile_tex(live, tex_path)
+        code = 0 if os.path.exists(os.path.splitext(tex_path)[0] + ".pdf") else 1
 
     # A failure that names nothing is the one that wastes an evening: the tutor
     # reported "FAILED" all session and the student reasonably read it as a
@@ -844,9 +843,9 @@ def hw_build(live, st):
     elif code != 0 and not out:
         out = ("FAILED: scripts/build.sh exited %d and printed nothing. It "
                "discards its own output; run it directly to see why." % code)
-    pdf = os.path.splitext(tex)[0] + ".pdf"
+    pdf = os.path.splitext(tex_path)[0] + ".pdf"
     if not os.path.exists(pdf):
-        found = glob.glob(os.path.join(os.path.dirname(tex), "build", "*.pdf"))
+        found = glob.glob(os.path.join(os.path.dirname(tex_path), "build", "*.pdf"))
         pdf = found[0] if found else None
     record = {"ok": code == 0, "at": time.time(),
               "iso": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -1237,7 +1236,7 @@ def cmd_recap(live, args):
         # land -- and should certainly not be fed its own private working back as
         # though it were the lesson so far.
         meta_r, body_r = card_meta(raw)
-        clean = boardlib.card_body(body_r)
+        clean = reasoning.card_body(body_r)
         if clean != body_r:
             raw = raw[:len(raw) - len(body_r)] + clean
         print("\n--- %s, in full ---\n%s" % (n, raw.strip()))
@@ -1356,7 +1355,7 @@ def cmd_export(live, args):
 def compile_tex(live, path):
     """Fallback compile, for a course with no build script of its own."""
     outdir = os.path.dirname(path)
-    env = boardlib.tex_env([
+    env = tex.tex_env([
         os.path.join(live.root, "latex"),
         os.path.join(TOOL, "tex"),
     ])
@@ -1383,14 +1382,14 @@ def compile_tex(live, path):
 # no LAN route between them. Tailscale gives both machines an address on the
 # same private network wherever they happen to be.
 # ---------------------------------------------------------------------------
-TS_DIR = boardlib.TS_DIR
-TS_SOCK = boardlib.TS_SOCK
+TS_DIR = tailscale.TS_DIR
+TS_SOCK = tailscale.TS_SOCK
 TS_LOG = os.path.join(TS_DIR, "tailscaled.log")
 
 
 def ts(*args, **kw):
     """Run the tailscale CLI, whether it is ours or the system's."""
-    prefix, kind = boardlib.tailscale_cli()
+    prefix, kind = tailscale.tailscale_cli()
     if not prefix:
         return 1, "tailscale is not installed"
     cmd = prefix + list(args)
@@ -1521,8 +1520,8 @@ def serve_target(port):
     bypass the fallback the whole design exists to provide. Anywhere else the name
     points at the board's own port.
     """
-    if boardlib.machine_shape() == "always-on host":
-        follow = boardlib.follow_config()
+    if machine.machine_shape() == "always-on host":
+        follow = machine.follow_config()
         return "http://" + (follow.get("listen") or "127.0.0.1:8844")
     return "http://127.0.0.1:%d" % port
 
@@ -1576,7 +1575,7 @@ def cmd_vpn(live, args):
         print("tailscale stopped")
         return 0
 
-    prefix, kind = boardlib.tailscale_cli()
+    prefix, kind = tailscale.tailscale_cli()
     if kind == "system":
         # Tailscale is already installed and running here -- a Mac, typically.
         # There is nothing for us to start, and starting a second daemon would
@@ -1609,7 +1608,7 @@ def cmd_vpn(live, args):
     if kind == "missing":
         print("tailscale is not installed. To reach the board from another\n"
               "network you need it on this machine:\n\n"
-              + boardlib.tailscale_download_hint(), file=sys.stderr)
+              + tailscale.tailscale_download_hint(), file=sys.stderr)
         return 1
 
     if not ts_check_owner("--force" in args):
@@ -1625,8 +1624,8 @@ def cmd_vpn(live, args):
         # changing networks -- and its address never changes.
         for n, a in enumerate(args):
             if a == "--hostname" and n + 1 < len(args):
-                boardlib.set_tailnet_hostname(args[n + 1])
-        name = boardlib.tailnet_hostname()
+                tailscale.set_tailnet_hostname(args[n + 1])
+        name = tailscale.tailnet_hostname()
         code, out = ts("up", "--hostname=" + name, "--accept-dns=false", timeout=20)
         _, status = ts("status")
         if "Log in at:" in status:
@@ -1820,7 +1819,7 @@ def cmd_eyes(live, args):
     with open(tex, "w", encoding="utf-8") as fh:
         fh.write(EYES_DOC % {"token": token, "word": word, "a": a, "b": b})
 
-    env = boardlib.tex_env()
+    env = tex.tex_env()
     proc = subprocess.run(
         ["pdflatex", "-interaction=nonstopmode", "-halt-on-error",
          "-output-directory=" + stamp, tex],
@@ -1856,7 +1855,7 @@ def cmd_eyes(live, args):
 
 def machine_shape():
     """What this machine is for. Platform knowledge, so it lives in boardlib."""
-    return boardlib.machine_shape()
+    return machine.machine_shape()
 
 
 def cmd_limit(live, args):
@@ -1876,14 +1875,14 @@ def cmd_limit(live, args):
     that came back early should not have to wait out a guess. A turn going
     through clears it too, without anyone typing anything.
     """
-    rec = boardlib.limit_record()
+    rec = limits.limit_record()
     if "--set" in args:
         n = args[args.index("--set") + 1] if args.index("--set") + 1 < len(args) else "3600"
-        boardlib.mark_limited(time.time() + float(n))
+        limits.mark_limited(time.time() + float(n))
         print("marked out of allowance for %ss" % n)
         return 0
     if "--clear" in args:
-        print("cleared" if boardlib.clear_limited() else "nothing was recorded")
+        print("cleared" if limits.clear_limited() else "nothing was recorded")
         return 0
     if not rec:
         print("allowance: fine  (nothing recorded on %s)" % this_node())
@@ -1911,19 +1910,19 @@ def cmd_egress(live, args):
     egress turns that into a tutor which listens, fails every turn, and says so
     only in a log.
     """
-    node = boardlib.exit_node()
+    node = egress.exit_node()
     print("exit node: %s" % (node["name"] if node else "none (direct)"))
-    print("probe:     %s" % ", ".join(boardlib.egress_probe_urls()))
-    ok = boardlib.egress_ok()
+    print("probe:     %s" % ", ".join(egress.egress_probe_urls()))
+    ok = egress.egress_ok()
     print("egress:    %s" % ("reachable" if ok else "NOT REACHABLE"))
     if ok:
         if node:
-            boardlib.remember_good_exit_node(node["ip"])
+            egress.remember_good_exit_node(node["ip"])
         return 0
     if "--repair" not in args:
         print("\na turn cannot get out from here. rotate with:  board egress --repair")
         return 1
-    ok, detail = boardlib.rotate_exit_node(log=lambda m: print("  " + m))
+    ok, detail = egress.rotate_exit_node(log=lambda m: print("  " + m))
     print("\n%s" % ("now reachable through %s" % detail if ok else
                      "could not repair: %s" % detail))
     return 0 if ok else 1
@@ -1938,11 +1937,11 @@ def cmd_node(live, args):
     shipped fix appears not to have landed.
     """
     want = next((a for a in args if not a.startswith("-")), None)
-    cluster = not boardlib.should_pin_node_name()
+    cluster = not machine.should_pin_node_name()
     if not want:
-        pinned = boardlib.node_name_pinned()
+        pinned = machine.node_name_pinned()
         print("node:    %s%s" % (this_node(), "  (pinned)" if pinned else ""))
-        print("system:  %s" % boardlib.system_node_name())
+        print("system:  %s" % machine.system_node_name())
         if pinned and cluster:
             print("\nthis machine is on a cluster, where the name changes between")
             print("allocations because it is a different machine each time. A pin here")
@@ -1951,7 +1950,7 @@ def cmd_node(live, args):
         elif not pinned and not cluster:
             print("\nnot pinned: this machine takes its name from the network, and a")
             print("rename orphans every board record written under the old one.")
-            print("pin it with:  board node %s" % boardlib.system_node_name())
+            print("pin it with:  board node %s" % machine.system_node_name())
         elif not pinned:
             print("\nnot pinned, which is right on a cluster: the name changes between")
             print("allocations because the machine does.")
@@ -1959,18 +1958,18 @@ def cmd_node(live, args):
 
     if want == "--unpin" or "--unpin" in args:
         try:
-            os.remove(boardlib.NODE_NAME_FILE)
+            os.remove(machine.NODE_NAME_FILE)
         except OSError:
             pass
         print("unpinned; this machine is '%s', from the system"
-              % boardlib.system_node_name())
+              % machine.system_node_name())
         return 0
 
     was = this_node()
     if cluster:
         print("warning: Slurm answers here, so this is a cluster node and its name")
         print("is supposed to change between allocations. Pinning one is usually wrong.")
-    now = boardlib.pin_node_name(want)
+    now = machine.pin_node_name(want)
     print("this machine is '%s'%s" % (now, "" if now == was else ", was '%s'" % was))
     if now != was:
         print("\nrecords written as '%s' are this machine's again only if they say so."
@@ -1983,7 +1982,7 @@ def cmd_node(live, args):
 def cmd_doctor(live, args):
     import platform as _pl
     import shutil as _sh
-    env_path = boardlib.tex_env().get("PATH", "")
+    env_path = tex.tex_env().get("PATH", "")
     ok = True
     print("system:   %s %s" % (_pl.system(), _pl.machine()))
     print("shape:    %s" % machine_shape())
@@ -2005,8 +2004,8 @@ def cmd_doctor(live, args):
     cfg = read_config(live.root)
     print("repo:     %s" % live.root)
     print("course:   %s  (%s mode)" % (cfg["name"], cfg["mode"]))
-    pinned = boardlib.node_name_pinned()
-    sysname = boardlib.system_node_name()
+    pinned = machine.node_name_pinned()
+    sysname = machine.system_node_name()
     print("node:     %s%s" % (this_node(),
                               "  (pinned)" if pinned else
                               "  (NOT pinned — the network can rename this machine)"))
@@ -2014,21 +2013,21 @@ def cmd_doctor(live, args):
         print("          the system currently says '%s'; the pinned name is what "
               "every record uses" % sysname)
     print("port:     %d (default for this repo)" % default_port(live.root))
-    lim = boardlib.limit_record()
+    lim = limits.limit_record()
     if lim:
         print("allowance: GONE until %s — '%s' has nothing left to spend here"
               % (time.strftime("%H:%M", time.localtime(lim["until"])),
                  lim.get("agent") or "the tutor"))
-    xn = boardlib.exit_node()
+    xn = egress.exit_node()
     if xn:
         print("exit node: %s  (every request a tutor makes leaves from there)"
               % xn["name"])
-        print("egress:   %s" % ("reachable" if boardlib.egress_ok()
+        print("egress:   %s" % ("reachable" if egress.egress_ok()
                                 else "NOT REACHABLE — board egress --repair"))
     owner = ts_owner()
     v4, tsname = ts_info()
     print("tailnet:  %s  (this machine calls itself '%s')"
-          % (tsname or "not linked", boardlib.tailnet_hostname()))
+          % (tsname or "not linked", tailscale.tailnet_hostname()))
     if owner:
         print("vpn host: %s%s" % (owner.get("node"),
                                   "" if owner.get("node") == this_node() else "  (not this one)"))

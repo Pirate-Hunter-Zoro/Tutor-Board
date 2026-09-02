@@ -108,10 +108,7 @@ check("the config carries a session length", "session_turns" in tutor.DEFAULT_CO
 import importlib.machinery as _m  # noqa: E402
 import importlib.util as _u       # noqa: E402
 
-_loader = _m.SourceFileLoader("serve_mod", os.path.join(ROOT, "serve.py"))
-_spec = _u.spec_from_loader("serve_mod", _loader)
-serve_mod = _u.module_from_spec(_spec)
-_loader.exec_module(serve_mod)
+from tutorboard import sense as serve_mod                    # noqa: E402
 
 teach = serve_mod.code_sense("", "teach")
 do = serve_mod.code_sense("", "do")

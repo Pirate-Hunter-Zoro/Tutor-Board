@@ -2415,6 +2415,24 @@ function repairPages() {
     var have = sentOn[t.answers];
     if (!have || (t.t || 0) >= have.t) sentOn[t.answers] = { t: t.t || 0, page: page };
   });
+  /* Which question the RECORD says each page was sent for. A board sitting on a
+     page that belongs to somebody else's question is wrong on evidence, not on
+     suspicion -- and it is the one kind of wrong the conservative tests above
+     cannot see, because such an entry looks perfectly healthy: the page exists,
+     no other board claims it in this browser, and there is ink on it. It is just
+     somebody else's ink.
+
+     Reported from the board, looking back over a lesson: "their recordings are
+     out of wack. My writing from one section is wrong and came from a later
+     section, vice versa." Both halves of that are this: two boards swapped, each
+     looking fine on its own. */
+  var pageOwner = {};
+  for (var qq in sentOn) {
+    var owned = sentOn[qq].page;
+    if (pageOwner[owned] === undefined) pageOwner[owned] = qq;
+    else if (pageOwner[owned] !== qq) pageOwner[owned] = null;   /* shared: no claim */
+  }
+
   var changed = false;
   for (var q in sentOn) {
     var want = sentOn[q].page;
@@ -2428,7 +2446,8 @@ function repairPages() {
     var rotten = now === undefined
               || now >= n
               || pageOwnedByOther(now, key)
-              || (writer.inkOn && writer.inkOn(now) === 0 && writer.inkOn(want) > 0);
+              || (writer.inkOn && writer.inkOn(now) === 0 && writer.inkOn(want) > 0)
+              || (pageOwner[now] && pageOwner[now] !== q);
     if (!rotten) continue;
     boardPage[key].p = want;
     changed = true;

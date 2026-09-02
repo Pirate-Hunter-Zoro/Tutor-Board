@@ -45,7 +45,7 @@ def check(name, cond):
 sandbox = tempfile.mkdtemp(prefix="tutor-egress-")
 os.environ["BOARD_STATE_DIR"] = sandbox
 sys.path.insert(0, ROOT)
-import boardlib  # noqa: E402
+from tutorboard.net import egress, tailscale
 
 # --- reading the tailscale picture ------------------------------------------
 STATUS = {
@@ -63,13 +63,13 @@ STATUS = {
     }
 }
 
-node = boardlib.exit_node(STATUS)
+node = egress.exit_node(STATUS)
 check("the exit node in use is found, by name and address",
       node == {"name": "si-lju-wg-001", "ip": "100.97.155.16"})
 check("no exit node reads as none rather than as an error",
-      boardlib.exit_node({"Peer": {"d": STATUS["Peer"]["d"]}}) is None)
+      egress.exit_node({"Peer": {"d": STATUS["Peer"]["d"]}}) is None)
 
-opts = boardlib.exit_node_options(STATUS)
+opts = egress.exit_node_options(STATUS)
 names = [o["name"] for o in opts]
 check("every peer offering to be an exit node is an option", len(opts) == 4)
 check("and a peer that is not offering is not one", "somebodys-laptop" not in names)
@@ -94,7 +94,7 @@ import urllib.request  # noqa: E402
 real_urlopen = urllib.request.urlopen
 urllib.request.urlopen = fake_urlopen
 check("a 401 means reachable -- we asked whether packets arrive, not whether we may in",
-      boardlib.egress_ok() is True)
+      egress.egress_ok() is True)
 
 
 def dead(req, timeout=None):
@@ -102,23 +102,23 @@ def dead(req, timeout=None):
 
 
 urllib.request.urlopen = dead
-check("a connection failure means not reachable", boardlib.egress_ok() is False)
+check("a connection failure means not reachable", egress.egress_ok() is False)
 urllib.request.urlopen = real_urlopen
 
 check("the endpoints are configuration with a default, never a fact in the code",
-      boardlib.DEFAULT_EGRESS_PROBE and callable(boardlib.egress_probe_urls))
-lib = open(os.path.join(ROOT, "boardlib.py"), encoding="utf-8").read()
+      egress.DEFAULT_EGRESS_PROBE and callable(egress.egress_probe_urls))
+lib = open(os.path.join(ROOT, "tutorboard", "net", "egress.py"), encoding="utf-8").read()
 check("and the default is the only place a provider is named",
       lib.count("api.anthropic.com") == 1)
 
 # --- rotation ---------------------------------------------------------------
 moved = []
-boardlib._ts_status = lambda: STATUS
-boardlib.set_exit_node = lambda ip: (moved.append(ip), True)[1]
+tailscale._ts_status = lambda: STATUS
+egress.set_exit_node = lambda ip: (moved.append(ip), True)[1]
 
 # Nothing works: the one the person chose has to be put back.
-boardlib.egress_ok = lambda timeout=12: False
-ok, detail = boardlib.rotate_exit_node(tries=2, log=None, settle=0)
+egress.egress_ok = lambda timeout=12: False
+ok, detail = egress.rotate_exit_node(tries=2, log=None, settle=0)
 check("when nothing works the rotation gives up rather than wandering", not ok)
 check("and puts back the exit node the person actually chose",
       moved and moved[-1] == "100.97.155.16")
@@ -136,25 +136,25 @@ def works_on_second(timeout=12):
     return tried["n"] >= 2
 
 
-boardlib.egress_ok = works_on_second
-ok, detail = boardlib.rotate_exit_node(tries=4, log=None, settle=0)
+egress.egress_ok = works_on_second
+ok, detail = egress.rotate_exit_node(tries=4, log=None, settle=0)
 check("a working exit node is found and kept", ok)
 check("and it is not the broken one it started on", moved[-1] != "100.97.155.16")
 check("and it is remembered, since the only evidence one works is that it did",
-      moved[-1] in json.load(open(boardlib.EGRESS_KNOWN_GOOD)))
+      moved[-1] in json.load(open(egress.EGRESS_KNOWN_GOOD)))
 
 # Known-good goes first next time.
 moved[:] = []
 tried["n"] = 0
-boardlib.egress_ok = lambda timeout=12: True
-ok, detail = boardlib.rotate_exit_node(tries=4, log=None, settle=0)
+egress.egress_ok = lambda timeout=12: True
+ok, detail = egress.rotate_exit_node(tries=4, log=None, settle=0)
 check("an exit node known to have worked is tried before the rest",
-      ok and moved[0] in json.load(open(boardlib.EGRESS_KNOWN_GOOD)))
+      ok and moved[0] in json.load(open(egress.EGRESS_KNOWN_GOOD)))
 
 # With no exit node at all there is nothing here to repair, and the fault is
 # real -- it must not be reported as fixed.
-boardlib._ts_status = lambda: {"Peer": {}}
-ok, detail = boardlib.rotate_exit_node(tries=2, log=None, settle=0)
+tailscale._ts_status = lambda: {"Peer": {}}
+ok, detail = egress.rotate_exit_node(tries=2, log=None, settle=0)
 check("with no exit node in use, a broken egress is not claimed to be repaired",
       not ok and "no exit node" in detail)
 
@@ -162,9 +162,9 @@ check("with no exit node in use, a broken egress is not claimed to be repaired",
 tutor_src = open(os.path.join(ROOT, "bin", "tutor"), encoding="utf-8").read()
 check("the tutor asks about egress only after a turn has actually failed",
       "if err:" in tutor_src and
-      tutor_src.index("if err:") < tutor_src.index("boardlib.egress_ok()"))
+      tutor_src.index("if err:") < tutor_src.index("egress.egress_ok()"))
 check("and rotates when it is the network rather than the tutor",
-      "boardlib.rotate_exit_node(" in tutor_src)
+      "egress.rotate_exit_node(" in tutor_src)
 check("and re-answers the message whose turn was lost, rather than waiting",
       "pending = out" in tutor_src and "out, pending = pending, None" in tutor_src)
 check("and says plainly when it could not repair it",

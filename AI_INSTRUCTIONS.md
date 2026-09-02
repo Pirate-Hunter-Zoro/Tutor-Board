@@ -58,12 +58,59 @@ preferred".
 - Something the student has to operate. They open a URL. That is the whole interface. Anything
   that would make them start, restart, or troubleshoot a process is a bug in the design.
 
+## Where code goes, and where it stays
+
+**This is a package, and it is organised by what a thing is ABOUT.** It was not always: `serve.py`
+was 2,806 lines and `boardlib.py` another 1,619, and the cost was never length — it was that
+finding out what `/switch` did meant reading past everything else, and that two people editing two
+unrelated things edited the same enormous method.
+
+```
+serve.py                the entry point, and nothing else. It keeps its name and
+                        its command line because a board is a long-lived process
+                        identified BY that command line.
+tutorboard/
+  paths ports choice    what this machine knows about itself
+  machine processes tex what this machine IS, and what is alive on it
+  limits reasoning      what a model may say, and when it may not say it
+  handoff sense         what a turn means, and what it leaves behind
+  machines.py           the other machines, and what each can teach
+  net/                  reaching them: tailscale, socks, boards, egress
+  course/               a course on disk: repo, config, document, homework,
+                        review, syllabus
+  lesson/               what is on the board now: cards, turns, notes, slate,
+                        archive, state, git, uploads
+  server/               the board itself: app, handler, hub, tikz, spawn,
+                        multipart, and routes/ — one module per family of paths
+  cli/                  reserved for the commands; today they are bin/
+```
+
+**Maintaining it is part of every change, not a separate task.** Concretely:
+
+- **A new route goes in `server/routes/`, in the family it belongs to.** Never back into
+  `handler.py`, which keeps the plumbing and the table and nothing else. `test/choice.py` checks
+  this and will fail if a route drifts home.
+- **A new rule goes in the module that owns the subject**, not in whatever file already has the
+  variable in scope. If it does not fit any of them, that is a new module, not a drawer.
+- **Import modules, never names.** `from tutorboard import machine`, then `machine.node_name()` —
+  not `from tutorboard.machine import node_name`. A test that moves `paths.CHOSEN` or replaces
+  `machine.machine_shape` must move it for every caller, and `from x import y` takes a copy of the
+  binding and quietly defeats both. This is not style; it is why the suite can isolate anything.
+- **A module name is reserved vocabulary.** Do not name a local `state`, `turns`, `cards`, `notes`,
+  `tex`, `handoff` or `hub`. Shadowing the module it came from is the single failure this
+  reorganisation produced most often, and it is invisible until the line runs.
+- **One place derives a path.** `paths.TOOL` is where the tool is; nothing computes it from its own
+  `__file__` again, because a module that moves takes a hand-rolled `dirname(dirname(...))` with it
+  and the only symptom is LaTeX not finding `board-macros.tex`.
+- **A suite that reads source reads the module that owns the rule.** That is what makes "where is
+  this decided" answerable, and it keeps the tests honest about the layout.
+
 ## Invariants
 
 - **One process per course repository.** Ports derive from the directory name so two courses can
   hold boards at once, and derive it identically on every machine — the always-on host cannot read
   the compute node's filesystem, so a shared rule is the only way it knows where to knock. A name
-  maps to a short *sequence* of ports (`boardlib.port_sequence`) rather than to one, because a hash
+  maps to a short *sequence* of ports (`tutorboard.ports.port_sequence`) rather than to one, because a hash
   cannot promise distinct numbers and did not: two courses collided and the second to start simply
   failed to come up. A start walks the sequence for a free port and records which one it took.
 - **Which course the address serves is a decision, not a race.** `chosen.json` records the course a
@@ -100,7 +147,7 @@ preferred".
   to keep that out of the content they return; several of the free ones do not. A card is the
   lesson, is pushed to every device the moment it is written, and is committed to the transcript, so
   there is no undo — which is why nothing here trusts a model to have kept its thinking to itself.
-  `boardlib.strip_reasoning` is the one place that knows what thinking looks like: the tutor strips
+  `tutorboard.reasoning.strip_reasoning` is the one place that knows what thinking looks like: the tutor strips
   as it comes off the wire, and `board write` strips again on the way in, so an agent this
   repository has never heard of is covered as well. The second gate takes only a block the card
   *opens* with — a lesson may be *about* reasoning models and say the word in earnest, and the body
@@ -108,7 +155,7 @@ preferred".
 - **And thinking with no tag on it is REFUSED, not stripped.** On 1 September 2026 the same course
   got a card that was eight hundred tokens of *"I need to read the student's response… Hmm, wait.
   Let me re-read"*, cut off mid-sentence, with no tag, channel or bracket anywhere in it. There is
-  nothing in that to strip: the whole reply is the thought. `boardlib.reads_as_reasoning` asks a
+  nothing in that to strip: the whole reply is the thought. `tutorboard.reasoning.reads_as_reasoning` asks a
   different question — is this addressed **to** the student or **about** them — and the answer is
   acted on by refusing: the free chain passes over a model that deliberates and tries the next one,
   `board write` writes nothing and says why (`--force` for somebody who means it), and the readers
@@ -202,7 +249,7 @@ preferred".
   address can only ever point at a board the always-on host is running itself, which is switching
   that cannot work however correct the arbitration above it is. It went unseen for a week because
   every test of the arbitration passed. And never look for the far side at a hostname out of the
-  config alone: a compute node's name is an allocation. `boardlib.locate_course` asks the tailnet.
+  config alone: a compute node's name is an allocation. `tutorboard.net.boards.locate_course` asks the tailnet.
 - **The machine is the person's choice, not an inference.** Which courses exist is a property of a
   machine — they are whatever is cloned beside the board — so a course name can mean two clones and
   the hub must be able to say which. `/hosts.json` lists every machine on the tailnet running a
@@ -228,7 +275,7 @@ preferred".
   front of it is thinking, so it is judged by whether its process still exists — `tutor` records
   the pid before `execvp`, which is the pid the assistant then has. Applying the heartbeat rule to
   both is why the board's indicator was dark in every ordinary session; applying the pid rule to a
-  daemon would believe a killed one whose record looked fresh. `boardlib.agent_is_attached` is the
+  daemon would believe a killed one whose record looked fresh. `tutorboard.processes.agent_is_attached` is the
   single place that decides, and the server, `tutor where` and `agent_live` all ask it.
   `headless --stop` skips interactive records: someone is sitting in front of that terminal.
 - **A pid on a shared filesystem proves nothing.** Every record that crosses `live/` carries the
@@ -384,7 +431,8 @@ preferred".
   eyes` settles it by experiment; prefer running it to recalling an answer.
 - **Do not promise handwriting recognition.** Ink to text or to LaTeX needs a trained engine. The
   tutor reads the PNG; that is the design, and it is why the slate does not need one.
-- **Platform knowledge lives in `boardlib.py`.** Where TeX is, which `tailscale` is in charge.
+- **Platform knowledge lives under `tutorboard/`, in the module for it.** Where TeX is (`tex`),
+  which `tailscale` is in charge (`net/tailscale`), what this machine is called (`machine`).
   Do not hardcode an architecture directory or a socket path anywhere else; the board has to run
   on a Mac and a cluster node without noticing the difference.
 - **Nothing model-specific, ever.** The interface is a command line and a directory of files. No
@@ -415,7 +463,7 @@ preferred".
   `HostName` set takes its name from the network, and Tailscale's DNS renamed this one mid-session
   — and it was being derived four different ways in four files (`os.uname()` in the launcher,
   `socket.gethostname()` in the board and the server), which can disagree on one machine.
-  `boardlib.node_name()` is the only place allowed to answer, it prefers a pinned file over
+  `tutorboard.machine.node_name()` is the only place allowed to answer, it prefers a pinned file over
   anything the network says, and `board start` pins it the first time. Never reach for
   `gethostname()` or `uname()` again. `test/node.py` holds it.
 - **The assistant belongs to the course, not to the terminal.** One is alive at a time, in the

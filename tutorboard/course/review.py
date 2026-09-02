@@ -25,7 +25,7 @@ Standard library only, like everything else.
 
 import os
 
-import syllabus
+from . import syllabus
 
 # What is not a part of a project. Build output, dependencies, the board's own
 # working directory, and anything hidden: none of them is a thing to be asked

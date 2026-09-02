@@ -63,7 +63,8 @@ import urllib.request
 
 TOOL = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, TOOL)
-import boardlib  # noqa: E402
+from tutorboard import choice, paths, ports
+from tutorboard.net import boards, tailscale
 
 CONFIG_DIR = os.path.join(
     os.environ.get("XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config")),
@@ -107,7 +108,7 @@ def courses(cfg):
 
 def default_port(root):
     """Stable per-repository port, identical to bin/board's."""
-    return boardlib.default_port(os.path.basename(root))
+    return ports.default_port(os.path.basename(root))
 
 
 def local_port(c):
@@ -156,9 +157,9 @@ def active_course(cands):
     Modification time is what decides when NOBODY has chosen anything, which is
     the only question it can honestly answer.
     """
-    rec = boardlib.chosen_course()
+    rec = choice.chosen_course()
     for c in cands:
-        if boardlib.same_dir(c["root"], rec.get("root")) or c["dir"] == rec.get("dir"):
+        if paths.same_dir(c["root"], rec.get("root")) or c["dir"] == rec.get("dir"):
             return c
     best = None
     for c in cands:
@@ -210,7 +211,7 @@ def probe(host, port, timeout=2.0):
     # in userspace mode, which cannot open a tailnet connection any other way.
     # This file used to do it the first way only, so on such a machine every
     # question about the other side answered "nobody is there".
-    health = boardlib.board_health(host, port, timeout=timeout)
+    health = boards.board_health(host, port, timeout=timeout)
     _HEALTH[key] = (now, health)
     return health
 
@@ -267,7 +268,7 @@ def find_course(node, c, timeout=2.0):
     off its usual number is still found -- and confirms identity at each step, so
     a course sitting on somebody else's number is not mistaken for them.
     """
-    for port in boardlib.port_sequence(c["dir"]):
+    for port in ports.port_sequence(c["dir"]):
         health = probe(node, port, timeout=timeout)
         if identifies_as(health, c["dir"]):
             return port
@@ -304,13 +305,13 @@ def node_choice(node, cands):
     # chosen, so a tap over there was published, correct, and invisible. The
     # address stayed where it was while `/health` on both machines said plainly
     # that somebody had asked for the other course.
-    hosts += [h for h in boardlib.tailnet_peers() if h != node]
+    hosts += [h for h in tailscale.tailnet_peers() if h != node]
     # And not a machine the tailnet says has gone home. `node` is a name out of a
     # config file, so it long outlives the machine being up, and every course in
     # `cands` is then knocked on at a port that cannot answer -- the walk above
     # is deliberately exhaustive, which makes an absent node the most expensive
     # host on the list. Six seconds per course, three walks a tick.
-    hosts = [h for h in hosts if not boardlib.peer_is_down(h)]
+    hosts = [h for h in hosts if not tailscale.peer_is_down(h)]
     # Whoever answered last, first: an ordinary tick is then one request.
     if _ASKED[0] and _ASKED[1]:
         health = probe(_ASKED[0], _ASKED[1], timeout=1.5)
@@ -357,9 +358,9 @@ def local_choice(cands):
     So ask a board instead of only reading a file. They publish the record they
     actually wrote.
     """
-    ports = ([_ASKED_LOCAL[0]] if _ASKED_LOCAL[0] else []) + \
+    candidates = ([_ASKED_LOCAL[0]] if _ASKED_LOCAL[0] else []) + \
             [default_port(c["root"]) for c in cands]
-    for port in ports:
+    for port in candidates:
         health = probe("127.0.0.1", port, timeout=1.0)
         if not health:
             continue
@@ -402,7 +403,7 @@ def wanted_course(remote_choice, local_published=None):
     there is recorded over there and would otherwise never be seen here.
     """
     best = (0.0, None)
-    for rec in (boardlib.chosen_course(), local_published, remote_choice):
+    for rec in (choice.chosen_course(), local_published, remote_choice):
         if not rec or not rec.get("dir"):
             continue
         try:
@@ -435,13 +436,13 @@ def remote_target(node, cands, want=None, hint=None):
     # out and the walk of the tailnet at the end is the honest answer anyway --
     # and on the evening this was written the configured node was asleep, so all
     # a tap got for its twenty seconds was the same None from a longer route.
-    if node and boardlib.peer_is_down(node):
+    if node and tailscale.peer_is_down(node):
         node = None
     if not node:
         # No configured node is not the same as no other machine. The tailnet
         # knows who is up; ask it before giving up on the far side entirely.
         if want:
-            found = boardlib.locate_course(want, skip_local=True, timeout=1.5)
+            found = boards.locate_course(want, skip_local=True, timeout=1.5)
             if found:
                 return found[0], found[1], True
         return None
@@ -469,7 +470,7 @@ def remote_target(node, cands, want=None, hint=None):
     # ports are derived from its name, so no configuration is needed to find one:
     # knock on every machine that is up.
     if want:
-        found = boardlib.locate_course(want, skip_local=True, timeout=1.5)
+        found = boards.locate_course(want, skip_local=True, timeout=1.5)
         if found:
             return found[0], found[1], True
 
@@ -511,7 +512,7 @@ def local_target(cands, want=None):
     recorded = local_port(active)
     if identifies_as(probe("127.0.0.1", recorded, timeout=1.0), active["dir"]):
         return "127.0.0.1", recorded, exact
-    for port in boardlib.port_sequence(active["dir"]):
+    for port in ports.port_sequence(active["dir"]):
         if port == recorded:
             continue
         health = probe("127.0.0.1", port, timeout=1.0)
@@ -559,7 +560,7 @@ def choose_target(node, cands, prefer="local"):
     """
     remote_choice = node_choice(node, cands)
     published = local_choice(cands)
-    mine = boardlib.chosen_course()
+    mine = choice.chosen_course()
     want = wanted_course(remote_choice, published)
     want_host = wanted_host(mine, published, remote_choice)
 
@@ -575,7 +576,7 @@ def choose_target(node, cands, prefer="local"):
     # course they also chose -- a named host does not entitle a board that is up
     # over there to take the address off the lesson somebody is in.
     if want_host:
-        here = (boardlib.tailnet_self() or "")
+        here = (tailscale.tailnet_self() or "")
         want_label = want_host.split(".")[0]
         named = []
         for t, w in order:
@@ -730,7 +731,7 @@ def forward(a, b):
 def ensure_serve(listen):
     """Point the tailnet HTTPS name at this proxy. `tailscale serve` proxies to a
     local backend fine; it only refuses a remote one, which is why this exists."""
-    prefix, kind = boardlib.tailscale_cli()
+    prefix, kind = tailscale.tailscale_cli()
     if not prefix:
         return
     host, port = listen.rsplit(":", 1)
@@ -750,7 +751,7 @@ def _choice_stamp():
     NOTICING is cheap and should not have to wait for it.
     """
     try:
-        return os.stat(boardlib.CHOSEN).st_mtime_ns
+        return os.stat(paths.CHOSEN).st_mtime_ns
     except OSError:
         return None
 
@@ -761,7 +762,7 @@ def _published_stamp():
     The file above is the cheap watch and it is not a sufficient one, for the
     reason already learned once and only half fixed: this process is started by
     launchd with whatever environment launchd hands it, and the boards are
-    started from a session, so `boardlib.CHOSEN` here is not always the path a
+    started from a session, so `paths.CHOSEN` here is not always the path a
     board writes. When they differ the stat never changes, the fast wake never
     fires, and every tap waits out the full interval -- which is the first half
     of "I had to tap it ten times".

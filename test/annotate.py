@@ -24,7 +24,16 @@ import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-import serve  # noqa: E402
+from tutorboard import sense
+from tutorboard.course import repo as course_repo
+from tutorboard.lesson import archive
+from tutorboard.lesson import git
+from tutorboard.lesson import notes
+from tutorboard.lesson import turns
+from tutorboard.server import handler
+from tutorboard.server import hub
+from tutorboard.server import tikz
+from http.server import ThreadingHTTPServer
 
 fails = []
 
@@ -39,23 +48,23 @@ def check(name, cond):
 
 tmp = tempfile.mkdtemp(prefix="tutor-ann-")
 json.dump({"name": "T", "mode": "math"}, open(os.path.join(tmp, "tutorboard.json"), "w"))
-repo = serve.Repo(tmp)
+repo = course_repo.Repo(tmp)
 open(os.path.join(repo.cards, "0003-a-card.md"), "w", encoding="utf-8").write(
     "---\nkind: lesson\ntitle: A card\n---\n\nSomething to mark up.\n")
 
-worker = serve.TikzWorker(repo)
+worker = tikz.TikzWorker(repo)
 worker.start()
-hub = serve.Hub(repo, worker)
-hub.payload = json.dumps(hub.build())
+board = hub.Hub(repo, worker)
+board.payload = json.dumps(board.build())
 
 sock = socket.socket()
 sock.bind(("127.0.0.1", 0))
 port = sock.getsockname()[1]
 sock.close()
-httpd = serve.ThreadingHTTPServer(("127.0.0.1", port), serve.Handler)
+httpd = ThreadingHTTPServer(("127.0.0.1", port), handler.Handler)
 httpd.daemon_threads = True
 httpd.repo = repo
-httpd.hub = hub
+httpd.hub = board
 threading.Thread(target=httpd.serve_forever, daemon=True).start()
 BASE = "http://127.0.0.1:%d" % port
 
@@ -82,28 +91,28 @@ try:
     check("a mark can be saved without being sent", status == 200 and body.get("ok"))
     check("it is stored against the card it sits on",
           os.path.isfile(os.path.join(repo.notes, "0003.json")))
-    check("no turn is created by merely saving", not serve.load_turns(repo))
+    check("no turn is created by merely saving", not turns.load_turns(repo))
 
-    notes = serve.load_notes(repo)
+    seen = notes.load_notes(repo)
     check("and the board gets it back on the next payload",
-          notes.get("0003") and notes["0003"][0]["p"][0] == 0.1)
+          seen.get("0003") and seen["0003"][0]["p"][0] == 0.1)
     # Saved is not sent, and after a reload the browser has no other way to tell
     # the difference. Marks autosaved and never handed over went on demanding a
     # decision every time anything else was sent, for ever.
     check("a saved-only mark is recorded as not sent",
-          serve.load_notes_sent(repo).get("0003") is False)
+          notes.load_notes_sent(repo).get("0003") is False)
     check("coordinates are the card's own, not the page's — so a reflow moves "
           "the ink with the words",
-          all(0.0 <= v <= 1.0 for v in notes["0003"][0]["p"]))
+          all(0.0 <= v <= 1.0 for v in seen["0003"][0]["p"]))
 
     # --- sending --------------------------------------------------------------
     status, body = post("/annotate/save", {"card": "0003", "strokes": strokes,
                                            "png": PNG, "send": True,
                                            "where": "near the top"})
     check("sending is accepted", status == 200 and body.get("turn"))
-    turns = serve.load_turns(repo)
-    check("it becomes a turn in the transcript", len(turns) == 1)
-    t = turns[0]
+    sent = turns.load_turns(repo)
+    check("it becomes a turn in the transcript", len(sent) == 1)
+    t = sent[0]
     check("of its own kind, distinct from a page of working", t["kind"] == "annotation")
     check("anchored to the card it was written on", t["answers"] == "0003")
     check("carrying the ink as an image the tutor can open", t["png"].endswith(".png"))
@@ -112,15 +121,15 @@ try:
     check("frozen, like every other answer — the card can be marked again later",
           "/answers/" in t["png"])
     check("and the card is now recorded as delivered",
-          serve.load_notes_sent(repo).get("0003") is True)
+          notes.load_notes_sent(repo).get("0003") is True)
     check("which the board is told about on the payload",
-          hub.build().get("notes_sent", {}).get("0003") is True)
+          board.build().get("notes_sent", {}).get("0003") is True)
 
     # A later change to the same card puts it back to undelivered, because a
     # plain save only ever arrives for a card that has just been drawn on.
     post("/annotate/save", {"card": "0003", "strokes": strokes + strokes, "png": PNG})
     check("marking it again makes it undelivered once more",
-          serve.load_notes_sent(repo).get("0003") is False)
+          notes.load_notes_sent(repo).get("0003") is False)
 
     with open(repo.messages_path, encoding="utf-8") as fh:
         line = json.loads([l for l in fh if l.strip()][-1])
@@ -135,9 +144,9 @@ try:
     status, body = post("/annotate/save", {"card": "0003", "strokes": strokes,
                                            "png": PNG, "send": True,
                                            "turn": t["id"]})
-    turns = serve.load_turns(repo)
-    check("marking the same card again revises that turn", len(turns) == 1)
-    check("and the revision is recorded", turns[0]["rev"] == 2)
+    sent = turns.load_turns(repo)
+    check("marking the same card again revises that turn", len(sent) == 1)
+    check("and the revision is recorded", sent[0]["rev"] == 2)
 
     # --- saving mid-session must not end the session --------------------------
     # `board push` from a terminal archives a code session, because a commit is
@@ -145,11 +154,11 @@ try:
     # different act: somebody putting the iPad down and wanting their work
     # committed. It must leave the lesson exactly where it was.
     before_cards = sorted(os.listdir(repo.cards))
-    before_turns = len(serve.load_turns(repo))
-    serve.run_push(repo, "a mid-session save")
+    before_turns = len(turns.load_turns(repo))
+    git.run_push(repo, "a mid-session save")
     check("a board save leaves the cards where they are",
           sorted(os.listdir(repo.cards)) == before_cards)
-    check("and the transcript intact", len(serve.load_turns(repo)) == before_turns)
+    check("and the transcript intact", len(turns.load_turns(repo)) == before_turns)
     check("and nothing archived out from under the student",
           not os.listdir(repo.archive))
     check("while still recording what happened, pass or fail",
@@ -171,14 +180,14 @@ try:
     check("and the set is bound to it", st.get("hw") == "homework/hw01/hw01.tex")
     check("and the badge will read homework", st.get("session") == "homework")
 
-    sense = serve.session_sense(repo)
+    line = sense.session_sense(repo)
     check("the tutor is pointed at the assignment sheet itself",
-          "sheet.pdf" in sense)
+          "sheet.pdf" in line)
     check("and told the problems are not its to choose",
-          "not yours to choose" in sense)
-    check("and told to do all of them, in order", "all of them, in order" in sense)
+          "not yours to choose" in line)
+    check("and told to do all of them, in order", "all of them, in order" in line)
     check("and not told to pick a manageable few, which is a lecture behaviour",
-          "manageable few" not in sense)
+          "manageable few" not in line)
 
     status, _ = post("/session", {"session": "homework", "hw": "hw99"})
     check("a set this course does not have is refused", status == 400)
@@ -202,7 +211,7 @@ try:
     check("and the sitting is labelled with it",
           repo.state().get("chapter") == "Ch 02 — Second chapter")
     check("the lesson that was open is filed, not discarded",
-          len(serve.list_archive(repo)) >= 1)
+          len(archive.list_archive(repo)) >= 1)
     check("and the board starts clean for the new chapter",
           not [n for n in os.listdir(repo.cards) if n.endswith(".md")])
 
@@ -240,5 +249,50 @@ finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
 print()
+# The controls are controls, not prose.
+#
+# Reported from the board: "sometimes the word 'Pen' gets highlighted in the
+# button that corresponds with the annotation writing options. And that makes the
+# annotation experience janky and intermittently stop writing." Press and hold a
+# button on a tablet and iOS selects its label; the selection then owns the next
+# drag, so the stroke that should have reached the ink layer never does.
+#
+# `body.annotating #board *` already refused selection over the lesson. The
+# annotation bar is fixed-position and sits OUTSIDE #board, so none of it applied
+# there -- and the bar is the one part of the screen a hand is on constantly.
+import re
+
+css = open(os.path.join(ROOT, "web", "board.css"), encoding="utf-8").read()
+# Comments sit inside the selector text once the file is split on braces,
+# and a selector with a paragraph in front of it matches nothing.
+css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+
+
+def rule_for(selector):
+    """Every declaration that applies to this selector, from every block.
+
+    All of them, not the first: `.annbar` is styled in one block for where it
+    sits and another for what it refuses, and reading only the first is how a
+    rule that IS there gets reported as missing.
+    """
+    out = []
+    for block in css.split("}"):
+        head, _, body = block.partition("{")
+        if any(part.strip() == selector for part in head.split(",")):
+            out.append(body)
+    return "\n".join(out)
+
+
+for sel in (".annbar", ".annbar *"):
+    got = rule_for(sel)
+    check("%s refuses selection, so holding a control cannot start one" % sel,
+          "user-select: none" in got)
+    check("and refuses the callout iOS puts on a long press (%s)" % sel,
+          "-webkit-touch-callout: none" in got)
+check("and its buttons take a tap without waiting to see if it is a zoom",
+      "touch-action: manipulation" in rule_for(".annbar button"))
+check("the title bar is held the same way and gets the same rule",
+      "user-select: none" in rule_for(".bar-right *"))
+
 print("%d FAILURES" % len(fails) if fails else "marks are anchored to the card they are about")
 sys.exit(1 if fails else 0)

@@ -230,6 +230,93 @@ function surface(saved, onPages) {
   window.close();
 }
 
+// ------------------------------------- two boards holding each other's working
+{
+  // The half the tests above could not see. Reported from the board, looking
+  // back over a lesson: "their recordings are out of wack. My writing from one
+  // section is wrong and came from a later section, vice versa."
+  //
+  // Two questions, each filed onto the page the OTHER one was sent from. Every
+  // conservative test passes: both pages exist, no two boards share a sheet in
+  // this browser, and both have ink on them. It is just the wrong ink. The only
+  // thing that can tell is the server's own record of which page each answer
+  // was handed in from -- so a board sitting on a page the record says belongs
+  // to another question is wrong on evidence, and gets moved.
+  const dom = new JSDOM(fs.readFileSync(path.join(WEB, 'board.html'), 'utf8'), {
+    runScripts: 'outside-only', pretendToBeVisual: true, url: 'https://board.test/board',
+  });
+  const { window } = dom;
+  window.HTMLCanvasElement.prototype.getContext = () =>
+    new Proxy({}, { get: () => () => {}, set: () => true });
+  window.HTMLCanvasElement.prototype.toDataURL = () => 'data:image/png;base64,';
+  Object.defineProperty(window.HTMLElement.prototype, 'clientWidth', { get: () => W });
+  Object.defineProperty(window.HTMLElement.prototype, 'clientHeight', { get: () => H });
+  window.HTMLElement.prototype.getBoundingClientRect = function () {
+    return { left: 0, top: 0, width: W, height: H, right: W, bottom: H, x: 0, y: 0 };
+  };
+  window.Element.prototype.scrollIntoView = function () {};
+  window.Element.prototype.setPointerCapture = function () {};
+  window.Element.prototype.releasePointerCapture = function () {};
+  window.requestAnimationFrame = (fn) => setTimeout(fn, 0);
+  window.renderMathInElement = () => {};
+  window.scrollTo = function () {};
+  window.EventSource = function () {
+    window.__es = this;
+    this.readyState = 1;
+    this.close = function () {};
+    this.addEventListener = function () {};
+  };
+  const saved = [];
+  for (let i = 0; i < 4; i++) {
+    saved.push({ page: i + 1, w: 1130, h: 1514,
+                 strokes: [{ c: '#eee', w: 3, pts: [[100, 100 + i], [200, 200 + i]] }] });
+  }
+  window.fetch = (u) => (/slate\/state/.test(String(u))
+    ? Promise.resolve({ json: () => Promise.resolve({ pages: saved }) })
+    : new Promise(() => {}));
+
+  // Swapped: 0001 on the page 0005 was sent from, and 0005 on 0001's.
+  const KEY = 'board.pages:Galois Theory:-';
+  window.localStorage.setItem(KEY, JSON.stringify({ '0001#0': { p: 3 },
+                                                    '0005#0': { p: 1 } }));
+
+  for (const f of ['typeface.js', 'macros.js', 'slate-core.js', 'annotate.js', 'board.js']) {
+    try { window.eval(fs.readFileSync(path.join(WEB, f), 'utf8')); }
+    catch (e) { fail(f + ': ' + e.message); }
+  }
+  const es = window.__es;
+  if (!es) {
+    fail('board.js never opened a stream');
+  } else {
+    const t0 = 1787849000;
+    const card = (id, kind, title, n) =>
+      ({ id, kind, title, body: 'the ' + title + ' body', mtime: t0 + n * 100 });
+    es.onmessage({ data: JSON.stringify({
+      state: { course: 'Galois Theory', session: 'lecture', mode: 'math' },
+      cards: [card('0001', 'question', 'Exercise 1.1', 1),
+              card('0005', 'question', 'Exercise 1.4', 3)],
+      turns: [{ id: 't0001', rev: 1, kind: 'ink', answers: '0001', t: t0 + 200,
+                page: 2, strokes: 9, png: '/answers/t0001-r1.png',
+                ink: '/answers/t0001-r1.json' },
+              { id: 't0002', rev: 1, kind: 'ink', answers: '0005', t: t0 + 400,
+                page: 4, strokes: 12, png: '/answers/t0002-r1.png',
+                ink: '/answers/t0002-r1.json' }],
+      history: 0,
+    }) });
+    await sleep(60);
+    let filed = {};
+    try { filed = JSON.parse(window.localStorage.getItem(KEY) || '{}'); } catch (e) {}
+    const pageOfQ = (q) => (filed[q + '#0'] || {}).p;
+    pageOfQ('0001') === 1 && pageOfQ('0005') === 3
+      ? ok('two boards holding each other\'s working are put back where the '
+           + 'record says each answer was written')
+      : fail('the swap stood: 0001 is on page ' + pageOfQ('0001')
+             + ' and 0005 on page ' + pageOfQ('0005')
+             + ' -- each still showing the other one\'s writing');
+  }
+  window.close();
+}
+
   console.log(errors.length ? '\n' + errors.length + ' FAILURES'
                             : '\nthe saved sitting is adopted, and nothing blank refuses it');
   process.exit(errors.length ? 1 : 0);

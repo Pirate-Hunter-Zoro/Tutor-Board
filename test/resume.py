@@ -34,7 +34,7 @@ spec = importlib.util.spec_from_loader("tutor", loader)
 tutor = importlib.util.module_from_spec(spec)
 loader.exec_module(tutor)
 
-import boardlib  # noqa: E402
+from tutorboard import machine, paths, processes
 
 fails = []
 
@@ -59,9 +59,9 @@ tutor.CONFIG_DIR = conf
 # The record of what a person chose is one file with one reader, in boardlib --
 # the launcher writes it, the board writes it when the hub is tapped, and the
 # always-on host's proxy follows it. Point that one place at the sandbox.
-boardlib.CONFIG_DIR = conf
-boardlib.CHOSEN = os.path.join(conf, "chosen.json")
-tutor.CHOSEN = boardlib.CHOSEN
+paths.CONFIG_DIR = conf
+paths.CHOSEN = os.path.join(conf, "chosen.json")
+tutor.CHOSEN = paths.CHOSEN
 
 
 def make_course(name, node=None, pid=1, when=None):
@@ -164,22 +164,22 @@ try:
     # answer depends on whether the machine running the tests happens to have a
     # `follow` block of its own. Pin it: everything below is the cluster rule,
     # and the always-on rule gets its own case at the end.
-    boardlib.machine_shape = lambda: "compute node"
+    machine.machine_shape = lambda: "compute node"
 
     def reset():
         for k in calls:
             calls[k] = []
 
     # --- the node named in the record is still alive: leave it alone --------
-    boardlib.slurm_nodes = lambda: {"compute999", "compute301"}
-    boardlib.board_is_running = lambda pid, root: False
+    machine.slurm_nodes = lambda: {"compute999", "compute301"}
+    processes.board_is_running = lambda pid, root: False
     reset()
     tutor.cmd_resume(cfg, ["Newer", "--quiet"])
     check("a board on a node that is still yours is left where it is",
           not calls["start"])
 
     # --- ...and once that allocation has ended, take it over ----------------
-    boardlib.slurm_nodes = lambda: {"compute301"}
+    machine.slurm_nodes = lambda: {"compute301"}
     reset()
     tutor.cmd_resume(cfg, ["Newer", "--quiet"])
     check("a board on a node that no longer exists is taken over here",
@@ -204,7 +204,7 @@ try:
         os.remove(tutor.CHOSEN)
     except OSError:
         pass
-    boardlib.board_is_running = lambda pid, root: True
+    processes.board_is_running = lambda pid, root: True
     make_course("Here", node="compute301", pid=33, when=9500)
     reset()
     tutor.cmd_resume(cfg, ["--quiet"])
@@ -223,10 +223,10 @@ try:
     # On the always-on host that is precisely backwards: its whole purpose is
     # that nobody has to be here, and from the iPad it is a course in the hub
     # that will not open on a machine that is otherwise perfectly healthy.
-    boardlib.machine_shape = lambda: "always-on host"
-    boardlib.slurm_nodes = lambda: None
+    machine.machine_shape = lambda: "always-on host"
+    machine.slurm_nodes = lambda: None
     make_course("Crashed", node="compute301", pid=44, when=200)
-    boardlib.board_is_running = lambda pid, root: pid != 44
+    processes.board_is_running = lambda pid, root: pid != 44
     reset()
     tutor.cmd_resume(cfg, ["--quiet"])
     check("a board whose process is gone is started again, without being asked",
@@ -238,7 +238,7 @@ try:
 
     # A board that is up is not restarted, which is the case that runs every
     # three minutes for ever and must therefore cost nothing.
-    boardlib.board_is_running = lambda pid, root: True
+    processes.board_is_running = lambda pid, root: True
     reset()
     tutor.cmd_resume(cfg, ["--quiet"])
     check("and a machine with nothing wrong with it starts nothing at all",
@@ -246,27 +246,27 @@ try:
 
     # On a compute node this must not happen: `resume` runs from a login hook
     # there, a board belongs to an allocation, and a login node is shared.
-    boardlib.machine_shape = lambda: "compute node"
-    boardlib.board_is_running = lambda pid, root: pid != 44
+    machine.machine_shape = lambda: "compute node"
+    processes.board_is_running = lambda pid, root: pid != 44
     reset()
     tutor.cmd_resume(cfg, ["--quiet"])
     check("but a login on a compute node does not start everything with a record",
           "Crashed" not in calls["start"])
     shutil.rmtree(os.path.join(tmp, "Crashed"), ignore_errors=True)
-    boardlib.board_is_running = lambda pid, root: pid == 33
+    processes.board_is_running = lambda pid, root: pid == 33
 
     # --- no squeue at all is not the same as no allocations -----------------
     # The cases above swept these records, which is what they are supposed to do
     # -- a run of `resume` clears records from nodes that no longer exist. Lay
     # them down again for what follows.
     make_course("Newer", node="compute999", pid=22, when=9000)
-    boardlib.slurm_nodes = lambda: None
+    machine.slurm_nodes = lambda: None
     # `Here` is a board running here, which is what its name means. It matters
     # from now on: a machine that is not a compute node also restarts boards of
     # its own that have died, so a course whose record names this host and whose
     # pid is gone is a start, and every "nothing was started" case below would be
     # asserting about that instead of about the node's board.
-    boardlib.board_is_running = lambda pid, root: pid == 33
+    processes.board_is_running = lambda pid, root: pid == 33
     reset()
     tutor.cmd_resume(cfg, ["Newer", "--quiet"])
     check("with no Slurm to ask, another node's board is left alone",
@@ -282,7 +282,7 @@ try:
     # nodes on one home directory, left the machine that never sleeps and holds
     # the repository permanently unable to host it. It does not stop the other
     # board: the proxy asks that one to hand its tutor over as the address moves.
-    boardlib.machine_shape = lambda: "always-on host"
+    machine.machine_shape = lambda: "always-on host"
     reset()
     tutor.cmd_resume(cfg, ["Newer", "--quiet"])
     check("the always-on host brings up a course it holds, whatever a record "
@@ -290,21 +290,21 @@ try:
     check("and points the one address the iPad has at it", calls["link"] == ["Newer"])
     check("and attaches a tutor, or there is a board with nobody on it",
           calls["agent"] == ["Newer"])
-    boardlib.machine_shape = lambda: "compute node"
+    machine.machine_shape = lambda: "compute node"
 
     # --- a login node is not a machine to start a board on ------------------
     # This runs from a login hook, so it gets invited to try on every machine
     # you touch. A login node is shared, is not yours, and is where a
     # long-running process goes to be killed.
-    boardlib.slurm_nodes = lambda: {"compute999"}
-    boardlib.board_is_running = lambda pid, root: False
+    machine.slurm_nodes = lambda: {"compute999"}
+    processes.board_is_running = lambda pid, root: False
     tutor.this_host = lambda: "login1"
     reset()
     tutor.cmd_resume(cfg, ["Newer", "--quiet", "--force"])
     check("--force still moves it, since that is a person asking",
           calls["start"] == ["Newer"])
     reset()
-    boardlib.slurm_nodes = lambda: {"compute301"}
+    machine.slurm_nodes = lambda: {"compute301"}
     tutor.cmd_resume(cfg, ["Newer", "--quiet"])
     check("a machine Slurm does not say is yours starts nothing",
           not calls["start"])
@@ -339,7 +339,7 @@ try:
             json.dump({"node": node, "pid": 4242, "root": ghost}, fh)
 
     lay_ghost("compute999")
-    boardlib.slurm_nodes = lambda: {"compute301"}
+    machine.slurm_nodes = lambda: {"compute301"}
     tutor.prune_dead_records(cfg, "compute301")
     check("a record from a node that is gone is swept",
           not os.path.exists(ghost_rec))
@@ -350,13 +350,13 @@ try:
           os.path.exists(ghost_rec))
 
     lay_ghost("compute999")
-    boardlib.slurm_nodes = lambda: None
+    machine.slurm_nodes = lambda: None
     tutor.prune_dead_records(cfg, "compute301")
     check("and with no Slurm to ask, nothing is swept — unknown is not gone",
           os.path.exists(ghost_rec))
 
     lay_ghost("compute301")
-    boardlib.slurm_nodes = lambda: {"compute301", "compute999"}
+    machine.slurm_nodes = lambda: {"compute301", "compute999"}
     lay_ghost("compute999")
     tutor.prune_dead_records(cfg, "compute301")
     check("nor is a record from a node that is still yours",
@@ -507,9 +507,16 @@ try:
     real = tempfile.mkdtemp(prefix="tutor-reexec-")
     try:
         up = os.path.join(real, "origin")
-        os.makedirs(os.path.join(up, "bin"))
-        for rel in ("bin/tutor", "bin/board", "boardlib.py"):
-            shutil.copy(os.path.join(ROOT, rel), os.path.join(up, rel))
+        # The launcher and the package it imports. A fake tool repository with
+        # half a package in it fails at the import and never reaches the pull,
+        # which is the thing under test.
+        for rel in ("bin/tutor", "bin/board"):
+            dest = os.path.join(up, rel)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copy(os.path.join(ROOT, rel), dest)
+        shutil.copytree(os.path.join(ROOT, "tutorboard"),
+                        os.path.join(up, "tutorboard"),
+                        ignore=shutil.ignore_patterns("__pycache__"))
         git(up, "init", "-q", "-b", "main")
         git(up, "add", "-A")
         git(up, "commit", "-qm", "the tool")

@@ -26,7 +26,7 @@ import urllib.request
 
 TOOL = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, TOOL)
-import boardlib  # noqa: E402  -- after the path insert, which is what finds it
+from tutorboard import handoff, reasoning
 
 BOARD = os.path.join(TOOL, "bin", "board")
 KEYS = os.path.join(os.path.expanduser("~"), ".config", "api-keys")
@@ -38,7 +38,7 @@ KEYS = os.path.join(os.path.expanduser("~"), ".config", "api-keys")
 # model's thinking. Every model on this chain reasons before it answers, and an
 # endpoint that forwards that reasoning inside `message.content` puts it on the
 # board. Asking is the cheap half of the defence and it is only half: the reply
-# goes through `boardlib.strip_reasoning` regardless, because a free endpoint
+# goes through `reasoning.strip_reasoning` regardless, because a free endpoint
 # ignoring a parameter it does not implement is exactly the shape of this bug.
 #
 # A parameter a provider has never heard of is a 400, so `post_json` drops these
@@ -124,7 +124,7 @@ def chat(messages, max_tokens=2048, reject=None):
                 continue
             text = ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "")
             said = (text or "").strip()
-            text = boardlib.strip_reasoning(text)
+            text = reasoning.strip_reasoning(text)
             if text and reject and reject(text):
                 last = "%s/%s deliberated instead of answering" % (name, model)
                 continue
@@ -164,7 +164,7 @@ def ocr_image(path):
     text = ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "")
     # The vision model reasons as well, and this text is handed to the tutor as
     # the student's own working -- thinking left in it is read as handwriting.
-    return boardlib.strip_reasoning(text)
+    return reasoning.strip_reasoning(text)
 
 
 def ocr(path):
@@ -326,9 +326,9 @@ def build_brief(root):
     # Only this chapter's. A handoff about a chapter that has been closed is the
     # last chapter's unfinished business, and distilling it into the brief would
     # feed it to every turn of the new one.
-    handoff = (read(os.path.join(root, "HANDOFF.md"))
-               if boardlib.handoff_applies(root, chapter_now(root)) else "")
-    if not any((method, contract, handoff)):
+    handoff_text = (read(os.path.join(root, "HANDOFF.md"))
+               if handoff.handoff_applies(root, chapter_now(root)) else "")
+    if not any((method, contract, handoff_text)):
         return ""
     prompt = (
         "Distill the following into ONE compact teaching brief of at most 500 words. "
@@ -340,7 +340,7 @@ def build_brief(root):
         "The course contract:\n\n%s\n\n"
         "The course's own macro commands:\n\n%s\n\n"
         "The handoff (where the last session left off):\n\n%s"
-        % (method, contract, macros or "(none)", handoff or "(none)"))
+        % (method, contract, macros or "(none)", handoff_text or "(none)"))
     try:
         return chat([{"role": "user", "content": prompt}], max_tokens=BRIEF_LIMIT)
     except RuntimeError as exc:
@@ -363,7 +363,7 @@ def load_brief(root):
             # A brief written before this file learned to strip thinking is a
             # cache that goes on poisoning every turn until one of its sources
             # happens to change, which could be weeks. Repair it in place.
-            clean = boardlib.strip_reasoning(cached)
+            clean = reasoning.strip_reasoning(cached)
             if clean != cached:
                 try:
                     with open(path, "w", encoding="utf-8") as fh:
@@ -390,7 +390,7 @@ def recap(root):
     return p.stdout.decode("utf-8", "replace")
 
 
-def handoff(root):
+def write_handoff(root):
     try:
         text = chat([{"role": "user", "content": (
             "Write HANDOFF.md for a tutoring session that just ended. Under 350 words. "
@@ -407,13 +407,13 @@ def handoff(root):
     with open(os.path.join(root, "HANDOFF.md"), "w", encoding="utf-8") as fh:
         fh.write(text.strip() + "\n")
     # Which chapter it is about, while this is still the only thing that knows.
-    boardlib.stamp_handoff(root, chapter_now(root))
+    handoff.stamp_handoff(root, chapter_now(root))
     return 0
 
 
 def main(argv):
     if argv and argv[0] == "--handoff":
-        return handoff(os.getcwd())
+        return write_handoff(os.getcwd())
     inbox = (argv[0] if argv else "").strip()
     root = os.getcwd()
 
@@ -466,7 +466,7 @@ def main(argv):
         """
         kind_, title_, body_ = parse_card(reply)
         return (not body_.strip()) or looks_meta(body_) \
-            or boardlib.reads_as_reasoning(body_)
+            or reasoning.reads_as_reasoning(body_)
 
     kind, title, body = "lesson", "", ""
     for attempt in range(2):
@@ -500,7 +500,7 @@ def main(argv):
     # re-read the question" on the board as the lesson, cut off mid-sentence.
     # A turn that produces no card is a turn somebody waits through; a monologue
     # that becomes a card is the lesson, and there is no undo.
-    if looks_meta(body) or boardlib.reads_as_reasoning(body):
+    if looks_meta(body) or reasoning.reads_as_reasoning(body):
         sys.stderr.write("free tutor: every model on the chain deliberated instead of "
                          "writing a card; nothing written\n")
         return 1

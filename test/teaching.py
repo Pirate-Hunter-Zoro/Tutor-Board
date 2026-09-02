@@ -222,7 +222,8 @@ check("the session brief points at it", "live/TEACHING.md" in tutor_src)
 check("the headless prompt points at it too",
       tutor_src.count("TEACHING.md") >= 3)
 
-serve_src = open(os.path.join(ROOT, "serve.py"), encoding="utf-8").read()
+serve_src = open(os.path.join(ROOT, "tutorboard", "sense.py"),
+                 encoding="utf-8").read()
 # In a headless session the begin line IS the prompt, so it carries the pointer.
 check("and so does the cold start, which in headless is the whole prompt",
       "TEACHING.md" in serve_src)
@@ -232,7 +233,8 @@ check("and so does the cold start, which in headless is the whole prompt",
 # shape attached writes a lecture and asks at the bottom of it. So every sitting
 # carries the shape, and it carries the SAME one -- one paragraph, hoisted.
 sys.path.insert(0, ROOT)
-loader2 = importlib.machinery.SourceFileLoader("serveapp", os.path.join(ROOT, "serve.py"))
+loader2 = importlib.machinery.SourceFileLoader(
+    "serveapp", os.path.join(ROOT, "tutorboard", "sense.py"))
 spec2 = importlib.util.spec_from_loader("serveapp", loader2)
 serveapp = importlib.util.module_from_spec(spec2)
 try:

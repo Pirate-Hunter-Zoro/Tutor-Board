@@ -53,7 +53,7 @@ box = tempfile.mkdtemp()
 os.environ["BOARD_STATE_DIR"] = box
 os.environ["BOARD_NODE_NAME"] = "test-node"
 
-import boardlib  # noqa: E402
+from tutorboard import handoff
 
 
 def load(name, path):
@@ -73,7 +73,7 @@ def course(chapter="Ch 01 — Groups"):
     return root
 
 
-def handoff(root, text):
+def write_handoff(root, text):
     with open(os.path.join(root, "HANDOFF.md"), "w", encoding="utf-8") as fh:
         fh.write(text)
 
@@ -89,48 +89,48 @@ def board(root, *args):
 print("-- a handoff says which chapter it is about --")
 
 root = course()
-handoff(root, "# HANDOFF\n\nLeft unfinished in Chapter 1: exercise 1.7.\n")
-boardlib.stamp_handoff(root, "Ch 01 — Groups")
-text, about = boardlib.read_handoff(root)
+write_handoff(root, "# HANDOFF\n\nLeft unfinished in Chapter 1: exercise 1.7.\n")
+handoff.stamp_handoff(root, "Ch 01 — Groups")
+text, about = handoff.read_handoff(root)
 check("the stamp names the chapter", about == "Ch 01 — Groups")
 check("and the handoff itself is untouched under it", "exercise 1.7" in text)
 
-boardlib.stamp_handoff(root, "Ch 01 — Groups")
+handoff.stamp_handoff(root, "Ch 01 — Groups")
 check("stamping twice does not stack two stamps",
-      boardlib.read_handoff(root)[0].count("<!-- chapter:") == 1)
+      handoff.read_handoff(root)[0].count("<!-- chapter:") == 1)
 
 check("a handoff about the chapter that is open is read",
-      boardlib.handoff_applies(root, "Ch 01 — Groups"))
+      handoff.handoff_applies(root, "Ch 01 — Groups"))
 
 # --- and one about another chapter is not ------------------------------------
 print("\n-- a chapter does not inherit the last one's unfinished business --")
 
 check("a handoff about a chapter that has been closed is not read",
-      not boardlib.handoff_applies(root, "Ch 03 — Rings"))
+      not handoff.handoff_applies(root, "Ch 03 — Rings"))
 check("and reading it is what puts it away, since the daemon that wrote it may "
       "have been writing while the next chapter was opening",
       not os.path.exists(os.path.join(root, "HANDOFF.md")))
 check("parked under the chapter it belongs to",
-      os.path.exists(boardlib.parked_handoff(root, "Ch 01 — Groups")))
+      os.path.exists(handoff.parked_handoff(root, "Ch 01 — Groups")))
 
 # An unstamped handoff is not evidence of anything: it predates the stamp, or a
 # model wrote the file itself. A course with no chapters at all is the same case.
 root2 = course(chapter="")
-handoff(root2, "# HANDOFF\n\nwhere the project got to\n")
+write_handoff(root2, "# HANDOFF\n\nwhere the project got to\n")
 check("an unstamped handoff still applies, and a course with no chapters is "
       "unaffected by any of this",
-      boardlib.handoff_applies(root2, ""))
+      handoff.handoff_applies(root2, ""))
 
 # --- board open ---------------------------------------------------------------
 print("\n-- opening a chapter files the last one's handoff away --")
 
 root3 = course()
-handoff(root3, "# HANDOFF\n\nChapter 1, and 1.7 is unfinished.\n")
+write_handoff(root3, "# HANDOFF\n\nChapter 1, and 1.7 is unfinished.\n")
 code, out = board(root3, "open", "Galois Theory", "Ch 03 — Rings")
 check("the open succeeds", code == 0)
 check("the handoff of the chapter being left is parked",
       not os.path.exists(os.path.join(root3, "HANDOFF.md"))
-      and os.path.exists(boardlib.parked_handoff(root3, "Ch 01 — Groups")))
+      and os.path.exists(handoff.parked_handoff(root3, "Ch 01 — Groups")))
 check("and it says so, rather than the file merely vanishing",
       "parked" in out)
 
@@ -152,20 +152,20 @@ print("\n-- and the tutor is told there is none, rather than left to hunt --")
 
 tutor = load("tutor_launcher", os.path.join(ROOT, "bin", "tutor"))
 root4 = course(chapter="Ch 03 — Rings")
-handoff(root4, "# HANDOFF\n\nChapter 1 leftovers.\n")
-boardlib.stamp_handoff(root4, "Ch 01 — Groups")
+write_handoff(root4, "# HANDOFF\n\nChapter 1 leftovers.\n")
+handoff.stamp_handoff(root4, "Ch 01 — Groups")
 clause = tutor.handoff_clause(root4)
 check("a tutor opening a chapter with no handoff of its own is told so",
       clause == tutor.NO_HANDOFF_CLAUSE)
 check("and told not to go looking for the last chapter's",
       "not in `live/archive/`" in clause)
 
-boardlib.restore_handoff(root4, "Ch 01 — Groups")   # put it back, wrong chapter
-os.replace(boardlib.parked_handoff(root4, "Ch 01 — Groups")
-           if os.path.exists(boardlib.parked_handoff(root4, "Ch 01 — Groups"))
+handoff.restore_handoff(root4, "Ch 01 — Groups")   # put it back, wrong chapter
+os.replace(handoff.parked_handoff(root4, "Ch 01 — Groups")
+           if os.path.exists(handoff.parked_handoff(root4, "Ch 01 — Groups"))
            else os.path.join(root4, "HANDOFF.md"),
            os.path.join(root4, "HANDOFF.md"))
-boardlib.stamp_handoff(root4, "Ch 03 — Rings")
+handoff.stamp_handoff(root4, "Ch 03 — Rings")
 check("and a tutor whose chapter DOES have one is told to read it",
       tutor.handoff_clause(root4) == tutor.HANDOFF_CLAUSE)
 
@@ -177,15 +177,23 @@ check("and so does the first prompt of a headless session",
 # --- a new tutor for the new chapter ------------------------------------------
 print("\n-- a chapter gets its own tutor --")
 
-with open(os.path.join(ROOT, "serve.py"), encoding="utf-8") as fh:
-    serve_src = fh.read()
+def source(*parts):
+    with open(os.path.join(ROOT, *parts), encoding="utf-8") as fh:
+        return fh.read()
+
+
+# The route asks for it; how it is done belongs with the other ways the board
+# runs its own commands.
 check("opening a chapter from the board starts a fresh assistant",
-      "fresh_tutor(repo.root, course)" in serve_src)
+      "spawn.fresh_tutor(repo.root, course)"
+      in source("tutorboard", "server", "routes", "lesson.py"))
 check("by stopping the old one and waiting for it, so the two never overlap",
-      '"agent", "stop", course, "--wait"' in serve_src)
+      '"agent", "stop", course, "--wait"'
+      in source("tutorboard", "server", "spawn.py"))
 check("and it happens off the request, because a wrap-up is a model call and "
       "nobody taps a chapter to wait a minute for it",
-      "threading.Thread(target=run, daemon=True).start()" in serve_src)
+      "threading.Thread(target=run, daemon=True).start()"
+      in source("tutorboard", "server", "spawn.py"))
 
 print()
 if errors:

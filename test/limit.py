@@ -60,17 +60,18 @@ os.environ["BOARD_STATE_DIR"] = box
 os.environ["BOARD_NODE_NAME"] = "test-node"
 # And no real tailnet. `follow.probe` is stubbed below, which was assumed to be
 # every way out of this file -- it is not: `choose_target` reaches the network a
-# second way, through `boardlib.locate_course`, and that one knocks on every peer
+# second way, through `boards.locate_course`, and that one knocks on every peer
 # the netmap lists. With a Mullvad exit-node subscription on the tailnet that is
 # 544 machines, so `bash test/all.sh` stopped here and never came back. The whole
 # suite hung on a unit test about arithmetic over `/health` documents.
 os.environ["BOARD_NO_TAILNET"] = "1"
 
-import boardlib                                              # noqa: E402
+from tutorboard import limits, paths, ports
+from tutorboard.net import boards, egress
 
-boardlib.STATE_DIR = box
-boardlib.LIMIT_RECORD = os.path.join(box, "limited.json")
-boardlib.CONFIG = os.path.join(box, "config.json")           # no user config
+paths.STATE_DIR = box
+limits.LIMIT_RECORD = os.path.join(box, "limited.json")
+paths.CONFIG = os.path.join(box, "config.json")           # no user config
 
 spec = importlib.util.spec_from_loader(
     "followcli",
@@ -87,59 +88,59 @@ spec.loader.exec_module(follow)
 now = 1_700_000_000.0
 
 check("the reset time a provider names is believed over any window we'd guess",
-      abs(boardlib.reads_as_usage_limit(
+      abs(limits.reads_as_usage_limit(
           "Claude AI usage limit reached|%d" % int(now + 7200), now) - (now + 7200)) < 2)
 check("a limit with no time on it gets the ordinary window",
-      boardlib.reads_as_usage_limit("Claude AI usage limit reached", now)
-      == now + boardlib.DEFAULT_LIMIT_WINDOW)
+      limits.reads_as_usage_limit("Claude AI usage limit reached", now)
+      == now + limits.DEFAULT_LIMIT_WINDOW)
 check("the five-hour form is a limit too",
-      boardlib.reads_as_usage_limit("5-hour limit reached ∙ resets 3pm", now))
+      limits.reads_as_usage_limit("5-hour limit reached ∙ resets 3pm", now))
 check("and so is the API's own word for it",
-      boardlib.reads_as_usage_limit('{"type":"rate_limit_error"}', now))
+      limits.reads_as_usage_limit('{"type":"rate_limit_error"}', now))
 
 check("an ordinary broken turn is not a limit, and must not demote the machine",
-      boardlib.reads_as_usage_limit("Error: ENOENT no such file", now) is None)
+      limits.reads_as_usage_limit("Error: ENOENT no such file", now) is None)
 check("nor is a turn that said nothing at all",
-      boardlib.reads_as_usage_limit("", now) is None)
+      limits.reads_as_usage_limit("", now) is None)
 
 # A reset time in the past, or absurdly far away, is a misread rather than news.
 check("a reset time already gone falls back to the window",
-      boardlib.reads_as_usage_limit("usage limit reached|100", now)
-      == now + boardlib.DEFAULT_LIMIT_WINDOW)
+      limits.reads_as_usage_limit("usage limit reached|100", now)
+      == now + limits.DEFAULT_LIMIT_WINDOW)
 check("and one a year out does not take the machine out for a year",
-      boardlib.reads_as_usage_limit("usage limit reached|%d" % int(now + 400 * 86400), now)
-      == now + boardlib.DEFAULT_LIMIT_WINDOW)
+      limits.reads_as_usage_limit("usage limit reached|%d" % int(now + 400 * 86400), now)
+      == now + limits.DEFAULT_LIMIT_WINDOW)
 
 # ---- the record ------------------------------------------------------------
 
-check("with nothing written, the machine has its allowance", boardlib.limited_until() == 0)
-boardlib.mark_limited(time.time() + 900, agent="claude")
-check("a limit reads back", boardlib.limited_until() > time.time())
-check("and says which tutor ran out", boardlib.limit_record().get("agent") == "claude")
+check("with nothing written, the machine has its allowance", limits.limited_until() == 0)
+limits.mark_limited(time.time() + 900, agent="claude")
+check("a limit reads back", limits.limited_until() > time.time())
+check("and says which tutor ran out", limits.limit_record().get("agent") == "claude")
 
-boardlib.mark_limited(time.time() - 60, agent="claude")
+limits.mark_limited(time.time() - 60, agent="claude")
 check("a limit that has expired is no limit; it does not need clearing by hand",
-      boardlib.limited_until() == 0)
+      limits.limited_until() == 0)
 
 # The home directory is shared between compute nodes. A limit hit by the
 # allocation that ended yesterday is not this machine's news.
-with open(boardlib.LIMIT_RECORD, "w", encoding="utf-8") as fh:
+with open(limits.LIMIT_RECORD, "w", encoding="utf-8") as fh:
     json.dump({"until": time.time() + 900, "node": "some-other-node"}, fh)
 check("a limit written by another machine is not this machine's",
-      boardlib.limited_until() == 0)
+      limits.limited_until() == 0)
 
-with open(boardlib.LIMIT_RECORD, "w", encoding="utf-8") as fh:
+with open(limits.LIMIT_RECORD, "w", encoding="utf-8") as fh:
     fh.write("{not json")
-check("a corrupt record is an allowance, not a crash", boardlib.limited_until() == 0)
+check("a corrupt record is an allowance, not a crash", limits.limited_until() == 0)
 
-boardlib.mark_limited(time.time() + 900, agent="claude")
-boardlib.clear_limited()
-check("and a turn going through clears it", boardlib.limited_until() == 0)
+limits.mark_limited(time.time() + 900, agent="claude")
+limits.clear_limited()
+check("and a turn going through clears it", limits.limited_until() == 0)
 
 # ---- the order, which is the whole feature ---------------------------------
 
 GAL = "/x/Galois-Theory"
-GAL_PORT = boardlib.default_port("Galois-Theory")
+GAL_PORT = ports.default_port("Galois-Theory")
 CANDS = [{"dir": "Galois-Theory", "root": GAL}]
 HERE_, NODE_ = "127.0.0.1", "node"
 
@@ -224,9 +225,9 @@ check("and with both well, `prefer: node` is still obeyed",
 src = open(os.path.join(ROOT, "bin", "tutor"), encoding="utf-8").read()
 
 check("a limit is asked about before the network is blamed",
-      src.index("reads_as_usage_limit") < src.index("boardlib.egress_ok()"))
+      src.index("reads_as_usage_limit") < src.index("egress.egress_ok()"))
 check("the machine is marked, which is what /health then publishes",
-      "boardlib.mark_limited(until, agent=agent_name)" in src)
+      "limits.mark_limited(until, agent=agent_name)" in src)
 check("the message whose turn was lost is carried, not dropped",
       "pending = out" in src)
 check("the tutor waits for a node to take the lesson before answering itself",
@@ -243,13 +244,14 @@ check("a fallback this machine cannot run is not a fallback",
 check("the allowance coming back climbs the tutor home again",
       "the allowance is back" in src)
 check("and a turn that goes through is what proves it",
-      "boardlib.clear_limited()" in src)
+      "limits.clear_limited()" in src)
 check("the handoff is written by whoever still can, so continuity survives",
       "has no allowance left for the handoff" in src)
 
-health = open(os.path.join(ROOT, "serve.py"), encoding="utf-8").read()
+health = open(os.path.join(ROOT, "tutorboard", "server", "routes",
+                           "machines.py"), encoding="utf-8").read()
 check("a board publishes its machine's allowance, because only it can know",
-      '"limited": boardlib.limited_until()' in health)
+      '"limited": limits.limited_until()' in health)
 
 print("\n%d FAILURES" % len(errors) if errors
       else "\nthe lesson goes where there is an allowance to teach it")

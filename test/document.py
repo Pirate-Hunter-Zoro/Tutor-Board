@@ -28,8 +28,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.path.dirname(HERE)
 sys.path.insert(0, TOOL)
 
-import boardlib                                                    # noqa: E402
-import document                                                    # noqa: E402
+from tutorboard import tex
+from tutorboard.course import document              # noqa: E402
 
 fails = []
 
@@ -128,32 +128,32 @@ def main():
 
     # ---------------------------------------------------------- both halves
     rec = document.build(root, scope="lesson", make_pdf=False)
-    tex = open(os.path.join(root, rec["tex"]), encoding="utf-8").read()
+    tex_src = open(os.path.join(root, rec["tex"]), encoding="utf-8").read()
 
-    if "Exercise 3.2" in tex and "nearly" in tex:
+    if "Exercise 3.2" in tex_src and "nearly" in tex_src:
         ok("the tutor's cards are in the document")
     else:
         bad("the tutor's cards are missing from the export")
 
-    if tex.count("includegraphics") == 2:
+    if tex_src.count("includegraphics") == 2:
         ok("and so is every page the student handed in, one picture each")
     else:
         bad("the student's own working is not in the document (%d pictures) -- "
             "which is a record of half a conversation"
-            % tex.count("includegraphics"))
+            % tex_src.count("includegraphics"))
 
-    if "attempt 1 of 3" in tex and "attempt 2 of 3" in tex:
+    if "attempt 1 of 3" in tex_src and "attempt 2 of 3" in tex_src:
         ok("every revision is kept, and says which attempt it is")
     else:
         bad("the attempts are collapsed or unlabelled, so the document does not "
             "show the work happening")
 
-    if "I think the other root is complex." in tex:
+    if "I think the other root is complex." in tex_src:
         ok("a typed answer is in it too")
     else:
         bad("typed answers are dropped from the export")
 
-    if "live/answers/t0001-r1.png" in tex:
+    if "live/answers/t0001-r1.png" in tex_src:
         ok("the pictures are named relative to the repository, so the .tex "
            "still builds on another machine")
     else:
@@ -161,8 +161,8 @@ def main():
 
     # Reading order: the answers sit under the question they answer, above the
     # card that replies to them.
-    q, a, reply = (tex.find("Exercise 3.2"), tex.find("You wrote"),
-                   tex.find("nearly"))
+    q, a, reply = (tex_src.find("Exercise 3.2"), tex_src.find("You wrote"),
+                   tex_src.find("nearly"))
     if -1 not in (q, a, reply) and q < a < reply:
         ok("and it reads in the order it happened: question, working, reply")
     else:
@@ -221,14 +221,14 @@ def main():
         bad("the master document is called " + every["name"])
 
     # ------------------------------------------------------------- Unicode
-    if "⤓" not in tex and "α" not in tex and "\\alpha" in tex:
+    if "⤓" not in tex_src and "α" not in tex_src and "\\alpha" in tex_src:
         ok("characters pdflatex cannot read are mapped or dropped, never left "
            "in to kill the build")
     else:
         bad("raw Unicode reaches LaTeX, which is a fatal error and not a warning")
 
     # ------------------------------------------------------- and it compiles
-    if boardlib.have_tex():
+    if tex.have_tex():
         built = document.build(root, scope="lesson", make_pdf=True)
         if built.get("ok") and built.get("pdf"):
             ok("and LaTeX agrees: the document compiles")

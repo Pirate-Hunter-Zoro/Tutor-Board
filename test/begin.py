@@ -26,8 +26,14 @@ import urllib.request
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import boardlib  # noqa: E402
-import serve  # noqa: E402
+from tutorboard import machine
+from tutorboard.course import repo as course_repo
+from tutorboard.lesson import state
+from tutorboard.lesson import turns
+from tutorboard.server import handler
+from tutorboard.server import hub
+from tutorboard.server import tikz
+from http.server import ThreadingHTTPServer
 
 fails = []
 
@@ -43,22 +49,22 @@ def check(name, cond):
 tmp = tempfile.mkdtemp(prefix="tutor-begin-")
 with open(os.path.join(tmp, "tutorboard.json"), "w", encoding="utf-8") as fh:
     json.dump({"name": "Test Course", "mode": "math"}, fh)
-repo = serve.Repo(tmp)
+repo = course_repo.Repo(tmp)
 
-worker = serve.TikzWorker(repo)
+worker = tikz.TikzWorker(repo)
 worker.start()
-hub = serve.Hub(repo, worker)
-hub.payload = json.dumps(hub.build())
+board = hub.Hub(repo, worker)
+board.payload = json.dumps(board.build())
 
 sock = socket.socket()
 sock.bind(("127.0.0.1", 0))
 port = sock.getsockname()[1]
 sock.close()
 
-httpd = serve.ThreadingHTTPServer(("127.0.0.1", port), serve.Handler)
+httpd = ThreadingHTTPServer(("127.0.0.1", port), handler.Handler)
 httpd.daemon_threads = True
 httpd.repo = repo
-httpd.hub = hub
+httpd.hub = board
 threading.Thread(target=httpd.serve_forever, daemon=True).start()
 
 BASE = "http://127.0.0.1:%d" % port
@@ -83,11 +89,11 @@ try:
     status, body = post("/say", {"signal": "begin"})
     check("a bare 'begin' is accepted", status == 200 and body.get("ok") is True)
 
-    turns = serve.load_turns(repo)
-    check("it lands in the transcript as a turn", len(turns) == 1)
-    check("and keeps its signal", turns and turns[0].get("signal") == "begin")
+    sent = turns.load_turns(repo)
+    check("it lands in the transcript as a turn", len(sent) == 1)
+    check("and keeps its signal", sent and sent[0].get("signal") == "begin")
     check("it answers no card, because there is none",
-          turns and not turns[0].get("answers"))
+          sent and not sent[0].get("answers"))
 
     with open(repo.messages_path, "r", encoding="utf-8") as fh:
         lines = [json.loads(l) for l in fh if l.strip()]
@@ -157,11 +163,11 @@ try:
     # for the tutor to know not to press the point.
     status, _ = post("/say", {"signal": "skip", "answers": "0001"})
     check("'skip' is accepted", status == 200)
-    turns = serve.load_turns(repo)
+    sent = turns.load_turns(repo)
     check("a skip is a turn in the transcript",
-          any(t.get("signal") == "skip" for t in turns))
+          any(t.get("signal") == "skip" for t in sent))
     check("and it records which question it declined",
-          [t for t in turns if t.get("signal") == "skip"][0].get("answers") == "0001")
+          [t for t in sent if t.get("signal") == "skip"][0].get("answers") == "0001")
     with open(repo.messages_path, "r", encoding="utf-8") as fh:
         lines = [json.loads(l) for l in fh if l.strip()]
     check("and tells the tutor to carry on rather than re-ask",
@@ -241,17 +247,17 @@ try:
     # whole bug in miniature: the machine renamed itself from the network, the
     # test went on writing records under the old name, and the mismatch it was
     # meant to catch was the one thing it could not see.
-    host = boardlib.node_name()
+    host = machine.node_name()
     write_agent(host=host, pid=os.getpid(), agent="claude", state="attached",
                 mode="interactive", cmd=sys.executable,
                 last_seen=_time.time() - 6000)
-    st = serve.load_agent(repo)
+    st = state.load_agent(repo)
     check("the board sees an interactive assistant that has been idle for an hour",
           st and st["state"] == "attached")
 
     write_agent(host=host, pid=999999, agent="claude", state="attached",
                 mode="interactive", cmd=sys.executable, last_seen=_time.time())
-    st = serve.load_agent(repo)
+    st = state.load_agent(repo)
     check("and marks it stale once its process is gone",
           st and st["state"] == "stale")
 
@@ -261,20 +267,20 @@ try:
     # runs longer than two minutes.
     write_agent(host=host, pid=os.getpid(), agent="claude", state="working",
                 turns=3, last_seen=_time.time() - 600)
-    st = serve.load_agent(repo)
+    st = state.load_agent(repo)
     check("a daemon mid-turn is not called dead for being slow",
           st and st["state"] == "working")
 
     write_agent(host=host, pid=999999, agent="claude", state="working",
                 turns=3, last_seen=_time.time())
-    st = serve.load_agent(repo)
+    st = state.load_agent(repo)
     check("but a daemon whose process is gone is stale even mid-turn",
           st and st["state"] == "stale")
 
     write_agent(host="a-node-that-is-not-this-one", pid=os.getpid(), agent="claude",
                 state="attached", mode="interactive", cmd=sys.executable,
                 last_seen=_time.time())
-    st = serve.load_agent(repo)
+    st = state.load_agent(repo)
     check("a record from another node is stale whatever its pid says",
           st and st["state"] == "stale")
     os.remove(agent_path)

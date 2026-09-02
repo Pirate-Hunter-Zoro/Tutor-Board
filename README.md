@@ -46,6 +46,48 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 2 September 2026
 >
+> **The board is a package now.** Asked for in these words: *"reorganize the fuck out of this
+> repository. The python scripts are monsters."* They were: `serve.py` was 2,806 lines and
+> `boardlib.py` another 1,619, and nine hundred of the first were a single `if path == ...` in two
+> methods. The cost was never length. It was that finding out what `/switch` did meant reading past
+> everything else, and that two unrelated changes edited the same enormous method.
+>
+> It is `tutorboard/` now, organised by what a thing is **about** — `paths`, `ports`, `choice`,
+> `machine`, `processes`, `tex`, `limits`, `reasoning`, `handoff`, `sense`, `machines`, and then
+> `net/`, `course/`, `lesson/` and `server/` with `server/routes/` holding one module per family of
+> paths. `serve.py` is the entry point and nothing else; it keeps its name and its command line
+> because a board is a long-lived process identified BY that command line, and renaming it would
+> orphan every board already running.
+>
+> Three rules came out of doing it, and they are in `AI_INSTRUCTIONS.md` as rules rather than
+> history, because each one broke something on the way. **Import modules, never names** — a test
+> that moves `paths.CHOSEN` or replaces `machine.machine_shape` must move it for every caller, and
+> `from x import y` takes a copy of the binding and quietly defeats that. **A module name is
+> reserved vocabulary** — a local called `state`, `turns`, `cards` or `hub` shadows the module it
+> came from, and that is invisible until the line runs. **One place derives a path** — `paths.TOOL`,
+> because a module that moves takes a hand-rolled `dirname(dirname(...))` with it and the only
+> symptom is LaTeX failing to find `board-macros.tex`.
+>
+> Nothing about the behaviour changed and the whole suite says so, twice over: every existing check
+> passes, and `test/choice.py` now also checks the shape itself — that `/switch` lives in
+> `server/routes/machines.py`, that `handler.py` holds no routes, and that the entry point is under
+> forty lines. A route that drifts back into a nine-hundred-line handler fails a test rather than
+> being noticed a year later.
+>
+> **Three defects from the same evening went with it.** The word *Pen* got selected when a hand
+> rested on the annotation toolbar — `body.annotating #board *` already refused selection over the
+> lesson, and that bar is fixed-position, outside `#board`, so none of it applied there; the
+> selection then owned the next drag, which is why annotation "intermittently stopped writing".
+> Both toolbars now refuse selection and take a tap without waiting to see if it is a zoom.
+>
+> And **two boards were holding each other's working**: *"my writing from one section is wrong and
+> came from a later section, vice versa."* The mapping from question to page is repaired against
+> the server's record — every answer carries the page it was sent from — but only where the entry
+> in hand looked untrustworthy, and a *swap* looks perfectly healthy from inside one browser: both
+> pages exist, neither is shared, both have ink. It is just the wrong ink. A board sitting on a page
+> the record says belongs to a different question is now wrong on evidence, and gets moved.
+> `test/adopt.js` swaps two boards and fails on the old rule.
+>
 > **Every autosave was crashing the board, and had been.** Reported as "it also keeps failing to
 > save", and the log said it plainly: `UnboundLocalError: local variable 'record' referenced before
 > assignment`, once per save, thrown out of `/slate/save`. The send-only tail of that handler had
@@ -268,7 +310,7 @@ which kind of subject it is and the board adapts.
 > was started with. `board_is_running` compared those as strings, so a command arriving by the
 > other spelling concluded the board was not running: the hub showed every course idle while one
 > was answering on its port, and `board start` would happily have begun a second board for a
-> course that already had one. Compared by `realpath` now, in `boardlib.same_dir`, and used
+> course that already had one. Compared by `realpath` now, in `tutorboard.paths.same_dir`, and used
 > everywhere a root is matched — the hub's *current* flag and both launchers' "you were working
 > here" included.
 >
@@ -417,13 +459,13 @@ which kind of subject it is and the board adapts.
 > hundred tokens of *"I need to read the student's response... Hmm, wait. Let me re-read the
 > question... Actually, I think"*, cut off mid-sentence at the token ceiling. No `<think>`, no
 > harmony channel, no brackets — a model deliberating in plain prose in `content`. Every
-> tag-shaped gate in `boardlib` looked straight through it, `bin/free` tried twice, got the same
+> tag-shaped gate in `tutorboard.reasoning` looked straight through it, `bin/free` tried twice, got the same
 > shape twice, and then wrote whatever it had.
 >
 > So the second question is asked of **voice** rather than syntax: is this text addressed *to* the
 > student, or *about* them? A card speaks to somebody — "take $G = S_4$", "tell me which is
 > which". Deliberation talks about the student in the third person, argues with itself, and
-> addresses nobody at all. `boardlib.reads_as_reasoning` is that test, and what everything does
+> addresses nobody at all. `tutorboard.reasoning.reads_as_reasoning` is that test, and what everything does
 > with it is **refuse**, because there is nothing to remove when the whole reply is the thought:
 > the free chain passes over a model that deliberates and tries the next one, `board write` writes
 > nothing and says why, and the readers — the board, the recap the tutor reads its own lesson back
@@ -567,7 +609,7 @@ which kind of subject it is and the board adapts.
 > every model on that free chain reasons before it answers. `bin/free` took `message.content` and used
 > it whole. Two gates now: the chain is asked not to send reasoning at all (OpenRouter's exclude,
 > Groq's hidden format, dropped and retried bare on a 400), and every reply goes through
-> `boardlib.strip_reasoning` regardless, because a free endpoint ignoring a parameter it does not
+> `tutorboard.reasoning.strip_reasoning` regardless, because a free endpoint ignoring a parameter it does not
 > implement is the exact shape of this bug. `board write` strips again on the way in — only a block
 > the card *opens* with, since a lesson about reasoning models may say the word in earnest — so an
 > agent this repository has never heard of is covered too.
@@ -594,7 +636,7 @@ which kind of subject it is and the board adapts.
 > defect table. The grant now covers `pdflatex`, `latexmk` and the course's build script;
 > `install_permissions` tops an existing file up rather than skipping it, appending only
 > what is missing so a course's own list survives; and the build runs under
-> `boardlib.tex_env()`, which already knew where every TeX on either machine lives.
+> `tutorboard.tex.tex_env()`, which already knew where every TeX on either machine lives.
 > A failed build also stops saying `FAILED` and nothing else. `TEACHING.md` now says
 > plainly that compiling is the tutor's job and that it is allowed to do it, because one
 > refused command had been enough to convince it otherwise.
@@ -837,7 +879,7 @@ push with no assistant attribution; Tailscale in userspace mode with HTTPS; the 
   knobs are `SMOOTH` and `RESAMPLE` at the top of `web/slate-core.js`.
 - *How it looks.* There is no browser on the machine this was written on. Every visual judgement
   in here is inference.
-- *macOS.* The platform paths in `boardlib.py`, `bootstrap.sh` and the LaunchAgent are written from
+- *macOS.* The platform paths in `tutorboard/`, `bootstrap.sh` and the LaunchAgent are written from
   documentation, not from a Mac.
 - *Headless mode.* `tutor headless` has never been run against a real agent end to end. The
   `headless` recipes in the config are best guesses at each tool's non-interactive flags. The
@@ -900,7 +942,7 @@ these tests fail, the test is right.
 | A board that was merely running captured the one address off a machine mid-lesson: the follower weighed "the board serving the chosen course" and "some board that answered over there" as if they were the same kind of claim, so `prefer` and the allowance rule decided between a lesson and a stranger | `test/choice.py` |
 | A course tapped in a hub served by the other machine recorded the choice *over there*, where the follower never read it — the tap started the board, moved nothing, and looked broken | `test/choice.py`, and `/health` now publishes when the choice was made |
 | A refresh landed in another course, and tapping the right one in the hub changed nothing: `agent_start` spawns `tutor headless <course>`, which recorded a *person's* course choice — and its callers are all timers, one of which loops over every course, so each tick handed the address to whichever course the loop finished on, and `tutor resume` then re-elected it from the record it had just written | `test/choice.py` |
-| The tutor's own thinking was written onto the board as the lesson: the free chain's models reason in the first person about the student, and the reply was taken from `message.content` and used whole | `test/reasoning.py`, and `boardlib.strip_reasoning` on the wire and again at `board write` |
+| The tutor's own thinking was written onto the board as the lesson: the free chain's models reason in the first person about the student, and the reply was taken from `message.content` and used whole | `test/reasoning.py`, and `tutorboard.reasoning.strip_reasoning` on the wire and again at `board write` |
 | And it was the whole card rather than a preamble to it, because the front-matter parser was anchored at position zero — anything in front of the opening `---` sent the reply down the branch that makes the entire text the body | `test/reasoning.py` |
 | The "is a tutor attached" dot could never go green outside headless: only the daemon ever wrote `agent.json`, and a heartbeat is the wrong test for a session that is idle whenever its person is thinking | `test/agents.py`, `test/begin.py` |
 | Pressing Send did nothing: with marks anywhere on the lesson the handler raised the *Send what?* chooser and issued no request, so an evening's working sat unsent for two days. Every existing assertion about Send checked that the button was in the right column and had not scrolled off the edge; none pressed it. The old chooser test called `askWhatToSend` directly and asserted the deferral, so the suite endorsed the bug | `test/interactive.js` presses the real button and watches the wire; `test/link.js` |
@@ -942,7 +984,7 @@ these tests fail, the test is right.
 | And then that fix was defeated by its own ordering, which cost the whole sitting rather than one mapping. `settled()` — the call whose entire job is to say *the page count can be believed now* — ran as the FIRST statement of the `/slate/state` handler, before the saved pages were adopted. So the board was told to believe a count of one, judged the question it was on to be recorded past the end, cut a fresh page for it, and by cutting it pushed the length to two. The adoption guard was `pages.length === 1`. It no longer held, so an evening on disk was refused in silence: every past board a blank photograph, and the next stroke saved a blank sheet over a real page under its new number. **The pattern, in a new coat: a guard written against the only thing that could break it at the time it was written** | the board is told last, once the pages are actually in; adoption asks whether any page has INK rather than how many sheets there are, so nothing blank can refuse a sitting; and the mapping is repaired from the page each answer records having been sent from, which is the one authority a browser cannot rot; `test/adopt.js` |
 | Only one board per question ever existed, so within an exercise the earlier attempts did not persist: you write, hand it in, the tutor replies, and the board that "appeared" under the reply was the same board slid down the run. Reported as "the previous board for this same question that I have not yet completed doesn't persist... I want ALL boards to persist and to operate independently of each other" | a question is a chain, one board per attempt: frozen where it was written as soon as what it holds has been handed in AND the tutor has answered since — both halves, or Send forks the page under your hand and a second hint cuts a board about nothing — and the next attempt opens on a COPY, which is the only way the working carries forward and the two are still independent; `test/chain.js` |
 | `board export` wrote the tutor's cards and nothing else, named with the second it happened, into `live/export/` -- which a course's `.gitignore` throws away. Half a conversation, unfindable, unkept. Asked for instead: the whole thing as one PDF to show a professor | `document.py` interleaves every card and every page handed in, in the board's own reading order and labelled by attempt; it lands in `transcripts/<lesson>-vN.pdf`, is staged in git, and `--all` makes one document of the whole course; `test/document.py` |
-| A card arrived that was the model thinking out loud, with no tag anywhere in it -- the whole reply was the thought, so every strip in `boardlib` passed it through and `bin/free` wrote it after two attempts came back the same way. Eight hundred tokens of deliberation, cut off mid-sentence, as the lesson | `reads_as_reasoning` judges voice rather than syntax -- a card is addressed to somebody, deliberation is about them -- and every caller refuses rather than edits: the chain tries the next model, `board write` writes nothing, and the board, the recap and the export show a notice in place of a card that got to disk another way; `test/reasoning.py` |
+| A card arrived that was the model thinking out loud, with no tag anywhere in it -- the whole reply was the thought, so every strip in `tutorboard.reasoning` passed it through and `bin/free` wrote it after two attempts came back the same way. Eight hundred tokens of deliberation, cut off mid-sentence, as the lesson | `reads_as_reasoning` judges voice rather than syntax -- a card is addressed to somebody, deliberation is about them -- and every caller refuses rather than edits: the chain tries the next model, `board write` writes nothing, and the board, the recap and the export show a notice in place of a card that got to disk another way; `test/reasoning.py` |
 | A save was addressed to "the current page", not to a page. A queued save therefore carried whichever page was in hand when the wire freed up — so switching page while one was in flight left the page being LEFT with an older version of itself on disk. Invisible until the board began switching pages on its own, and then it was ink lost | saves carry a page number, `dirtyPages` remembers which pages are owed, and a page is cleaned only if it did not change while its save was in the air; `test/plane.js` holds a save open on the wire and checks what the queue does with it |
 | A follow-up question landed on a blank board while the working it was asking about sat on the board above. Not a defect -- a question card is a new question and a new question gets a blank sheet -- but wrong in the middle of an exercise, and unguessable from a card kind | a blank board with working behind it offers to carry it over, one tap, as a copy; the person decides, because a new exercise opened on the last one's proof is worse than a blank sheet; `test/chain.js` |
 | A skipped homework problem was dropped. One sentence told the tutor what a skip meant — "do not re-ask it, carry on" — which is right for a concept check and expensive for an assigned problem, where a skip is a lost mark and the student means *not now* | `skip_sense` reads the sitting: in homework the skip defers and names what is still owed, off the document rather than off anyone's memory; `homework.outstanding`, `board hw`, `test/begin.py`, `test/homework.py` |
@@ -952,7 +994,7 @@ these tests fail, the test is right.
 | The compute node never pulled the board. Every session pulled the *course*, and the always-on host had a timer for the tool, but `--tool-pull` refuses to install one on a node — so the node ran whatever it was last pulled by hand, indefinitely, while the Mac moved on. And the timer that did run bounced only the proxy on purpose, so the Mac's own boards and tutors went on serving the old code after every pull: a fix reached the disk of both machines and the lesson of neither | `tutor` and `tutor resume` pull this repository, re-exec onto it, and then `tutor restart --tutors`; `scripts/tool-pull.sh` does the same; `test/resume.py` |
 | ...and the first version of that fix could not say it had happened: `execve` throws away whatever is sitting in the process's buffers, and stdout is a pipe or a log file every time this runs for real — so the one line explaining why the board changed under somebody's lesson was dropped on the way out | a flush before the exec; `test/resume.py` drives a real clone and reads what it printed |
 | A deploy dropped somebody mid-proof into a different course: starting a board claimed the tailnet name unconditionally, and `tutor restart` restarts every board on the machine one after another — so the address ended up wherever the course list happened to end. The installed app has one URL baked into it and no way to say which lesson it wanted | `ts_repoint` will not take a name from a board that is still answering; `board vpn serve` is the one command that does, because that is a person asking; `test/address.py` |
-| An evening's homework was written up and could not be typeset. Two causes wearing one face. A course's `.claude/settings.local.json` was written the first time its board started and never touched again, so a course created before the LaTeX grant existed was never going to get it — and the tutor, refused the compiler, reasonably concluded the machine was the problem. Underneath that, `board hw build` handed the course's own `scripts/build.sh` whatever `PATH` the board process happened to have: that script prepends TinyTeX's *Linux* directory, and on the Mac, started by a login agent with `/usr/bin:/bin` and nothing else, there was no `pdflatex` to find. The sheet was complete and correct the whole time | the grant covers `pdflatex`, `latexmk`, the course's build script and the rest of the toolchain, and `install_permissions` now tops an existing file up instead of skipping it — appending only what is missing, so a course's own list survives intact; the build runs under `boardlib.tex_env()`, which already knew every place a TeX gets installed on either machine; `test/agents.py`, `test/homework.py` |
+| An evening's homework was written up and could not be typeset. Two causes wearing one face. A course's `.claude/settings.local.json` was written the first time its board started and never touched again, so a course created before the LaTeX grant existed was never going to get it — and the tutor, refused the compiler, reasonably concluded the machine was the problem. Underneath that, `board hw build` handed the course's own `scripts/build.sh` whatever `PATH` the board process happened to have: that script prepends TinyTeX's *Linux* directory, and on the Mac, started by a login agent with `/usr/bin:/bin` and nothing else, there was no `pdflatex` to find. The sheet was complete and correct the whole time | the grant covers `pdflatex`, `latexmk`, the course's build script and the rest of the toolchain, and `install_permissions` now tops an existing file up instead of skipping it — appending only what is missing, so a course's own list survives intact; the build runs under `tutorboard.tex.tex_env()`, which already knew every place a TeX gets installed on either machine; `test/agents.py`, `test/homework.py` |
 | **The pattern this repository keeps relearning, again: a rule with no way to expire.** "Only ever created, never edited" was written to protect a course's own permission list, and it did — while quietly guaranteeing that no course would ever receive a grant added after its first board start. A file that is only ever created is a file frozen at the moment the project understood the least about what it needed | anything that installs a file into a course has to have an answer to "and then what, in six weeks"; here it is a merge that only appends |
 | `board hw build` printed the single word `FAILED` for an entire sitting while knowing more than that. The course's build script discards its own output by design, so on the one failure it could not explain — no compiler at all — it had nothing to pass on, and "failed" with no reason reads as a broken proof to the person who just wrote it | a failed build with nothing to say is given a reason: the missing compiler is named when that is what it is, and a silent script is named when it is not; the board shows it the way it shows a LaTeX error; `test/homework.py` |
 
@@ -1640,7 +1682,7 @@ The pieces:
 - **`/handover`** in `serve.py` — a secret-gated way for one machine to ask the other to wrap up
   its tutor before the proxy moves. `bin/follow` is its caller, on the transition off a remote
   machine and only there.
-- **`boardlib.machine_shape()`** — "always-on host" (a `follow` config block), "compute node"
+- **`tutorboard.machine.machine_shape()`** — "always-on host" (a `follow` config block), "compute node"
   (Slurm answers), or "standalone". `board doctor` prints it, and `bin/board` uses it so that on
   the always-on host the HTTPS name points at the proxy, never at a board port directly.
 
@@ -1940,7 +1982,8 @@ board behaves, never about whether it works, and one command overrides it.
 
 Nothing here is tied to a Linux cluster. The server is standard-library Python, the pages are
 plain browser JavaScript, and the two things that genuinely differ between machines — where TeX
-keeps its binaries and which `tailscale` is in charge — are isolated in `boardlib.py`.
+keeps its binaries and which `tailscale` is in charge — are isolated in `tutorboard/`,
+in `tex.py`, `machine.py` and `net/tailscale.py`.
 
 - **TeX** is found by globbing rather than guessing an architecture: `~/.TinyTeX/bin/*`,
   `~/Library/TinyTeX/bin/*` (where TinyTeX lands on macOS), `/Library/TeX/texbin` for MacTeX, and
@@ -2616,11 +2659,23 @@ wrapper.
 ## Layout
 
 ```
-bin/board          the command line
-serve.py           the server: watches cards, pushes SSE, compiles TikZ, takes uploads and ink
+bin/board          the command line (also: tutor, follow, free)
+serve.py           the entry point, and nothing else
 TEACHING.md        how to teach on this board -- copied into every course's live/
-boardlib.py        the handful of things that differ between machines
-homework.py        where a course keeps its problem sets, and how much of one is done
+tutorboard/        the board itself, organised by what a thing is about:
+  paths ports      what this machine knows about itself
+  choice machine   which course was asked for, and what this machine is
+  processes tex    what is alive here, and where TeX is
+  limits reasoning what a model may say, and when it may not say it
+  handoff sense    what a turn means, and what it leaves behind
+  machines.py      the other machines, and what each can teach
+  net/             reaching them: tailscale, socks, boards, egress
+  course/          a course on disk: repo, config, document, homework, review,
+                   syllabus
+  lesson/          what is on the board now: cards, turns, notes, slate,
+                   archive, state, git, uploads
+  server/          app, handler, hub, tikz, spawn, multipart, and routes/ --
+                   one module per family of paths
 web/               the hub   — home.html, home.css, home.js
                    the board — board.html, board.css, board.js, macros.js, vendored KaTeX
                    the ink layer — annotate.js, over the tutor's own cards
