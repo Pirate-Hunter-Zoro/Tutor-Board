@@ -214,13 +214,59 @@ try:
     check("and it is still caught up first, so a warm board never goes stale",
           calls["sync"] == ["Here"])
 
+    # --- a board that DIED, on a machine nobody is sitting at ---------------
+    #
+    # `board stop` removes the record. A crash, an OOM or a reboot leaves one
+    # behind naming a pid that is gone -- and nothing ever looked. This command
+    # restores the course last worked in, which is exactly one of them, so any
+    # other board that fell over stayed down until a person noticed and said so.
+    # On the always-on host that is precisely backwards: its whole purpose is
+    # that nobody has to be here, and from the iPad it is a course in the hub
+    # that will not open on a machine that is otherwise perfectly healthy.
+    boardlib.machine_shape = lambda: "always-on host"
+    boardlib.slurm_nodes = lambda: None
+    make_course("Crashed", node="compute301", pid=44, when=200)
+    boardlib.board_is_running = lambda pid, root: pid != 44
+    reset()
+    tutor.cmd_resume(cfg, ["--quiet"])
+    check("a board whose process is gone is started again, without being asked",
+          "Crashed" in calls["start"])
+    check("a course nobody has ever opened is not started by a timer",
+          "NeverRan" not in calls["start"])
+    check("and neither is a board recorded on another machine",
+          "Newer" not in calls["start"] and "Older" not in calls["start"])
+
+    # A board that is up is not restarted, which is the case that runs every
+    # three minutes for ever and must therefore cost nothing.
+    boardlib.board_is_running = lambda pid, root: True
+    reset()
+    tutor.cmd_resume(cfg, ["--quiet"])
+    check("and a machine with nothing wrong with it starts nothing at all",
+          not calls["start"])
+
+    # On a compute node this must not happen: `resume` runs from a login hook
+    # there, a board belongs to an allocation, and a login node is shared.
+    boardlib.machine_shape = lambda: "compute node"
+    boardlib.board_is_running = lambda pid, root: pid != 44
+    reset()
+    tutor.cmd_resume(cfg, ["--quiet"])
+    check("but a login on a compute node does not start everything with a record",
+          "Crashed" not in calls["start"])
+    shutil.rmtree(os.path.join(tmp, "Crashed"), ignore_errors=True)
+    boardlib.board_is_running = lambda pid, root: pid == 33
+
     # --- no squeue at all is not the same as no allocations -----------------
     # The cases above swept these records, which is what they are supposed to do
     # -- a run of `resume` clears records from nodes that no longer exist. Lay
     # them down again for what follows.
     make_course("Newer", node="compute999", pid=22, when=9000)
     boardlib.slurm_nodes = lambda: None
-    boardlib.board_is_running = lambda pid, root: False
+    # `Here` is a board running here, which is what its name means. It matters
+    # from now on: a machine that is not a compute node also restarts boards of
+    # its own that have died, so a course whose record names this host and whose
+    # pid is gone is a start, and every "nothing was started" case below would be
+    # asserting about that instead of about the node's board.
+    boardlib.board_is_running = lambda pid, root: pid == 33
     reset()
     tutor.cmd_resume(cfg, ["Newer", "--quiet"])
     check("with no Slurm to ask, another node's board is left alone",

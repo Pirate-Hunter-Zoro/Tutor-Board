@@ -1608,6 +1608,42 @@ def cmd_resume(cfg, args):
         say("cleared a dead board record for: %s" % ", ".join(swept))
 
     found = courses(cfg)
+
+    # A board that DIED is not a board that was stopped, and until now nothing
+    # ever looked. `board stop` removes the record; a crash, an OOM or a reboot
+    # leaves one behind naming a pid that is gone. This command restores the
+    # course last worked in -- exactly one of them -- so any other board that
+    # fell over while nobody was sitting at this machine stayed down until a
+    # person noticed and said so. From the iPad that is a course in the hub that
+    # will not open, on a machine that is otherwise perfectly healthy, and the
+    # whole point of the always-on host is that nobody has to be here.
+    #
+    # Three conditions, and each one is a thing that must NOT be started: only
+    # where a record exists, so a course nobody has ever opened is not brought up
+    # by a timer; only where it names this node, because a record from another
+    # machine proves nothing this one can check; and only where the pid is really
+    # gone, which `board_is_running` decides by realpath rather than by string.
+    #
+    # And not on a compute node. There, this runs from a login hook, a board
+    # belongs to an allocation, and a login is a person arriving who wants the
+    # one course they came for -- starting every board that an ended allocation
+    # left a record of, on a shared login node, is the thing the guard further
+    # down exists to prevent.
+    import boardlib
+    revived = []
+    if boardlib.machine_shape() != "compute node":
+        for c in found:
+            rec = board_record(c["root"]) or {}
+            if not rec or rec.get("node") != host:
+                continue
+            if boardlib.board_is_running(rec.get("pid"), c["root"]):
+                continue
+            code, _ = board(c["root"], "start")
+            if code == 0:
+                revived.append(c["dir"])
+    if revived:
+        say("restarted a board that had died: %s" % ", ".join(revived))
+
     course = pick(found, rest[0]) if rest else last_board(cfg)
     if not course:
         say("no board has ever run in %s; start one with: tutor" % cfg["courses_dir"])
