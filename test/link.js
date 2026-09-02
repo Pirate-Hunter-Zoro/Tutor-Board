@@ -619,6 +619,130 @@ if (es && window.Annotate) {
     if (padded > W) ok('the layer is larger than the card, so there is room to overshoot');
     else fail('the layer is exactly the card, so anything drawn past it is lost');
 
+    // An erase repairs the rectangle it emptied. It does not repaint the card.
+    //
+    // This is the annotation half of the fix the slate already had. Rubbing a
+    // word out of a card carrying a lot of ink cleared the whole layer and
+    // repainted every mark on it, per pointer sample -- and a Pencil sends four
+    // of those a frame. Reported as annotating being "still sluggish as hell".
+    {
+      window.Annotate.setTool('pen');
+      window.Annotate.clear('0003');
+      var spots = [60, 160, 260, 360, 460];
+      spots.forEach(function (x) {
+        ink('pointerdown', x, 100, 0.5);
+        ink('pointermove', x + 10, 100, 0.5);
+        ink('pointermove', x + 20, 100, 0.5);
+        ink('pointermove', x + 30, 100, 0.5);
+        ink('pointerup', x + 30, 100, 0.5);
+      });
+      var drawn = window.Annotate.payload('0003').strokes.length;
+
+      var straightRaf = window.requestAnimationFrame;
+      window.requestAnimationFrame = function (fn) { fn(); };
+
+      window.__paints = {};
+      window.Annotate.redrawAll();
+      var whole = (window.__paints.lineTo || 0);
+
+      window.Annotate.setTool('erase');
+      window.__paints = {};
+      ink('pointerdown', spots[2] + 15, 100, 0.5);
+      ink('pointerup', spots[2] + 15, 100, 0.5);
+      var oneOut = (window.__paints.lineTo || 0);
+      var cleared = (window.__paints.clearRect || 0);
+      var clipped = (window.__paints.clip || 0);
+      window.requestAnimationFrame = straightRaf;
+      window.Annotate.setTool('pen');
+
+      var left = window.Annotate.payload('0003').strokes.length;
+      if (drawn === spots.length && left === spots.length - 1)
+        ok('one sweep of the rubber takes out the mark under it and no other');
+      else fail('the rubber removed ' + (drawn - left) + ' of ' + drawn + ' marks');
+      /* A repair over one mark's rectangle repaints that mark. A repaint of the
+         card repaints all of them, so anything near the whole is the old
+         behaviour back. */
+      if (whole > 0 && oneOut * 2 < whole)
+        ok('and repaints the rectangle it emptied, not the card (' + oneOut
+           + ' line calls where a repaint is ' + whole + ')');
+      else fail('erasing one mark cost ' + oneOut + ' line calls against ' + whole
+                + ' for the whole card: the rectangle is not being clipped');
+      /* And the ink really did come off: a clip and a clear, once. Without this
+         the check above passes just as well for a rubber that does nothing. */
+      if (cleared === 1 && clipped === 1)
+        ok('with one clip and one clear, so the ink actually came off');
+      else fail('the rubber cleared ' + cleared + ' rectangle(s) under '
+                + clipped + ' clip(s); one of each is a repair');
+      window.Annotate.clear('0003');
+    }
+
+    // An undo step is the LIST of marks, not a copy of them.
+    //
+    // It used to be a deep copy of every point of every mark on the card, built
+    // on every pen-down and every touch of the rubber, with sixty of them on the
+    // stack -- an allocation proportional to everything already written, landing
+    // at the moment a hand asks the surface for something. Making it the list is
+    // correct only because nothing on a card is ever changed in place: adding a
+    // mark REPLACES the list. If that stops being true the undo stack silently
+    // starts holding the present, and the symptom is an undo that does nothing.
+    {
+      window.Annotate.setTool('pen');
+      window.Annotate.clear('0003');
+      ink('pointerdown', 80, 60, 0.5);
+      ink('pointermove', 110, 60, 0.5);
+      ink('pointerup', 140, 60, 0.5);
+      ink('pointerdown', 80, 150, 0.5);
+      ink('pointermove', 110, 150, 0.5);
+      ink('pointerup', 140, 150, 0.5);
+      var two = window.Annotate.payload('0003').strokes.length;
+      window.Annotate.undo();
+      var one = window.Annotate.payload('0003').strokes.length;
+      window.Annotate.undo();
+      var none = window.Annotate.payload('0003').strokes.length;
+      if (two === 2 && one === 1 && none === 0)
+        ok('undo takes back one mark at a time, so the stack holds the past');
+      else fail('two marks undid to ' + one + ' then ' + none
+                + ': an undo step is holding the live list');
+      window.Annotate.redo();
+      if (window.Annotate.payload('0003').strokes.length === 1)
+        ok('and redo puts it back');
+      else fail('redo did not restore the mark undo took');
+      window.Annotate.clear('0003');
+    }
+
+    // A stroke belongs to ONE pointer.
+    //
+    // The other contacts that arrive on the layer while a stroke is being drawn
+    // are the rest of the hand holding the pen -- or, now that a finger scrolls
+    // over a card like anywhere else, a finger that has landed to do exactly
+    // that. Either of them used to be able to finish somebody else's stroke,
+    // because a `pointerup` is a `pointerup` whoever sent it. The symptom is
+    // annotation that stops writing partway through a word and cannot be
+    // reproduced by anyone holding the pen properly.
+    {
+      window.Annotate.setTool('pen');
+      window.Annotate.clear('0003');
+      var other = function (type, x, y) {
+        var ev = new window.Event(type, { bubbles: true, cancelable: true });
+        Object.assign(ev, { pointerId: 99, pointerType: 'touch', isPrimary: false,
+                            pressure: 0, clientX: x, clientY: y });
+        layer.dispatchEvent(ev);
+      };
+      ink('pointerdown', 100, 170, 0.5);
+      ink('pointermove', 130, 170, 0.5);
+      other('pointerup', 400, 40);            /* a hand lifting off the glass */
+      other('pointercancel', 400, 40);        /* or a scroll taking it away */
+      ink('pointermove', 200, 170, 0.5);
+      ink('pointerup', 240, 170, 0.5);
+      var whole = window.Annotate.payload('0003').strokes;
+      var far = whole.length ? whole[0].p[whole[0].p.length - 2] * W : 0;
+      if (whole.length === 1 && Math.abs(far - 240) < 14)
+        ok('a second contact does not finish the stroke the pen is drawing');
+      else fail('the stroke ended at ' + far.toFixed(0) + ' of 240 across '
+                + whole.length + ' mark(s): another contact cut it short');
+      window.Annotate.clear('0003');
+    }
+
     // Smoothing: one sample thrown 24px sideways out of an otherwise straight
     // line must not come back as a spike. Raw samples joined by straight
     // segments is what "jagged" meant.
@@ -709,10 +833,95 @@ if (es && window.Annotate) {
       ok('but the lesson can still be scrolled while annotating');
     else fail('touch-action is refused across the whole lesson, so there is '
               + 'nowhere left to scroll with once annotate mode is on');
-    if (/body\.annotating\s+\.card,\s*body\.annotating\s+\.card \*\s*\{[^}]*touch-action:\s*none/.test(css3))
-      ok('while a swipe over a card is still a stroke, not a scroll');
-    else fail('a card no longer refuses the scroll gesture, so ink over one '
-              + 'will be taken as a swipe');
+    // And WHERE the hand landed no longer decides whether it scrolls.
+    //
+    // It used to. `body.annotating .card, body.annotating .card *` refused the
+    // gesture, so a swipe over a card was always a stroke and a swipe over the
+    // margin down either side of the column was always a scroll — which means a
+    // pen out in that margin scrolled the lesson instead of writing on it.
+    // Reported from the device: "on the far left and right I can't
+    // write/annotate there because it scrolls. I don't want the location to be
+    // what determines if I scroll or not. I want whether or not it is my finger
+    // operating determining if it scrolls."
+    if (!/body\.annotating\s+\.card,\s*body\.annotating\s+\.card \*\s*\{[^}]*touch-action:\s*none/.test(css3))
+      ok('and where the hand landed does not decide whether it scrolls');
+    else fail('touch-action: none is back on the cards, so the place a hand '
+              + 'lands decides again whether it writes or scrolls');
+    var layerRule = /canvas\.ann-layer\s*\{([^}]*)\}/.exec(css3);
+    if (layerRule && /touch-action:\s*pan-y/.test(layerRule[1]))
+      ok('the ink layer permits the scroll, and the script takes it back');
+    else fail('the ink layer refuses the scroll in CSS, so a finger cannot '
+              + 'move the lesson while annotate mode is on');
+
+    // The hand decides, and the script is where that decision is made: a pen
+    // is refused the scroll, a finger is not.
+    window.Annotate.setOn(true);
+    var noteLayer = card.querySelector('canvas.ann-layer');
+
+    var fingerDown = new window.Event('pointerdown', { bubbles: true, cancelable: true });
+    fingerDown.pointerType = 'touch';
+    fingerDown.clientX = 40; fingerDown.clientY = 40; fingerDown.pointerId = 7;
+    noteLayer.dispatchEvent(fingerDown);
+    var fingerTouch = new window.Event('touchstart', { bubbles: true, cancelable: true });
+    fingerTouch.changedTouches = [{ touchType: 'direct' }];
+    noteLayer.dispatchEvent(fingerTouch);
+    if (!fingerTouch.defaultPrevented)
+      ok('a finger still scrolls the lesson, over a card as anywhere else');
+    else fail('a finger over a card is refused the scroll, so annotate mode '
+              + 'locks the lesson where it stands');
+
+    var penDown = new window.Event('pointerdown', { bubbles: true, cancelable: true });
+    penDown.pointerType = 'pen';
+    penDown.clientX = 40; penDown.clientY = 40; penDown.pointerId = 8;
+    penDown.pressure = 0.5;
+    noteLayer.dispatchEvent(penDown);
+    var penTouch = new window.Event('touchstart', { bubbles: true, cancelable: true });
+    penTouch.changedTouches = [{ touchType: 'stylus' }];
+    noteLayer.dispatchEvent(penTouch);
+    if (penTouch.defaultPrevented) ok('while a pen never scrolls, wherever it lands');
+    else fail('a pen is allowed to scroll the lesson, so it cannot write');
+    noteLayer.dispatchEvent(new window.Event('pointerup', { bubbles: true }));
+    window.Annotate.clear('0003');
+
+    // The layer has to REACH the margin, or refusing the scroll out there
+    // achieves nothing: there would still be no canvas under the pen.
+    var wideCard = { left: 82, top: 0, width: 736, height: 400,
+                     right: 818, bottom: 400, x: 82, y: 0 };
+    card.getBoundingClientRect = function () { return wideCard; };
+    window.Annotate.load({ '0003': [{ c: '#e0b45c', w: 2, p: [0.1, 0.1, 0.5, 0.5] }] });
+    window.Annotate.redrawAll();
+    if (parseFloat(noteLayer.style.width || '0') >= 900)
+      ok('and the layer reaches both edges of the window, so the margins take ink');
+    else fail('the ink layer stops at the card (' + noteLayer.style.width
+              + ' wide in a 900px window); the margins are still unwritable');
+    if (parseFloat(noteLayer.style.left || '0') <= -82)
+      ok('offset to match, so ink in the margin is still anchored to its card');
+    else fail('the layer is wider but not moved, so it hangs off one side only');
+
+    // Up and down it reaches half the gap to its neighbour -- and a HIDDEN
+    // neighbour is not a neighbour. The writing surface sits in this same list
+    // and reports a rectangle of zeros while the panel is shut, which read as a
+    // neighbour a thousand pixels up: the layer would then reach back over the
+    // card above it and take that card's pen. Marks landing on the wrong card is
+    // exactly what the padding is kept small to avoid.
+    var ghost = doc.createElement('div');
+    ghost.getBoundingClientRect = function () {
+      return { left: 0, top: 0, width: 0, height: 0, right: 0, bottom: 0, x: 0, y: 0 };
+    };
+    doc.getElementById('cards').insertBefore(ghost, card);
+    card.getBoundingClientRect = function () {
+      return { left: 82, top: 900, width: 736, height: 400,
+               right: 818, bottom: 1300, x: 82, y: 900 };
+    };
+    window.Annotate.load({ '0003': [{ c: '#e0b45c', w: 2, p: [0.1, 0.1, 0.5, 0.5] }] });
+    window.Annotate.redrawAll();
+    if (parseFloat(noteLayer.style.top || '0') >= -40)
+      ok('and a hidden neighbour is not one, so no layer reaches over a card');
+    else fail('the layer reaches ' + noteLayer.style.top + ' above its own card '
+              + 'because a hidden sibling reported a rectangle of zeros');
+    ghost.remove();
+    card.getBoundingClientRect = function () { return wideCard; };
+    window.Annotate.clear('0003');
 
     window.Annotate.setOn(true);
     var sel1 = new window.Event('selectstart', { bubbles: true, cancelable: true });

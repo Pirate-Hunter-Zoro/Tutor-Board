@@ -46,6 +46,87 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 2 September 2026
 >
+> **Where a hand lands stopped deciding whether it writes.** Reported in three parts, and the
+> middle one is the interesting one: *"annotating is STILL sluggish as hell. And on the side of the
+> screen — the far left and right — I can't write/annotate there because it scrolls. I don't want
+> the location to be what determines if I scroll or not. I want whether or not it is my finger
+> operating determining if it scrolls or not. I should be able to annotate anywhere outside of a
+> board."*
+>
+> **It was two rules about the same screen.** `body.annotating .card` carried `touch-action: none`,
+> so a swipe over a card was always a stroke and a swipe anywhere else was always a scroll. `#board`
+> is a 46rem column centred in the glass, so on a tablet in landscape that "anywhere else" is two
+> hundred pixels of margin down each side — and a pen out there had no canvas under it at all, so
+> the gesture went to the page. The margin was answering a question that belongs to the hand.
+>
+> Both halves are now the hand's. The ink layer permits the scroll in CSS and `annotate.js` takes
+> it back on `touchstart` when the contact is a stylus, or when it is a finger and the slate has
+> been told a finger writes — so a finger scrolls the lesson natively, with its own momentum,
+> anywhere on it, and a pen never scrolls, anywhere on it. And the layer now *reaches* the margins:
+> sideways to both edges of the window, up and down half the gap to its neighbour, so a run of
+> cards has no strip in it where the pen has nothing to land on. Ink there is still stored as
+> fractions **of its card**, which is what keeps it anchored to the words it is about through every
+> reflow; the fractions simply go negative. A hidden neighbour is not a neighbour — the writing
+> surface sits in that same list and reports a rectangle of zeros while the panel is shut, which
+> reads as a neighbour a thousand pixels up, and a layer believing it would reach back over the
+> card above and take that card's pen.
+>
+> **And the sluggishness was four more things, three of them the same shape as fixes the slate
+> already had.**
+>
+> - **Every undo step was a deep copy of the card.** Every point of every mark on it, rebuilt on
+>   every pen-down and every touch of the rubber, sixty of them on the stack — an allocation
+>   proportional to everything already written, landing at the moment the hand asks the surface for
+>   something. A step is the LIST of marks now, which is correct only because adding one REPLACES
+>   the list rather than pushing onto it. `test/link.js` undoes two marks one at a time and fails if
+>   a step ever starts holding the present.
+> - **Every erase sample repainted the card.** Clear the whole layer, repaint every mark, per
+>   pointer sample, of which a Pencil sends four a frame. It repairs the rectangle the removed ink
+>   occupied instead — clipped, once a frame — and a pen lift repairs the rectangle of the stroke
+>   that was just drawn rather than the card. Measured: nothing repainted where a repaint of five
+>   marks is 195 line calls.
+> - **A second contact could finish somebody else's stroke.** A `pointerup` is a `pointerup`
+>   whoever sent it, and the layer never checked. The rest of the hand holding the pen used to be
+>   able to end a word halfway through, and now that a finger scrolls over a card like anywhere else
+>   there is one more contact that can. A stroke belongs to one pointer.
+> - **And the autosave serialised the card in the middle of the next stroke.** It no longer encodes
+>   a picture, but `JSON.stringify` of a well-annotated card is still real main-thread time, and it
+>   was scheduled about a second after a stroke — which is the middle of the one after it. Deferred
+>   while a hand is at work, the way the slate's own save is, with an eight-second ceiling so ink
+>   still reaches disk under a hand that never stops.
+>
+> Two smaller things went with them: `end` no longer asks the card for its rectangle (a forced
+> layout of a lesson full of typeset mathematics, once per stroke) — the resize observer remembers a
+> card that grew mid-stroke instead; and the picture the tutor reads is cropped to the ink, because
+> a layer that reaches both edges of the window would otherwise be a ring the size of a fingernail
+> in the middle of a sheet of white.
+>
+> **What is still not writable, and deliberately.** The student's own turns. A `.mine` block
+> carrying a frozen answer is a picture of a board, and the ask was to be able to write *outside* a
+> board; the gutter beside one is the only place left where a pen scrolls. Annotations are anchored
+> to a card id — `/annotate/save` takes one — so covering a turn is a change to what a mark is
+> about, not to where the canvas reaches.
+>
+> **Nothing that arrives above the reader may move the reader.** The third part of the same report:
+> *"intermittently, after I submit a response, it glitches and scrolls me up above the last board I
+> wrote my response on."* Nothing scrolled. The transcript grew above the writing surface and took
+> the page down with it, which from behind the glass is indistinguishable from being scrolled up.
+>
+> Two things do that on a send, and the first explains the intermittency. A sent answer is held out
+> of the transcript until the tutor replies — but only when it is the LAST item, which it is only
+> while the question being answered is also the last card the tutor has written. Answer an exercise
+> the tutor has since written a note under, and the turn is rendered into its proper place *above*
+> the surface, a whole board's height of it. And the frozen picture is an `img` with a width and no
+> height, so it occupies nothing until it decodes and then suddenly occupies a screenful.
+>
+> Safari has no scroll anchoring, so the board keeps the place itself: `render` notes which card or
+> turn the reader is actually looking at and where on the glass it sits, and puts it back once the
+> lesson has been rebuilt around it. Everything below that either leaves the page alone or says
+> explicitly where it should go, and both of those are decisions; content appearing above somebody
+> is not. The late picture compensates on its own `load`. `test/interactive.js` carries a small
+> layout engine for the transcript and fails on the old behaviour by 300 pixels. Shell version
+> `board-shell-v74`.
+>
 > **A past board was a photograph taken for somebody else, and it could not be written on.**
 > Reported from the iPad, mid-Galois: *"Some of the boards on my current Galois-Theory lesson are
 > fucked. The color is inverted and when I try to write on them, it clears everything to be a new

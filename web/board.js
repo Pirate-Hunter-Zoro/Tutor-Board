@@ -630,6 +630,10 @@ function render(data) {
   }
 
   var wasFollowing = following();
+  /* Where the reader is, before the lesson is rebuilt around them. Put back at
+     the foot of this function unless something down there has a better idea
+     about where the page should be. */
+  var place = firstPaint ? null : anchorNow();
   /* What is on screen already, by key. A payload arrives for all sorts of
      reasons that have nothing to do with the lesson -- the tutor's heartbeat
      lands every thirty seconds while it writes, the uncommitted count changes, a
@@ -729,6 +733,14 @@ function render(data) {
         shot.src = m.png;
         shot.loading = "lazy";
         shot.alt = "what you wrote";
+        /* It has a width and no height, so until it decodes it occupies nothing
+           and then suddenly occupies a screenful. If that happens above the
+           reader it takes the page down with it, which is the other half of
+           "after I submit a response it scrolls me up above the last board". */
+        var shotWas = 0;
+        shot.addEventListener("load", function () {
+          shotWas = holdBelow(shotWrap, shotWas);
+        });
         shotWrap.appendChild(shot);
         node.appendChild(shotWrap);
       }
@@ -956,6 +968,11 @@ function render(data) {
     window.Annotate.loadSent(data.notes_sent);
   }
   renderScratch(data.uploads || []);
+
+  /* Put the reader back where they were. Everything below this either leaves the
+     page alone or says explicitly where it should go, and both of those are
+     decisions; content appearing above somebody is not. */
+  holdAnchor(place);
 
   if (firstPaint) {
     firstPaint = false;
@@ -1302,6 +1319,68 @@ function revealNewest(smooth) {
   else window.scrollTo(0, top);
 }
 
+/* ------------------------------------------------------- keeping the place --
+
+   NOTHING THAT ARRIVES ABOVE THE READER MAY MOVE THE READER.
+
+   Reported as: "intermittently, after I submit a response, it glitches and
+   scrolls me up above the last board I wrote my response on." Nothing scrolled.
+   The transcript grew ABOVE the writing surface and took the page down with it,
+   which from behind the glass is indistinguishable from being scrolled up.
+
+   Two things do that on a send. The answer becomes a turn, and it is rendered
+   into the transcript in its proper place -- above the surface -- unless it
+   happens to be the very last item, which it is only while the question being
+   answered is also the last card the tutor has written. And the frozen picture
+   of it is an `img` with a width and no height, so it occupies nothing at all
+   until it has decoded and then suddenly occupies a screenful.
+
+   Safari has no scroll anchoring, so this is it: note which node the reader is
+   actually looking at and where on the glass it sits, and after the lesson has
+   been rebuilt around it, put it back. Anchored by card or turn id rather than
+   by render key, because a key carries a version and the node the reader is
+   looking at is very often the one that was just rebuilt. */
+function anchorId(node) {
+  if (!node || !node.dataset) return null;
+  if (node.dataset.card) return '[data-card="' + node.dataset.card + '"]';
+  if (node.dataset.turn) return '[data-turn="' + node.dataset.turn + '"]';
+  return null;
+}
+
+function anchorNow() {
+  var kids = els.cards.children;
+  for (var i = 0; i < kids.length; i++) {
+    var sel = anchorId(kids[i]);
+    if (!sel) continue;
+    var r = kids[i].getBoundingClientRect();
+    /* The first thing whose foot is still on the glass: that is what is being
+       read, or what is immediately above it. */
+    if (r.bottom > 0) return { sel: sel, top: r.top };
+  }
+  return null;
+}
+
+function holdAnchor(a) {
+  if (!a) return;
+  var node;
+  try { node = els.cards.querySelector(a.sel); } catch (e) { return; }
+  if (!node) return;
+  var moved = node.getBoundingClientRect().top - a.top;
+  /* A pixel of rounding is not a jump, and correcting it would cancel a smooth
+     scroll that is legitimately in flight. */
+  if (Math.abs(moved) < 2) return;
+  window.scrollBy(0, moved);
+}
+
+/* And the same again for one late-decoding picture, which arrives long after any
+   render has finished. */
+function holdBelow(node, before) {
+  var r = node.getBoundingClientRect();
+  var grew = r.height - before;
+  if (grew > 1 && r.top < 0) window.scrollBy(0, grew);
+  return r.height;
+}
+
 /* "Was the lesson still being read when this arrived." Near the bottom counts,
    and so does having the newest card anywhere on screen -- because the board
    now parks that card at the TOP of the window, which on a long lesson is
@@ -1524,9 +1603,32 @@ function saveNotes(send) {
   }));
 }
 
+/* Not while a hand is on the glass.
+
+   `payload` no longer encodes a picture, but it still serialises every mark on
+   the card, and `JSON.stringify` of a well-annotated card is real main-thread
+   time -- landing, by construction, about a second after a stroke, which is the
+   middle of the next one. Same rule as the slate's own autosave: nothing about
+   getting ink to disk has to happen in a particular second, and the strokes are
+   still written the moment the hand stops. `pagehide` is the backstop. */
+var noteSaveOwed = 0;
+var NOTE_SAVE_WAIT = 8000;
+
 function queueNoteSave() {
+  if (!noteSaveOwed) noteSaveOwed = Date.now();
   if (noteSaveTimer) clearTimeout(noteSaveTimer);
-  noteSaveTimer = setTimeout(function () { saveNotes(false); }, 900);
+  noteSaveTimer = setTimeout(function () {
+    /* Deferred, but not indefinitely: a hand that reads and scrolls for a
+       minute is a hand that is never idle, and ink that has not reached disk in
+       eight seconds has waited long enough. */
+    if (Date.now() - noteSaveOwed < NOTE_SAVE_WAIT
+        && (penBusy() || (window.Annotate && window.Annotate.busy()))) {
+      queueNoteSave();
+      return;
+    }
+    noteSaveOwed = 0;
+    saveNotes(false);
+  }, 900);
 }
 
 if (window.Annotate) {

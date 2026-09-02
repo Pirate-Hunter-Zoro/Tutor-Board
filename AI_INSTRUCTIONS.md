@@ -268,24 +268,36 @@ tutorboard/
   scrolls with a finger. The strokes go to disk at once either way. This is the same defect the annotation
   layer already had, and the rule generalises: when you add work to a save, a stroke or a frame,
   ask what is holding the glass while it runs.
-- **An undo step is the list of strokes, not a copy of them** — and that is only correct because a
+- **An undo step is the list of strokes, not a copy of them** — on the slate and on the annotation
+  layer both — and that is only correct because a
   stroke on a page is never changed in place. Anything that would change one (dragging a selection,
   recolouring it) replaces it with a copy and changes that; `dense` and `_bb` are caches and may be
   dropped on anything at any time. Break the rule and undo silently stops undoing, which no
   screenshot will show you. It used to serialise the whole page on every pen lift and every touch
-  of the rubber. `test/plane.js` drags and undoes.
-- **An ink layer's BOX is the card's; its bitmap waits for the first mark.** Every card carries one,
-  because it is what takes the pen while annotate mode is on, and allocating each at the card's
-  size in device pixels is hundreds of megabytes over a long lesson — the budget the dormant boards
-  exist to stay inside of. The box keeps the 18px overhang either way, because two adjacent layers
-  must MEET or a stroke begun in the gap between cards lands on the prose. And `Annotate.load`
-  redraws what it adopted, never the whole lesson: it runs on every payload.
+  of the rubber. `test/plane.js` drags and undoes; `test/link.js` undoes two marks on a card one at
+  a time, which is what fails when adding a mark starts pushing onto the live list again.
+- **An ink layer's BOX reaches the window; its bitmap waits for the first mark.** Every card
+  carries one, because it is what takes the pen while annotate mode is on, and allocating each at
+  the card's size in device pixels is hundreds of megabytes over a long lesson — the budget the
+  dormant boards exist to stay inside of. The box exists either way, and it is not the card: it
+  reaches both edges of the window sideways and half the gap to its neighbour up and down, because
+  a run of cards must have no strip in it where the pen has nothing to land on. Ink out there is
+  still stored as fractions OF ITS CARD; the fractions go negative. A hidden neighbour is not a
+  neighbour — the writing surface is in that same list and reports a rectangle of zeros while the
+  panel is shut, and a layer believing it would reach back over the card above and take its pen.
+  The bitmap is capped at four million device pixels and drawn a little below the screen's own
+  resolution above that, because iOS answers a canvas budget it has run out of with blank
+  canvases. And `Annotate.load` redraws what it adopted, never the whole lesson: it runs on every
+  payload.
 - **A repaint draws what can be SEEN.** A page is a plane that grows downward as it is worked, so
   most of an evening's strokes are a screen or more away — and a full repaint is what a pan, a
   pinch, a zoom and every erased stroke used to cost. Strokes are culled against the visible box
   (their own boxes cached on them, cleared wherever points MOVE), and rubbing out repairs the
   rectangle it emptied rather than the page. Measured in `test/plane.js`, which fails if an erase
-  goes back to costing a whole-page repaint.
+  goes back to costing a whole-page repaint. The annotation layer follows the same rule: an erase
+  sample and a pen lift each repair one clipped rectangle, once a frame, and only the marks that
+  reach into it — `test/link.js` counts the line calls. A repair with no rectangle repairs nothing;
+  it must never fall back to the whole canvas.
 - **The nib marks the page on the frame it lands.** The curve needs three samples before it yields
   a point, and samples closer together than `MIN_STEP` are dropped, so a pen put down and moved
   slowly painted nothing until it had travelled a pixel or two — reported as a delay on tapping to
@@ -374,6 +386,32 @@ tutorboard/
   annotate mode is on — an always-live overlay over the lesson is the drop-overlay defect
   again, and it would eat every scroll and every selection. `test/annotate.py` and
   `test/link.js` hold both halves.
+- **Whether a gesture scrolls is a question about the HAND, not about the place.** It used to be
+  about the place: `touch-action: none` on the cards, so a swipe over a card was always a stroke and
+  a swipe over the margin down either side of the column was always a scroll — which got the pen
+  wrong exactly where the pen has least room. The ink layer permits the scroll in CSS
+  (`touch-action: pan-y pinch-zoom`) and `annotate.js` takes it back on `touchstart` when the
+  contact is a stylus, or when it is a finger and the slate has been told a finger writes. A finger
+  scrolls natively, with its own momentum, anywhere on the lesson; a pen never scrolls, anywhere on
+  the lesson. Nothing may put `touch-action: none` back on a card or on `#board` — `test/link.js`
+  fails if it comes back. One setting decides what a finger does, and it belongs to the slate:
+  `window.Slate.fingerWrites`.
+- **A stroke belongs to one pointer.** The other contacts arriving on a layer mid-stroke are the
+  rest of the hand holding the pen, or a finger that has landed to scroll, and a `pointerup` is a
+  `pointerup` whoever sent it. The slate answers this by condemning every other contact as a palm
+  the moment the nib lands; the annotation layer, which has no palm map, answers it by checking the
+  id — a move or a lift from anyone but the pointer that began the stroke is ignored. The symptom
+  otherwise is annotation that stops writing partway through a word and cannot be reproduced by
+  anyone holding the pen properly. `test/link.js` lands a second contact mid-stroke.
+- **Nothing that arrives above the reader may move the reader.** Safari has no scroll anchoring, so
+  `render` notes which card or turn the reader is looking at and where on the glass it sits, and
+  puts it back once the lesson has been rebuilt around it. A sent answer is held out of the
+  transcript only while it is the LAST item, so answering a question the tutor has since written
+  under renders a whole board's height above the surface; and the frozen picture has a width and no
+  height, so it occupies nothing until it decodes. Everything after `holdAnchor` either leaves the
+  page alone or says explicitly where it should go, and both of those are decisions — content
+  appearing above somebody is not. `test/interactive.js` carries a small layout engine for the
+  transcript and fails on the old behaviour.
 - **What the tutor gets is the ink and the card, not a picture of the lesson.** It wrote the
   card and can read it back off disk. Flattening rendered HTML and KaTeX into an image needs
   fonts inlined per send and cannot be verified without a browser; do not add it.

@@ -23,24 +23,82 @@ var LAYER = "ann-layer";
 var pen = { colour: "#e0b45c", width: 2.2 };
 var on = false;
 
-/* Room to draw outside the card. A mark about a line of prose is very often a
-   ring around it, and a ring around something near an edge goes outside the box
-   -- the coordinates used to be clamped into [0,1], so the ring came back with
-   a straight edge where it met the boundary. It read as the pen cutting out.
-   Fractions are still fractions OF THE CARD, so everything anchored stays
-   anchored; the canvas simply extends past the card and the fractions are
-   allowed past 0 and 1 by this much.
+/* Room to draw outside the card, ABOVE and BELOW it. A mark about a line of
+   prose is very often a ring around it, and a ring around something near an edge
+   goes outside the box -- the coordinates used to be clamped into [0,1], so the
+   ring came back with a straight edge where it met the boundary. It read as the
+   pen cutting out. Fractions are still fractions OF THE CARD, so everything
+   anchored stays anchored; the canvas simply extends past the card and the
+   fractions are allowed past 0 and 1 by this much.
 
-   Kept comfortably under half the gap between cards (`.card` has 2.1rem of
-   margin below it), because while annotate mode is on these layers take the
-   pointer, and two of them overlapping would mean marks landing on the wrong
-   card near a boundary. */
-/* How far the ink layer reaches beyond its card, in CSS pixels. It is here so a
-   ring drawn around something near an edge is not chopped off at the boundary --
-   and it is 18 rather than 12 so that two adjacent layers MEET: cards are 2.1rem
-   apart, and a stroke begun in the gap between them used to land on the prose
-   instead of on a canvas. */
+   Sideways there is no such number, because sideways the answer is the window.
+   See `padsOf`. */
 var PAD = 18;
+
+/* The most a layer will grow into the gap above or below it. A gap can be
+   enormous -- a folded run of superseded cards, a student's own turn between two
+   cards -- and a layer that swallowed all of it would be a canvas the size of
+   the document for the sake of a strip nobody writes in. */
+var REACH = 160;
+
+/* The most device pixels one layer's bitmap may hold. See `size`. */
+var CAP = 4e6;
+
+/* The nearest neighbour that is actually on the page.
+
+   A hidden element -- the writing surface with the panel shut, and it sits in
+   this list -- reports a rectangle of zeros wherever it is in the document. Read
+   as a neighbour that is a thousand pixels away, which is what a zero bottom
+   looks like from halfway down a lesson, it would send a layer reaching up over
+   the card above it to take that card's pen. Marks landing on the wrong card is
+   the thing the padding is kept small to avoid. */
+function nextBox(node, dir) {
+  for (var n = 0; node && n < 8; n++) {
+    var box = node.getBoundingClientRect();
+    if (box.width > 0 || box.height > 0) return box;
+    node = dir < 0 ? node.previousElementSibling : node.nextElementSibling;
+  }
+  return null;
+}
+
+/* How far each layer reaches beyond its card, per side, in CSS pixels.
+
+   Sideways: to the edge of the WINDOW. `#board` is a 46rem column centred in the
+   glass, so on a tablet held in landscape there are two hundred pixels of margin
+   down each side with nothing over them -- and a pen put down there had no
+   canvas under it, so the gesture went to the page and the page scrolled.
+   Reported in exactly those words: "on the side of the screen, the far left and
+   right, I can't write/annotate there because it scrolls." Where the ink lands is
+   not a decision the margin gets to make.
+
+   Up and down: half the gap to the neighbour, so a run of cards is covered
+   without any two layers fighting over the same strip -- clamped at PAD, which is
+   what an ordinary 2.1rem gap comes to, and at REACH, which is what stops a
+   folded run of cards from being turned into backing store.
+
+   `documentElement.clientWidth` rather than `innerWidth`: on a desktop the
+   second includes the scrollbar, and a canvas reaching under it is a canvas
+   sticking out of the document, which the browser answers with a horizontal
+   scrollbar of its own. */
+function padsOf(card, r) {
+  var vw = document.documentElement.clientWidth || window.innerWidth || 0;
+  var p = { l: PAD, r: PAD, t: PAD, b: PAD };
+  if (vw > 0) {
+    p.l = Math.max(PAD, Math.round(r.left));
+    p.r = Math.max(PAD, Math.round(vw - r.right));
+  }
+  var prev = nextBox(card.previousElementSibling, -1);
+  if (prev) {
+    var above = Math.round(r.top - prev.bottom);
+    if (above > 0) p.t = Math.max(PAD, Math.min(REACH, Math.ceil(above / 2)));
+  }
+  var next = nextBox(card.nextElementSibling, 1);
+  if (next) {
+    var below = Math.round(next.top - r.bottom);
+    if (below > 0) p.b = Math.max(PAD, Math.min(REACH, Math.floor(below / 2)));
+  }
+  return p;
+}
 
 /* The slate's ink geometry, shared rather than reimplemented: smooth the samples
    as they arrive, run a Catmull-Rom curve through them, resample it to about a
@@ -87,10 +145,11 @@ function layerOf(card) {
 }
 
 /* The canvas is sized in device pixels and scaled down by CSS, or the ink is
-   soft on exactly the screens this is meant for. It is PAD larger than the card
-   on every side, and offset by -PAD, so a ring drawn around something near an
-   edge has somewhere to go. `_w`/`_h` stay the CARD's size: that is what the
-   stored fractions are fractions of. */
+   soft on exactly the screens this is meant for. It reaches past the card on
+   every side by `padsOf`, and is offset by the same, so a ring drawn around
+   something near an edge -- or a note written out in the margin beside it -- has
+   somewhere to go. `_w`/`_h` stay the CARD's size: that is what the stored
+   fractions are fractions of. */
 /* Is there anything to paint on this card's layer? */
 function marked(card) {
   return (store[card.dataset.card] || []).length > 0
@@ -99,15 +158,39 @@ function marked(card) {
 
 function size(card, canvas) {
   var r = card.getBoundingClientRect();
-  var dpr = window.devicePixelRatio || 1;
+  var p = padsOf(card, r);
   var w = Math.max(1, Math.round(r.width)), h = Math.max(1, Math.round(r.height));
   var need = marked(card);
+  /* Device pixels, capped.
+
+     A layer is the card plus both margins now, which on a tablet held in
+     landscape is close to the width of the glass -- half again what it was --
+     and the backing store is four bytes a device pixel. A marked card was
+     already eight megabytes of it; a tall card in a wide window would be
+     fifteen, and iOS answers a canvas budget it has run out of by quietly
+     handing back blank ones. So a layer over the cap is drawn a little below the
+     screen's own resolution rather than being allowed to cost whatever it likes.
+     `CAP` is four million device pixels, which nothing on a real card reaches --
+     it is the ceiling, not the working figure. */
+  var dpr = window.devicePixelRatio || 1;
+  var area = (w + p.l + p.r) * (h + p.t + p.b);
+  if (area * dpr * dpr > CAP) dpr = Math.max(1, Math.sqrt(CAP / area));
+  /* Where the canvas's own top-left is, in client coordinates. Recorded here
+     because `size` has just paid for the card's rectangle, and a stroke needs
+     the canvas's rectangle -- asking the canvas for its own is a second forced
+     layout of a lesson full of typeset mathematics, at the moment the pen lands.
+     It is the card's, less the padding, by construction. */
+  canvas._rl = r.left - p.l;
+  canvas._rt = r.top - p.t;
   if (canvas._w === w && canvas._h === h && canvas._dpr === dpr
-      && canvas._real === need) return false;
+      && canvas._real === need
+      && canvas._pl === p.l && canvas._pr === p.r
+      && canvas._pt === p.t && canvas._pb === p.b) return false;
   canvas._w = w; canvas._h = h; canvas._dpr = dpr; canvas._real = need;
-  /* The box is always the card's, plus the overhang: this element is what takes
-     the pen while annotate mode is on, and two adjacent layers have to MEET or a
-     stroke begun in the gap between two cards lands on the prose. Only the
+  canvas._pl = p.l; canvas._pr = p.r; canvas._pt = p.t; canvas._pb = p.b;
+  /* The box exists whatever is on it: this element is what takes the pen while
+     annotate mode is on, and it has to reach the margins and MEET its
+     neighbours, or a stroke begun out there lands on nothing at all. Only the
      BITMAP waits.
 
      A layer with nothing on it holds one pixel. Every card in the lesson gets
@@ -117,38 +200,86 @@ function size(card, canvas) {
      nobody will ever draw on. It is the same budget the dormant boards were
      turned into photographs to stay inside of, spent here on nothing. The real
      bitmap arrives with the first mark. */
-  canvas.style.width = (w + 2 * PAD) + "px";
-  canvas.style.height = (h + 2 * PAD) + "px";
-  canvas.style.left = -PAD + "px";
-  canvas.style.top = -PAD + "px";
+  canvas.style.width = (w + p.l + p.r) + "px";
+  canvas.style.height = (h + p.t + p.b) + "px";
+  canvas.style.left = -p.l + "px";
+  canvas.style.top = -p.t + "px";
   if (!need) {
     canvas.width = canvas.height = 1;
     return false;
   }
-  canvas.width = Math.round((w + 2 * PAD) * dpr);
-  canvas.height = Math.round((h + 2 * PAD) * dpr);
+  canvas.width = Math.round((w + p.l + p.r) * dpr);
+  canvas.height = Math.round((h + p.t + p.b) * dpr);
   /* A resize invalidates every cached pixel path on this card. */
   var strokes = store[card.dataset.card] || [];
-  for (var i = 0; i < strokes.length; i++) strokes[i]._k = null;
+  for (var i = 0; i < strokes.length; i++) { strokes[i]._k = null; strokes[i]._bbk = null; }
   return true;
 }
 
-/* Stored fractions -> a dense pixel path, cached per canvas size. The
+/* The canvas's whole surface, in CSS pixels. */
+function boxOf(cv) {
+  return { x0: 0, y0: 0,
+           x1: (cv._w || 1) + (cv._pl || 0) + (cv._pr || 0),
+           y1: (cv._h || 1) + (cv._pt || 0) + (cv._pb || 0) };
+}
+
+/* Stored fractions -> a dense pixel path, cached per canvas geometry. The
    densifying is done in pixels rather than in fractions so the line is resampled
    to the size it is actually being drawn at: a card that reflows narrower gets a
    correctly resampled curve rather than a stretched one. */
-function pathOf(s, w, h) {
-  var key = w + "x" + h;
+function geomOf(cv) {
+  return cv._w + "x" + cv._h + "@" + cv._pl + "," + cv._pt;
+}
+
+function pathOf(s, cv) {
+  var key = geomOf(cv);
   if (s._k === key && s._d) return s._d;
   var raw = [];
   var pr = s.pr || null;
   for (var i = 0, n = 0; i < s.p.length; i += 2, n++) {
-    raw.push([s.p[i] * w + PAD, s.p[i + 1] * h + PAD,
+    raw.push([s.p[i] * cv._w + cv._pl, s.p[i + 1] * cv._h + cv._pt,
               pr && pr[n] !== undefined ? pr[n] : 0.5]);
   }
   s._k = key;
   s._d = densify(raw);
   return s._d;
+}
+
+/* What a stroke covers, in canvas pixels, cached the same way.
+
+   This is what makes an erase cheap. Rubbing out a word on a card holding a
+   hundred marks used to clear the whole layer and repaint every one of them --
+   per pointer sample, of which a Pencil sends four a frame. The rectangle the
+   removed ink occupied is the only part of the canvas that changed; everything
+   else on it is already correct and repainting it is work spent to arrive back
+   where it started. */
+function bboxOf(s, cv) {
+  var key = geomOf(cv);
+  if (s._bbk === key && s._bb) return s._bb;
+  var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (var i = 0; i < s.p.length; i += 2) {
+    var x = s.p[i] * cv._w + cv._pl, y = s.p[i + 1] * cv._h + cv._pt;
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+    if (y < y0) y0 = y;
+    if (y > y1) y1 = y;
+  }
+  /* The curve runs a little outside the samples it was fitted through, and the
+     line has width. Both are small and both are why this is generous. */
+  var m = (s.w || pen.width) * 1.6 + 4;
+  s._bbk = key;
+  s._bb = { x0: x0 - m, y0: y0 - m, x1: x1 + m, y1: y1 + m };
+  return s._bb;
+}
+
+function grow(box, add) {
+  if (!add) return box;
+  if (!box) return { x0: add.x0, y0: add.y0, x1: add.x1, y1: add.y1 };
+  if (add.x0 < box.x0) box.x0 = add.x0;
+  if (add.y0 < box.y0) box.y0 = add.y0;
+  if (add.x1 > box.x1) box.x1 = add.x1;
+  if (add.y1 > box.y1) box.y1 = add.y1;
+  return box;
 }
 
 /* One stroke, with the width varying along it. Straight `lineTo` between raw
@@ -207,6 +338,33 @@ function context(canvas) {
   return ctx;
 }
 
+/* Repaint one RECTANGLE of a card's layer, and only the marks that reach into
+   it. Everything that redraws part of a layer goes through here -- an erase
+   sample, a pen lift -- so the cost of a change is the size of the change and
+   not the size of the page. `draw` below is this with the whole canvas as the
+   rectangle, which is what a reload, a resize and an undo want. */
+function repair(id, cv, box) {
+  if (!cv._real || !box) return;
+  var ctx = context(cv);
+  if (!ctx) return;
+  var all = boxOf(cv);
+  var x0 = Math.max(all.x0, Math.floor(box.x0)), y0 = Math.max(all.y0, Math.floor(box.y0));
+  var x1 = Math.min(all.x1, Math.ceil(box.x1)), y1 = Math.min(all.y1, Math.ceil(box.y1));
+  if (x1 <= x0 || y1 <= y0) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x0, y0, x1 - x0, y1 - y0);
+  ctx.clip();
+  ctx.clearRect(x0, y0, x1 - x0, y1 - y0);
+  (store[id] || []).forEach(function (s) {
+    if (!s.p || s.p.length < 2) return;
+    var bb = bboxOf(s, cv);
+    if (bb.x1 < x0 || bb.x0 > x1 || bb.y1 < y0 || bb.y0 > y1) return;
+    paint(ctx, s, pathOf(s, cv), s.c || pen.colour);
+  });
+  ctx.restore();
+}
+
 /* `measured` says the caller has already established that the card has not
    changed size -- which is true for every frame of a stroke, and matters because
    `size` asks the card for its rectangle and that forces the browser to lay out
@@ -221,16 +379,12 @@ function draw(card, measured) {
   /* Nothing on it and nothing being drawn on it: there is no bitmap to clear
      and nothing to put back. */
   if (!canvas._real) return;
-  var ctx = context(canvas);
-  if (!ctx) return;
-  ctx.clearRect(0, 0, canvas._w + 2 * PAD, canvas._h + 2 * PAD);
-  (store[id] || []).forEach(function (s) {
-    if (!s.p || s.p.length < 2) return;
-    paint(ctx, s, pathOf(s, canvas._w, canvas._h), s.c || pen.colour);
-  });
+  repair(id, canvas, boxOf(canvas));
   /* The stroke being drawn right now is not in the store yet on the frame it
      starts, and a full redraw during a stroke would wipe it. */
   if (drawing && drawing.card === card && drawing.dense.length) {
+    var ctx = context(canvas);
+    if (!ctx) return;
     ctx.strokeStyle = drawing.stroke.c || pen.colour;
     paintFrom(ctx, drawing.dense, 1, drawing.stroke.w || pen.width);
     drawing.drawnTo = drawing.dense.length - 1;
@@ -253,44 +407,68 @@ function whereOn(id) {
   return mid < 0.34 ? "near the top" : mid < 0.67 ? "in the middle" : "near the bottom";
 }
 
-/* The ink alone, on white, at a size worth reading. The tutor already has the
-   card's words; what it needs from here is the marks. */
+/* The ink alone, on white, at a size worth reading, CROPPED TO THE INK.
+
+   The tutor already has the card's words; what it needs from here is the marks.
+   And it needs them large: the layer now reaches out to both edges of the window,
+   so a picture of the whole layer is a ring the size of a fingernail in the
+   middle of a sheet of white. Cropping is the same rule the slate's own preview
+   follows, and for the same reason -- the picture's only job is to be legible to
+   whatever opens it. */
 function png(id) {
   var src = document.querySelector('[data-card="' + id + '"]');
   if (!src) return "";
   var live = src.querySelector("canvas." + LAYER);
-  if (!live) return "";
+  if (!live || !live._w) return "";
+  var strokes = (store[id] || []).filter(function (s) { return s.p && s.p.length >= 2; });
+  if (!strokes.length) return "";
+
+  var box = null;
+  strokes.forEach(function (s) { box = grow(box, bboxOf(s, live)); });
+  var all = boxOf(live);
+  var m = 10;
+  var x0 = Math.max(all.x0, Math.floor(box.x0 - m)), y0 = Math.max(all.y0, Math.floor(box.y0 - m));
+  var x1 = Math.min(all.x1, Math.ceil(box.x1 + m)), y1 = Math.min(all.y1, Math.ceil(box.y1 + m));
+  if (x1 <= x0 || y1 <= y0) return "";
+
+  var dpr = live._dpr || 1;
   var out = document.createElement("canvas");
-  out.width = live.width;
-  out.height = live.height;
+  out.width = Math.round((x1 - x0) * dpr);
+  out.height = Math.round((y1 - y0) * dpr);
   var ctx = out.getContext("2d");
   if (!ctx) return "";
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, out.width, out.height);
-  var dpr = live._dpr || 1;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.setTransform(dpr, 0, 0, dpr, -x0 * dpr, -y0 * dpr);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  (store[id] || []).forEach(function (s) {
-    if (!s.p || s.p.length < 2) return;
+  strokes.forEach(function (s) {
     /* Dark ink on white whatever the screen is showing -- the PNG's only job is
        to be legible to whatever opens it. The same smoothed path as the screen,
        a little heavier, because it is read at whatever size the reader chooses. */
-    paint(ctx, s, pathOf(s, live._w, live._h), "#1a1a1a", 1.3);
+    paint(ctx, s, pathOf(s, live), "#1a1a1a", 1.3);
   });
   try { return out.toDataURL("image/png"); } catch (e) { return ""; }
 }
 
 /* Undo has to cover erasing and clearing too, not just strokes, or the eraser is
-   a one-way door over the tutor's own words. Snapshots, because a card carries a
-   handful of strokes and the simple thing is correct. */
+   a one-way door over the tutor's own words.
+
+   A step is the LIST of strokes, not a copy of them. It used to be a deep copy --
+   every point of every mark on the card, rebuilt on every pen-down and every
+   touch of the rubber, with sixty of them on the stack. That is the same defect
+   the slate had: an allocation proportional to everything already written,
+   landing at the exact moment a hand is asking the surface for something, which
+   from behind a pen is a delay on tapping to write.
+
+   It is correct only because nothing on a card is ever changed in place: adding a
+   mark, erasing and clearing all REPLACE the list. If that ever stops being true
+   the undo stack silently starts holding the present. */
 var past = [], future = [];
 var HISTORY = 60;
 
 function snapshot(id) {
-  return { id: id, strokes: (store[id] || []).map(function (s) {
-    return { c: s.c, w: s.w, p: s.p.slice() };
-  }) };
+  return { id: id, strokes: store[id] || [] };
 }
 
 function remember(id) {
@@ -315,22 +493,25 @@ var pending = false;
    because the target is a pen line over prose on a tablet. */
 var ERASE_NEAR = 0.02;
 
+/* Returns the strokes it removed, so the caller knows which rectangle of the
+   canvas actually changed. */
 function eraseAt(id, x, y) {
   var all = store[id] || [];
+  var gone = [];
   var kept = all.filter(function (s) {
     for (var i = 0; i < s.p.length; i += 2) {
       var dx = s.p[i] - x, dy = s.p[i + 1] - y;
-      if (dx * dx + dy * dy < ERASE_NEAR * ERASE_NEAR) return false;
+      if (dx * dx + dy * dy < ERASE_NEAR * ERASE_NEAR) { gone.push(s); return false; }
     }
     return true;
   });
-  if (kept.length === all.length) return false;
+  if (!gone.length) return null;
   store[id] = kept;
-  return true;
+  return gone;
 }
 
-/* Canvas-space pixels. The canvas is offset by -PAD, so its own rect already
-   carries the padding and this needs no correction. */
+/* Canvas-space pixels. The canvas is offset by its own padding, so its own rect
+   already carries it and this needs no correction. */
 function at(ev, d) {
   return [ev.clientX - d.rect.left, ev.clientY - d.rect.top];
 }
@@ -392,14 +573,23 @@ function extend(d) {
   }
 }
 
-/* One paint per frame, and only the part of the line that is new. The old layer
-   redrew every stroke on the card from scratch inside the pointermove handler,
+/* One paint per frame, and only the part that changed. The old layer redrew
+   every stroke on the card from scratch inside the pointermove handler -- for a
+   pen, and, until the rectangle above existed, for every sample of an erase --
    which on a tablet is the difference between ink that follows the nib and ink
    that arrives after it. */
 function tick() {
   pending = false;
   var d = drawing;
-  if (!d || d.erasing) return;
+  if (!d) return;
+  if (d.erasing) {
+    /* One repair a frame, over the union of everything rubbed out since the
+       last one, rather than one repaint per sample. */
+    var box = d.dmg;
+    d.dmg = null;
+    repair(d.id, d.canvas, box);
+    return;
+  }
   extend(d);
   var ctx = context(d.canvas);
   if (!ctx) return;
@@ -431,18 +621,22 @@ function store_stroke(d) {
   /* Polished once, on lift: a weighted average over the interior that pulls out
      hand tremor while leaving the endpoints exactly where they were put. */
   var pts = polish(d.raw, POLISH);
-  var w = d.canvas._w || 1, h = d.canvas._h || 1;
+  var cv = d.canvas;
+  var w = cv._w || 1, h = cv._h || 1;
   var flat = [], pr = [];
   for (var i = 0; i < pts.length; i++) {
     /* Fractions OF THE CARD, so ink stays anchored to the words it is about
        through every reflow -- and allowed outside [0,1] by the padding, so a
-       ring around something near an edge is not cut off at the boundary. */
-    flat.push((pts[i][0] - PAD) / w, (pts[i][1] - PAD) / h);
+       ring around something near an edge is not cut off at the boundary and a
+       note written in the margin beside the card stays beside it. */
+    flat.push((pts[i][0] - cv._pl) / w, (pts[i][1] - cv._pt) / h);
     pr.push(Math.round(pts[i][2] * 100) / 100);
   }
   d.stroke.p = flat;
   d.stroke.pr = pr;
-  strokesFor(d.id).push(d.stroke);
+  /* Replaced, not pushed. The undo stack holds this list by reference; see
+     `snapshot`. */
+  store[d.id] = strokesFor(d.id).concat([d.stroke]);
 }
 
 /* The canvas rect is read once per stroke rather than per sample -- asking for
@@ -473,6 +667,40 @@ function dropSelection() {
 document.addEventListener("selectstart", noSelect, true);
 document.addEventListener("dragstart", noSelect, true);
 
+/* WHETHER THIS IS A SCROLL IS A QUESTION ABOUT THE HAND, NOT ABOUT THE PLACE.
+
+   It used to be about the place. `touch-action: none` sat on the cards, so a
+   swipe over a card was always a stroke and a swipe anywhere else -- the margins
+   down each side, the gaps -- was always a scroll. That is two rules a person has
+   to hold in their head about their own screen, and it gets the pen wrong exactly
+   where the pen has least room: out in the margin, where the answer was "you
+   scrolled".
+
+   So the layer permits the scroll in CSS and this takes it back when the hand
+   says so. `drawing` is the whole of the test: `begin` runs on `pointerdown`,
+   which is dispatched before `touchstart`, and it sets `drawing` for a pen
+   always and for a finger only when the slate has been told a finger writes. If
+   we own the gesture, nothing scrolls. If we do not, the page scrolls natively,
+   with its own momentum, which is not a thing worth reimplementing.
+
+   `touchType` is the belt to that braces: it is what Safari calls an Apple
+   Pencil, and it means the pen is refused the scroll even if the two events
+   arrive the other way round. */
+function stylus(ev) {
+  var t = ev.changedTouches && ev.changedTouches[0];
+  return !!t && t.touchType === "stylus";
+}
+
+function onTouchStart(ev) {
+  if (!on) return;
+  if ((drawing || stylus(ev)) && ev.cancelable) ev.preventDefault();
+}
+
+function onTouchMove(ev) {
+  if (!on || !drawing) return;
+  if (ev.cancelable) ev.preventDefault();
+}
+
 function begin(ev, card) {
   if (!on) return;
   var id = card.dataset.card;
@@ -490,7 +718,8 @@ function begin(ev, card) {
   var canvas = layerOf(card);
   var d = {
     id: id, card: card, canvas: canvas,
-    rect: null,
+    pid: ev.pointerId,
+    rect: null, dmg: null,
     raw: [], dense: [], built: 0, drawnTo: 0, sx: null, sy: null,
     erasing: tool === "erase",
     stroke: { c: pen.colour, w: pen.width, p: [], pr: [] },
@@ -499,9 +728,12 @@ function begin(ev, card) {
      anything is going to be drawn on it -- and this is that. */
   drawing = d;
   size(card, canvas);
-  /* Read once per stroke, and after the sizing above, which is what moves the
-     layer out over the card's edges. */
-  d.rect = canvas.getBoundingClientRect();
+  card._annGrew = false;
+  /* Read from the sizing above rather than asked for again: `size` has just paid
+     for the card's rectangle and the canvas's is that one less the padding. A
+     second `getBoundingClientRect` here is a second forced layout of the whole
+     lesson, at the moment the nib lands. */
+  d.rect = { left: canvas._rl, top: canvas._rt };
   remember(id);
 
   if (d.erasing) {
@@ -518,22 +750,36 @@ function begin(ev, card) {
 function rub(ev) {
   var d = drawing;
   if (!d) return;
+  var cv = d.canvas;
   var xy = at(ev, d);
-  var x = (xy[0] - PAD) / Math.max(1, d.canvas._w);
-  var y = (xy[1] - PAD) / Math.max(1, d.canvas._h);
-  if (eraseAt(d.id, x, y)) {
-    dirty[d.id] = true;
-    handed[d.id] = false;
-    /* The card was measured when the pen went down and cannot have reflowed
-       since -- nothing moves under a stroke but the scroll, which `follow`
-       handles. */
-    draw(d.card, true);
-  }
+  var x = (xy[0] - cv._pl) / Math.max(1, cv._w);
+  var y = (xy[1] - cv._pt) / Math.max(1, cv._h);
+  var gone = eraseAt(d.id, x, y);
+  if (!gone) return;
+  dirty[d.id] = true;
+  handed[d.id] = false;
+  /* Only the rectangle the removed ink occupied, and only once a frame. The card
+     was measured when the pen went down and cannot have reflowed since --
+     nothing moves under a stroke but the scroll, which `follow` handles. */
+  for (var i = 0; i < gone.length; i++) d.dmg = grow(d.dmg, bboxOf(gone[i], cv));
+  frame();
+}
+
+/* Whose hand this is. A stroke belongs to ONE pointer, and the others that
+   arrive on the layer while it is being drawn are the rest of the hand holding
+   the pen -- or a finger that has landed to scroll. Both of them used to be able
+   to finish somebody else's stroke, because a `pointerup` is a `pointerup`
+   whoever sent it, and the symptom is annotation that stops writing partway
+   through a word for no reason anybody can reproduce. */
+function mine(ev, d) {
+  return !(ev && ev.pointerId !== undefined && d.pid !== undefined
+           && ev.pointerId !== d.pid);
 }
 
 function move(ev) {
   var d = drawing;
   if (!on || !d) return;
+  if (!mine(ev, d)) return;
   if (d.erasing) {
     rub(ev);
   } else {
@@ -546,8 +792,12 @@ function move(ev) {
 function end(ev) {
   var d = drawing;
   if (!d) return;
+  if (!mine(ev, d)) return;
   window.removeEventListener("scroll", follow, true);
   var id = d.id;
+  var cv = d.canvas;
+  /* The rubber's last frame may still be owed. */
+  if (d.erasing && d.dmg) { repair(id, cv, d.dmg); d.dmg = null; }
   if (!d.erasing) {
     /* Where the nib actually left the glass. The samples that arrive during a
        stroke are smoothed towards the hand's average, and on a short quick mark
@@ -562,22 +812,63 @@ function end(ev) {
         d.raw.push([xy[0], xy[1], last ? last[2] : 0.5]);
       }
     }
+    /* What the live pass put on the glass, which has to come off again whether
+       the mark is kept or not: kept, because the polished line is not quite the
+       one that was painted; thrown away, because a tap is not a mark. */
+    var was = null;
+    var seen = [d.raw, d.dense];
+    for (var g = 0; g < seen.length; g++) {
+      for (var i = 0; i < seen[g].length; i++) {
+        var q = seen[g][i];
+        was = grow(was, { x0: q[0], y0: q[1], x1: q[0], y1: q[1] });
+      }
+    }
+    if (was) {
+      var m = (d.stroke.w || pen.width) * 1.6 + 4;
+      was.x0 -= m; was.y0 -= m; was.x1 += m; was.y1 += m;
+    }
     /* Two points make a line, and a line is a mark. This wanted three, which
        threw away every flick short enough to be recorded in two -- and a tick
        beside a wrong line is exactly that flick. */
     if (d.raw.length < 2) {
       past.pop();                  /* a tap is not a mark, or an undo step */
       drawing = null;
-      draw(d.card);                /* clear whatever dot was painted live */
+      settle(d.card, cv, id, was); /* clear whatever dot was painted live */
       return;
     }
     store_stroke(d);
+    d.dmg = grow(was, bboxOf(d.stroke, cv));
   }
   drawing = null;
   dirty[id] = true;
   handed[id] = false;
-  draw(d.card);                    /* once, with the polished line */
+  settle(d.card, cv, id, d.dmg);
+  d.dmg = null;
   onChange();
+}
+
+/* The layer, put right after a stroke.
+
+   Only the rectangle the stroke touched -- a full repaint of the card was a
+   noticeable cost at every pen lift on a card carrying a lot of ink, which is
+   what "I try to write something out multiple times and a few seconds later the
+   multiple writings all show up" is made of. The exception is a card that
+   changed size WHILE the stroke was being drawn: its layer is measured against a
+   geometry that no longer exists, and the whole thing has to be laid out and
+   repainted. The resize observer cannot do it, because it is asleep for the
+   duration of a stroke and will not fire again for a change it has already
+   reported. */
+function settle(card, cv, id, box) {
+  if (card && card._annGrew) {
+    card._annGrew = false;
+    draw(card);
+    return;
+  }
+  /* No rectangle means nothing on the glass is wrong -- the rubber's last frame
+     has already been repaired, or the pen never painted anything. It does NOT
+     mean "repaint the card": falling back to the whole canvas here undid the
+     whole point of the rectangle, once per sweep of the rubber. */
+  if (box) repair(id, cv, box);
 }
 
 window.Annotate = {
@@ -596,8 +887,12 @@ window.Annotate = {
        you touched. */
     if (window.ResizeObserver) {
       var ro = new window.ResizeObserver(function () {
-        if (drawing && drawing.card === card) return;   /* not mid-stroke */
-        if (size(card, canvas)) draw(card);
+        /* Not mid-stroke: relaying out the surface under a moving nib is worse
+           than being a frame stale. Remembered rather than dropped, because this
+           observer will not fire a second time for a change it has already
+           reported -- `settle` picks it up when the pen lifts. */
+        if (drawing && drawing.card === card) { card._annGrew = true; return; }
+        if (size(card, canvas)) draw(card, true);
       });
       try { ro.observe(card); } catch (e) { /* not fatal */ }
     }
@@ -605,6 +900,14 @@ window.Annotate = {
     canvas.addEventListener("pointermove", move);
     canvas.addEventListener("pointerup", end);
     canvas.addEventListener("pointercancel", end);
+    /* Not passive: refusing the scroll is the whole point of them. */
+    try {
+      canvas.addEventListener("touchstart", onTouchStart, { passive: false });
+      canvas.addEventListener("touchmove", onTouchMove, { passive: false });
+    } catch (e) {
+      canvas.addEventListener("touchstart", onTouchStart, false);
+      canvas.addEventListener("touchmove", onTouchMove, false);
+    }
     draw(card);
   },
   redrawAll: function () {
@@ -652,6 +955,9 @@ window.Annotate = {
   isOn: function () { return on; },
   setTool: function (t) { tool = (t === "erase") ? "erase" : "pen"; },
   tool: function () { return tool; },
+  /* Is a hand on the layer right now. The autosave asks before it spends the
+     main thread serialising a card's ink. */
+  busy: function () { return !!drawing; },
   undo: function () {
     var snap = past.pop();
     if (!snap) return false;
@@ -716,17 +1022,17 @@ window.Annotate = {
   },
   payload: function (id, send) {
     /* The picture ONLY when it is actually going to the tutor.
-   
-       `png()` builds an offscreen canvas the size of the card, repaints every
-       stroke on it and PNG-encodes the result. That ran on every autosave --
-       which is about a second after every stroke, for every card with unsaved
-       marks -- and on a tablet holding a long lesson it is hundreds of
-       milliseconds of the main thread each time. Reported as: "HELLA laggy. I
-       try to write something out multiple times and a few seconds later the
-       multiple writings all show up overlapping." That is precisely what a
-       blocked main thread looks like from behind a pen: the strokes were
-       captured the whole time and nothing could paint them.
-   
+
+       `png()` builds an offscreen canvas, repaints every stroke on it and
+       PNG-encodes the result. That ran on every autosave -- which is about a
+       second after every stroke, for every card with unsaved marks -- and on a
+       tablet holding a long lesson it is hundreds of milliseconds of the main
+       thread each time. Reported as: "HELLA laggy. I try to write something out
+       multiple times and a few seconds later the multiple writings all show up
+       overlapping." That is precisely what a blocked main thread looks like from
+       behind a pen: the strokes were captured the whole time and nothing could
+       paint them.
+
        Nothing read it. An autosave exists so a reload does not cost the marks,
        and what a reload restores is `strokes`; the server writes the file and
        `load_notes` never looks at it. The tutor reads the picture, and the tutor

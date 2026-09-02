@@ -357,6 +357,64 @@ setTimeout(() => setTimeout(() => {
       closeBtn.dispatchEvent(new window.Event('click', { bubbles: true, cancelable: true }));
       v.hidden ? ok('the close button closes it') : fail('the close button did nothing');
     }
+
+    // ---- nothing that arrives above the reader may move the reader --------
+    //
+    // Reported from the device: "intermittently, after I submit a response, it
+    // glitches and scrolls me up above the last board I wrote my response on."
+    // Nothing scrolled. The answer became a turn and was rendered into the
+    // transcript in its proper place — which is above the writing surface, and
+    // not at the end of it, whenever the question being answered is not also the
+    // last card the tutor has written. The page went down with it, and from
+    // behind the glass that is indistinguishable from being scrolled up.
+    //
+    // Safari has no scroll anchoring, so the board keeps the place itself.
+    // jsdom has no layout engine either, so here is just enough of one for the
+    // transcript: every child of #cards is a fixed height, stacked in order,
+    // and the window has a scroll offset that `scrollBy` moves.
+    const ROW = 300;
+    window.__scroll = 0;
+    window.scrollBy = function (x, y) { window.__scroll += y; };
+    window.HTMLElement.prototype.getBoundingClientRect = function () {
+      const p = this.parentNode;
+      if (p && p.id === 'cards') {
+        const i = Array.prototype.indexOf.call(p.children, this);
+        const t = i * ROW - window.__scroll;
+        return { left: 0, top: t, width: 900, height: ROW,
+                 right: 900, bottom: t + ROW, x: 0, y: t };
+      }
+      return { left: 0, top: 0, width: 900, height: 500,
+               right: 900, bottom: 500, x: 0, y: 0 };
+    };
+
+    const qA = { id: '0001', kind: 'question', title: 'Q', body: 'ask', mtime: now };
+    const noteB = { id: '0002', kind: 'note', title: 'N', body: 'aside', mtime: now + 20 };
+    window.__render({ state: { course: 'X', mode: 'math' },
+                      cards: [qA, noteB], messages: [], turns: [], slate: [],
+                      uploads: [] });
+    const box = doc.getElementById('cards');
+    const idxOf = (n) => Array.prototype.indexOf.call(box.children, n);
+    const c2 = doc.querySelector('[data-card="0002"]');
+    if (!c2) { fail('the aside card did not render'); return done(); }
+    // Scrolled so the aside is the first thing on the glass: that is what is
+    // being read, and it is what must not move.
+    window.__scroll = idxOf(c2) * ROW;
+    window.__render({ state: { course: 'X', mode: 'math' },
+                      cards: [qA, noteB], messages: [], slate: [], uploads: [],
+                      turns: [{ id: 't9', rev: 1, kind: 'ink', answers: '0001',
+                                t: now + 25, t0: now + 25,
+                                png: '/answers/t9-r1.png', strokes: 9 }] });
+    const c2b = doc.querySelector('[data-card="0002"]');
+    const turnNode = doc.querySelector('.mine[data-turn="t9"]');
+    if (turnNode && c2b && idxOf(turnNode) >= 0 && idxOf(turnNode) < idxOf(c2b))
+      ok('an answer to an earlier question lands above the card being read');
+    else fail('the answer did not land above the reader, so this proves nothing');
+    const moved = c2b ? c2b.getBoundingClientRect().top : 999;
+    if (Math.abs(moved) <= 2)
+      ok('and the page stays where it was, rather than going down with it');
+    else fail('the transcript grew above the reader and took the page '
+              + moved + 'px with it');
+
     done();
   }
   return;
