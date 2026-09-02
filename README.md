@@ -44,6 +44,47 @@ which kind of subject it is and the board adapts.
 >   board that is answering) but it is worth confirming: the port the HTTPS name points at should
 >   be the course they are working in.
 >
+> ### Where this is right now, 2 September 2026
+>
+> **The tutor stopped lecturing.** Asked for in these words: *"I want tutoring style for
+> homework/lessons of any kind based on a book to be completely about exercises. Completely."*
+> `TEACHING.md` had the right instinct already — teach toward the question they are about to
+> answer — and it was not enough, because it still described an explaining step: *teach the
+> concept, work an example yourself, then hand them a small one.* A model reading that writes a
+> lecture and staples a question to the bottom, every time, because that is what teaching looks
+> like in everything it has ever read.
+>
+> So the shape is now stated outright and stated first: **a lesson is exercises, all the way
+> down.** There is no explaining step. Whatever would have been explained is handed over as
+> something to do — the tutor brings the objects, a group of order six, three candidate subgroups,
+> a map that is nearly a homomorphism, and the student shows what they are. The exercise is stated
+> in full up front so they can see what the work is for; it is laddered with one small thing per
+> idea the exercise *actually uses*, and none at all for an idea it does not, however central that
+> idea is to the chapter; and then it is **re-posed in full**, because *now try 4.12* is eleven
+> cards up a tablet somebody is holding. Two rungs is normal, five means the wrong exercise was
+> chosen. Any rung can be skipped, and skipping every one of them is using the board correctly.
+>
+> **And a card that poses a problem now carries its own definitions.** Asked for from the board
+> mid-proof: *"I don't want to have to scroll back to understand exactly what I'm trying to
+> prove."* A statement on its own is not the whole question — the definitions it leans on are
+> part of it, and on a tablet they are eleven cards up. So every posing card is **self-contained**:
+> under the statement, one line each for every definition, symbol and named result the problem
+> uses — *normal: gNg⁻¹ = N for every g in G*; *[G : H]: the number of left cosets* — including the
+> ones from checks the student skipped, because a skip means *I have this*, not *do not tell me
+> what the symbol means*. A reference list, not a re-teaching: nothing on it is argued for. It
+> costs a few lines and it buys the thing the board is for, which is the whole of what they need
+> being in front of them.
+>
+> A review inverts exactly that one thing and nothing else: it asks **cold**, because laddering in
+> front of a question tells you only that the student can follow a ladder. The ladder comes off the
+> break, once there is one.
+>
+> The half that mattered as much as the document: in a headless session the board's own sense line
+> **is** the whole prompt, and it used to say "teach only what the problem needs, one question per
+> turn". That sentence is a lecture instruction. Every kind of sitting — lecture, homework, review
+> — now carries the same hoisted paragraph (`METHOD_SENSE` in `serve.py`), and the brief and the
+> cold-start prompt in `bin/tutor` say it too. `test/teaching.py` guards both halves.
+>
 > ### Where this is right now, 1 September 2026
 >
 > **One command on the Mac.** `bash scripts/catch-up.sh` pulls the tool and re-runs itself on what
@@ -804,25 +845,40 @@ time. The brief, the headless prompt and the cold-start line all point at it, so
 every assistant in every repository reads the same document and none of them can
 drift out of step.
 
+The rule it all follows from: **a lesson is exercises, all the way down.** There
+is no explaining step that stands on its own. Whatever would have been explained
+is handed over as something to *do* — the tutor supplies the objects, a group of
+order six, two polynomials, three candidate subgroups, and the student shows what
+they are: is this one an example, which of these three is not, where exactly does
+the second one fail. That showing *is* the teaching.
+
 The shape, in a mathematics course:
 
 1. **Read the section's exercises first.** They are the specification for the
    lesson; the prose is the means.
 2. **Choose a manageable few** — three to five, sometimes two — and say in the
    opening card which ones and why each earned its place. Not all of them.
-3. **For each in turn:** teach the concept it needs, work a smaller example
-   yourself, **hand the student a tiny instance of it to work themselves**, and
-   only then pose the exercise as a `question` card and stop. A concept that has
-   only been read is not one they can use, and the exercise is an expensive place
-   to discover that. The check is thirty seconds of writing, one concept at a
-   time, and it can be skipped like any other prompt.
-4. **Read what comes back.** A wrong answer gets its break located, not repaired.
-5. **When the chosen set is done, offer more** as a question — the student
+3. **For each in turn:** state the exercise in full, so the student can see what
+   the work is for, then **ladder it** — one tiny thing to work themselves per
+   idea the exercise actually needs, one per card, thirty seconds of writing
+   each, and none at all for an idea it does not need. Two rungs is normal;
+   five means the wrong exercise was chosen.
+4. **Then put the exercise back in front of them**, restated in full — *now try
+   4.12* is not a re-pose when it is eleven cards up a tablet — and ask for it,
+   **with every definition it uses listed under it**, one line each. Nobody
+   should have to scroll back up a lesson to find out what they are proving.
+5. **Read what comes back.** A wrong answer gets its break located, not repaired.
+6. **When the chosen set is done, offer more** as a question — the student
    answers, or taps **skip**, which means *move on*.
 
+Any rung can be skipped, like any other prompt, and a student who skips every one
+of them and goes straight to the exercise is using the board exactly as intended:
+the ladder is scaffolding for an answer, and anyone who can reach without it
+should.
+
 Front-loading is the failure it exists to prevent: no chapter summary, no "here
-is everything we will cover". Teach toward the question the student is about to
-answer, and nothing else.
+is everything we will cover", no card that teaches for four paragraphs and asks
+at the bottom. The measure of a sitting is how many exercises got answered.
 
 Sections are archived, so nothing has to be crammed — **◷** reopens any of them
 with the student's own working still in it, and an exercise left undone is a note

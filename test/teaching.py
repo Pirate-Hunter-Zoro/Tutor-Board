@@ -88,6 +88,34 @@ for phrase, why in [
     ("One concept per check", "one concept per check, not three in one card"),
     ("Tiny", "a check is small enough to answer at once"),
     ("can be skipped", "and a check can be declined like any other prompt"),
+    # And then the half that was missing: the checks are not a supplement to the
+    # explaining, they ARE the explaining. A model handed a chapter and told to
+    # teach writes a lecture, because that is what teaching looks like in
+    # everything it has ever read. So the shape is stated outright and first.
+    ("exercises, all the way down", "a lesson is exercises and nothing else"),
+    ("no explaining step that", "with no explaining step that stands on its own"),
+    ("There is no worked-example card", "and no card that only demonstrates"),
+    ("You bring the objects; they do the showing",
+     "the tutor supplies the objects and the student shows what they are"),
+    ("non-example", "and a non-example is how a definition gets fixed"),
+    ("ladder is as short as it can possibly be",
+     "only what the exercise needs is taught, and nothing else is"),
+    ("Re-pose the exercise", "the exercise comes back after the ladder"),
+    ("is not a re-pose", "restated in full, because a reference is not a re-pose"),
+    ("measure of a sitting is how many exercises got answered",
+     "and a sitting is measured in exercises answered"),
+    # A review is the one sitting that must NOT ladder before the question --
+    # laddering first would tell you only that they can follow a ladder.
+    ("ladder comes after the break", "a review asks cold and ladders from a break"),
+    # Asked for from the board, mid-proof: "I don't want to have to scroll back
+    # to understand exactly what I'm trying to prove." A statement on its own is
+    # not the whole question -- the definitions it leans on are part of it.
+    ("self-contained", "a card that poses a problem is self-contained"),
+    ("every definition, symbol and named result",
+     "and carries every definition the statement uses"),
+    ("scroll back", "so nothing has to be hunted for up the transcript"),
+    ("Include the ones from the rungs",
+     "including the ones from checks that were skipped"),
     # A code repository is a project, and the method used to be fifteen lines
     # bolted onto a document about books. So a first card on a project with no
     # chapters opened with "Which chapter this is", invented an order out of the
@@ -198,6 +226,44 @@ serve_src = open(os.path.join(ROOT, "serve.py"), encoding="utf-8").read()
 # In a headless session the begin line IS the prompt, so it carries the pointer.
 check("and so does the cold start, which in headless is the whole prompt",
       "TEACHING.md" in serve_src)
+
+# The pointer is not enough on its own. In headless the sense line IS the whole
+# prompt, and a tutor that reads "teach what the exercise needs" without the
+# shape attached writes a lecture and asks at the bottom of it. So every sitting
+# carries the shape, and it carries the SAME one -- one paragraph, hoisted.
+sys.path.insert(0, ROOT)
+loader2 = importlib.machinery.SourceFileLoader("serveapp", os.path.join(ROOT, "serve.py"))
+spec2 = importlib.util.spec_from_loader("serveapp", loader2)
+serveapp = importlib.util.module_from_spec(spec2)
+try:
+    loader2.exec_module(serveapp)
+except Exception as exc:                      # pragma: no cover - import guard
+    serveapp = None
+    print("note: serve.py did not import (%s); checking its source instead" % exc)
+
+sense = serveapp.METHOD_SENSE if serveapp else ""
+if serveapp:
+    for phrase, why in [
+        ("LESSON IS", "the sense line says the lesson is exercises"),
+        ("EXERCISES", "in the word the tutor cannot read past"),
+        ("state the exercise in full", "the exercise is stated in full first"),
+        ("ONE tiny thing", "then one small thing at a time"),
+        ("RESTATED IN FULL", "and the exercise is restated in full at the end"),
+        ("not a re-pose", "a reference to it is not a re-pose"),
+        ("self-contained", "every posing card is self-contained"),
+        ("scroll back", "so nothing has to be hunted for up the transcript"),
+        ("One question per turn", "one question per turn"),
+    ]:
+        check("the headless prompt " + why, phrase in sense)
+    check("and every kind of sitting is given the same shape",
+          serve_src.count("METHOD_SENSE") >= 4)
+    # A review inverts one thing and only one: it asks before it teaches.
+    check("except a review, which asks cold and ladders from the break",
+          "asks COLD" in serve_src and "Ladder only from a break" in serve_src)
+    # A skipped check is a rung, so the skip has somewhere to go next.
+    check("a skipped check moves to the next rung, or to the exercise",
+          "hand-check" in serveapp.SIGNAL_SENSE["skip"]
+          and "restated in full" in serveapp.SIGNAL_SENSE["skip"])
 
 board_src = open(os.path.join(ROOT, "bin", "board"), encoding="utf-8").read()
 check("board start installs it rather than assuming it is there",

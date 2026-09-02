@@ -363,11 +363,38 @@ SIGNAL_SENSE = {
     # The lecture and test-review reading. A homework sitting means something
     # different by the same tap and gets its own sentence -- see `skip_sense`.
     "skip": "they are not writing this one out. Do not re-ask it and do not press "
-            "them on it; carry on with the lesson.",
+            "them on it; carry on with the lesson. If it was a hand-check, treat "
+            "that idea as known and go to the next one -- or, if it was the last "
+            "one, straight to the exercise, restated in full.",
     "done": "their work is ready for you to check.",
     "help": "they are stuck and want help.",
     "confused": "something is not making sense to them.",
 }
+
+
+# The method in one paragraph. In a headless session these strings ARE the whole
+# prompt, and the shape is the half that goes wrong -- a model handed a chapter
+# and told to teach writes a lecture, every time, because that is what teaching
+# looks like in everything it was trained on. So the shape is said outright and
+# said first: a lesson is exercises, and explanation that is not something the
+# student does is not part of it.
+METHOD_SENSE = (
+    "Follow live/TEACHING.md, and the rule it all follows from: THE LESSON IS "
+    "EXERCISES, not explanation. Never write a card that teaches for four "
+    "paragraphs and asks at the bottom. Instead: state the exercise in full so "
+    "they can see what it is for, then hand them ONE tiny thing to work "
+    "themselves -- you supply the concrete objects, they show what those objects "
+    "are (is this one an example, which of these three is not, where does this "
+    "one fail) -- one per turn, and only for what the exercise actually needs. "
+    "When the last of those is answered or skipped, put the exercise back in "
+    "front of them RESTATED IN FULL and ask for it; a reference to it is not a "
+    "re-pose. EVERY card that poses a problem is self-contained: under the "
+    "statement, list every definition, symbol and named result the problem uses, "
+    "one line each, including ones from checks they skipped. They are reading on "
+    "a tablet and must never have to scroll back up the lesson to find out what "
+    "they are being asked to prove. One question per turn, then stop and wait. "
+    "The only thing that counts is exercises answered. "
+)
 
 
 def code_sense(label, stance="teach"):
@@ -456,8 +483,12 @@ def review_sense(repo, st, mode):
         "some, and write one in the same style where there are not. "
     )
     return (
-        "Follow live/TEACHING.md: teach only what the question in front of them "
-        "needs, one question per turn, then stop. This is a TEST REVIEW over %s, "
+        METHOD_SENSE +
+        "A review is the one sitting that asks COLD: no hand-checks in front of "
+        "the question and nothing taught toward it, because you are finding out "
+        "what is not solid. Ladder only from a break, once there is one, and "
+        "then re-pose the question in full. "
+        "This is a TEST REVIEW over %s, "
         "in this order: %s. "
         "The scope is theirs and is not yours to widen or narrow -- ask over "
         "exactly those and nothing else, and spread the questions across all of "
@@ -554,11 +585,10 @@ def session_sense(repo):
         return code_sense(chapter, cfg_here.get("stance"))
     # In a headless session this line is the whole prompt, so it has to carry the
     # pointer to the method as well as the pointer to the place.
-    how = ("Follow live/TEACHING.md: teach only what the problem in front of them "
-           "needs, one question per turn, then stop. "
-           if kind == "homework" else
-           "Follow live/TEACHING.md: the section's exercises first, a manageable few, "
-           "teach only what each needs, one question per turn, then stop. ")
+    how = (METHOD_SENSE if kind == "homework" else
+           METHOD_SENSE + "Read the section's exercises before you teach anything "
+           "and choose a manageable few -- three to five -- saying which and why "
+           "in your first card. ")
     if kind == "homework":
         st_hw = homework.status(repo.root, st)
         if st_hw and st_hw.get("name"):

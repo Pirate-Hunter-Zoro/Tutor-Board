@@ -394,9 +394,12 @@ model can see images, open the file directly; if it cannot, call the
 `describe_image` tool on the file path and read the OCR it returns.
 
 **Read `live/TEACHING.md` before your first card.** It is the method every course
-on this board is taught by, and it is not optional: pick the section's exercises
-first, choose a manageable few, teach only what each one needs, pose one question,
-and stop. It ships with the board rather than with the course, so it is the same
+on this board is taught by, and it is not optional. The rule it all follows from:
+**the lesson is exercises, not explanation.** Pick the section's exercises first,
+choose a manageable few, and for each one state it in full, hand the student one
+tiny thing to work themselves per idea it actually needs — your objects, their
+showing — then re-pose the exercise in full and ask for it. One question per turn,
+then stop. It ships with the board rather than with the course, so it is the same
 everywhere and cannot drift.
 
 %(handoff)s
@@ -503,9 +506,10 @@ HEADLESS_FIRST_PROMPT = (
     "You are running headless: there is no terminal and nobody will read stdout. "
     "The student is on the board.\n\n"
     "Read these once, in this order: AI_INSTRUCTIONS.md (the contract for this "
-    "course), live/TEACHING.md (the method -- the section's exercises first, a "
-    "manageable few, teach only what each needs, one question per turn, then "
-    "stop). %(handoff)s\n\n"
+    "course), live/TEACHING.md (the method -- the lesson is EXERCISES, not "
+    "explanation: the section's exercises first, a manageable few, each one "
+    "stated in full, laddered with tiny things the student works themselves, "
+    "then re-posed in full; one question per turn, then stop). %(handoff)s\n\n"
     # One call instead of one per card. The lesson is a transcript and an
     # assistant resuming it needs its shape, its last card and the student's last
     # move -- not every card re-read in full.
