@@ -643,7 +643,23 @@ window.Annotate = {
     onChange();
   },
   payload: function (id, send) {
-    return { card: id, strokes: store[id] || [], png: png(id),
+    /* The picture ONLY when it is actually going to the tutor.
+   
+       `png()` builds an offscreen canvas the size of the card, repaints every
+       stroke on it and PNG-encodes the result. That ran on every autosave --
+       which is about a second after every stroke, for every card with unsaved
+       marks -- and on a tablet holding a long lesson it is hundreds of
+       milliseconds of the main thread each time. Reported as: "HELLA laggy. I
+       try to write something out multiple times and a few seconds later the
+       multiple writings all show up overlapping." That is precisely what a
+       blocked main thread looks like from behind a pen: the strokes were
+       captured the whole time and nothing could paint them.
+   
+       Nothing read it. An autosave exists so a reload does not cost the marks,
+       and what a reload restores is `strokes`; the server writes the file and
+       `load_notes` never looks at it. The tutor reads the picture, and the tutor
+       only sees marks that were sent. */
+    return { card: id, strokes: store[id] || [], png: send ? png(id) : "",
              where: whereOn(id), send: !!send };
   },
   onChange: function (fn) { onChange = fn || function () {}; }

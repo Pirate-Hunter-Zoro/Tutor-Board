@@ -454,6 +454,41 @@ if (es && window.Annotate) {
     if (last && last.p && last.p.length >= 6) ok('a pen stroke lands on a card');
     else fail('drawing on a card produced no stroke');
 
+    // An autosave must not pay for a picture nobody reads.
+    //
+    // Reported from the board: "HELLA laggy. I try to write something out
+    // multiple times and a few seconds later the multiple writings all show up
+    // overlapping." That is a blocked main thread seen from behind a pen -- the
+    // strokes were captured the whole time and nothing could paint them.
+    // `png()` builds an offscreen canvas the size of the card, repaints every
+    // stroke and PNG-encodes it, and it ran on EVERY autosave: about a second
+    // after every stroke, for every card with unsaved marks.
+    //
+    // Nothing read it. A reload restores `strokes`; the tutor reads the picture,
+    // and the tutor only ever sees marks that were sent.
+    var encodes = 0;
+    var realToDataURL = window.HTMLCanvasElement.prototype.toDataURL;
+    window.HTMLCanvasElement.prototype.toDataURL = function () {
+      encodes++;
+      return 'data:image/png;base64,';
+    };
+    var autosaved = window.Annotate.payload('0003', false);
+    var duringSave = encodes;
+    encodes = 0;
+    var handedIn = window.Annotate.payload('0003', true);
+    var duringSend = encodes;
+    window.HTMLCanvasElement.prototype.toDataURL = realToDataURL;
+
+    if (duringSave === 0) ok('an autosave carries the marks and encodes no picture');
+    else fail('an autosave still encoded ' + duringSave + ' picture(s) of the card, '
+              + 'which is the main thread it takes to paint the next stroke');
+    if (autosaved.strokes && autosaved.strokes.length)
+      ok('and it still carries the strokes, which is what a reload restores');
+    else fail('an autosave carries no strokes at all');
+    if (duringSend > 0 && handedIn.png)
+      ok('and sending still carries the picture the tutor reads');
+    else fail('a send no longer carries a picture');
+
     var above = false;
     for (var q = 1; last && q < last.p.length; q += 2) if (last.p[q] < 0) above = true;
     if (above) ok('and ink drawn past the edge of the card is kept, not clipped flat');

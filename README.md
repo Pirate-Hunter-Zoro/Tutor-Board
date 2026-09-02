@@ -46,6 +46,23 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 2 September 2026
 >
+> **And annotating was paying for a picture nobody read, after every stroke.** Reported straight
+> after the selection fix landed: *"Annotating isn't doing the highlighting anymore but it is HELLA
+> laggy. I try to write something out multiple times and a few seconds later the multiple writings
+> all show up overlapping and ugly."* The first half is the fix working. The second half is a
+> blocked main thread seen from behind a pen — the strokes were captured the whole time and nothing
+> could paint them, so several attempts arrived at once.
+>
+> The autosave was the cost. `Annotate.payload` built an offscreen canvas the size of the card,
+> repainted every stroke on it and PNG-encoded the result — on **every** save, which is about a
+> second after every stroke, for every card with unsaved marks. On a tablet holding a long lesson
+> that is hundreds of milliseconds of the main thread, over and over.
+>
+> And nothing read it. An autosave exists so a reload does not cost the marks, and what a reload
+> restores is `strokes`; `load_notes` never opens the picture. The tutor reads it, and the tutor
+> only ever sees marks that were **sent** — so the picture is built when it is sent and not before.
+> `test/link.js` counts the encodes on both paths. Shell version `board-shell-v71`.
+>
 > **The board is a package now.** Asked for in these words: *"reorganize the fuck out of this
 > repository. The python scripts are monsters."* They were: `serve.py` was 2,806 lines and
 > `boardlib.py` another 1,619, and nine hundred of the first were a single `if path == ...` in two
