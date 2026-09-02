@@ -46,6 +46,27 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 2 September 2026
 >
+> **Every autosave was crashing the board, and had been.** Reported as "it also keeps failing to
+> save", and the log said it plainly: `UnboundLocalError: local variable 'record' referenced before
+> assignment`, once per save, thrown out of `/slate/save`. The send-only tail of that handler had
+> been de-indented out of its own `if` — so every ordinary autosave, which is every save the slate
+> makes while somebody is writing, ran code that builds a *turn* record, hit `record` before it was
+> ever assigned, and killed the connection without a response. The real "saved" return underneath
+> it was unreachable dead code the whole time.
+>
+> The strokes did reach disk — the page file is written before the crash — so nothing was lost; the
+> board simply never heard back, said `offline`, and kept the page marked dirty. Both halves of
+> what was reported were one bug. `test/begin.py` now posts an ordinary autosave at a real board
+> and checks it gets an answer, which is a thing no suite had ever asked.
+>
+> **And a tutor being bounced no longer reads as a tutor that died.** "No tutor attached. NOW the
+> tutor just got attached, but this is spotty" — both true, and the cause was a ship: `tutor
+> restart --tutors` stops each daemon and starts it again, and the gap between showed on the iPad
+> as the dead-end chip a course that never had a tutor shows. The record is marked on the way out
+> now and a clean stop keeps it rather than deleting it, so the board can tell *reattaching…* from
+> *stopped — nothing is reading the board* from *no tutor attached*. Three different things that
+> used to look identical. `test/agents.py`.
+>
 > **And then `offline` beside the send button, which was the same wound.** Reported with the
 > tutor plainly listening at the top of the same screen. That tag is set when a `/slate/save` is
 > refused — and it was set *and left there*: the word never cleared, nothing retried, and the page

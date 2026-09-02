@@ -414,5 +414,33 @@ check("and a failure to restart does not fail the push",
       "|| echo" in push_src)
 
 print()
+# A daemon being BOUNCED is not a daemon that died.
+#
+# Reported mid-lesson, right after a ship: "No tutor attached. NOW the tutor just
+# got attached, but this is spotty and I don't like it." Both statements were
+# true -- `tutor restart --tutors` stops each daemon and starts it again, and the
+# gap between the two showed on the iPad as the dead-end chip a course that never
+# had a tutor shows, plus the empty-board banner. The record is now marked on the
+# way out, and the board says what is actually happening.
+import serve as _serve                                       # noqa: E402
+import time as _time                                         # noqa: E402
+
+check("a restart says on disk that it is a restart",
+      'agent_state(c["root"] + "/live", restarting=True' in tool_src)
+check("and a clean stop keeps the record rather than deleting it, so the board "
+      "can tell 'stopped' from 'never had one'",
+      'agent_state(live, state="stopped", restarting=False' in tool_src
+      and "os.remove(os.path.join(live, \"agent.json\"))" not in tool_src)
+check("a record left by a restart in flight reads as reattaching",
+      _serve._reattaching({"restarting": True, "stopped_at": _time.time()}))
+check("and one left by a restart that never finished does not, for ever",
+      not _serve._reattaching({"restarting": True,
+                               "stopped_at": _time.time() - 10000}))
+check("a daemon that simply died is not dressed up as a restart",
+      not _serve._reattaching({"stopped_at": _time.time()}))
+check("and the board has a word for it that is not 'nothing is reading'",
+      'agent.state === "reattaching"' in
+      open(os.path.join(ROOT, "web", "board.js"), encoding="utf-8").read())
+
 print("%d FAILURES" % len(fails) if fails else "the assistant follows the course")
 sys.exit(1 if fails else 0)

@@ -764,8 +764,31 @@ def load_agent(repo):
     except (OSError, ValueError):
         return None
     if not boardlib.agent_is_attached(st, boardlib.node_name()):
-        st["state"] = "stale"
+        # A daemon being BOUNCED is not a daemon that died, and the board is the
+        # only place anybody finds out which it was. A restart marks the record
+        # on its way out, so the gap between the old process going and the new
+        # one writing its first heartbeat says "reattaching" rather than "no
+        # tutor attached" -- which is what a course that never had one says, and
+        # is a dead end in the middle of a lesson.
+        st["state"] = "reattaching" if _reattaching(st) else "stale"
     return st
+
+
+# How long a restart is given before the board stops calling it a restart. Long
+# enough for a daemon to write its handoff turn and come back; short enough that
+# a bounce that genuinely failed does not go on claiming to be in progress.
+REATTACH_GRACE = 180
+
+
+def _reattaching(st):
+    """Was this record left behind by a restart that is still in flight?"""
+    if not st.get("restarting"):
+        return False
+    try:
+        since = time.time() - float(st.get("stopped_at") or 0)
+    except (TypeError, ValueError):
+        return False
+    return 0 <= since <= REATTACH_GRACE
 
 
 def load_hw(repo):
@@ -2490,25 +2513,25 @@ class Handler(BaseHTTPRequestHandler):
                     "ink": "/answers/" + base + ".json",
                     "read": False,
                 }
-            write_turn(repo, record)
-            msg = dict(record)
-            # What arrived is a page, not a verdict. It may be an attempt,
-            # a question written in the margin, or "I don't know how to
-            # start" -- and reading it as a wrong answer when it is a
-            # question is the most discouraging thing this can do.
-            msg["text"] = ("[slate] %s rev %d, %d strokes. Open the image and "
-                           "read what is actually on it: if there is a question "
-                           "anywhere on the page, answer that first, in its own "
-                           "card, before assessing any working. Do not mark a "
-                           "question wrong."
-                           % (tid, rev, len(strokes)))
-            msg["slate"] = os.path.join(repo.answers, base + ".png")
-            with open(repo.messages_path, "a", encoding="utf-8") as fh:
-                fh.write(json.dumps(msg) + "\n")
-            self.server.hub.worker.dirty.set()
-            self.note("slate page %d: %d strokes, SENT as %s rev %d answering %s"
-                      % (n, len(strokes), tid, rev, record["answers"] or "-"))
-            return self.send_json({"ok": True, "page": n, "turn": tid, "rev": rev})
+                write_turn(repo, record)
+                msg = dict(record)
+                # What arrived is a page, not a verdict. It may be an attempt,
+                # a question written in the margin, or "I don't know how to
+                # start" -- and reading it as a wrong answer when it is a
+                # question is the most discouraging thing this can do.
+                msg["text"] = ("[slate] %s rev %d, %d strokes. Open the image and "
+                               "read what is actually on it: if there is a question "
+                               "anywhere on the page, answer that first, in its own "
+                               "card, before assessing any working. Do not mark a "
+                               "question wrong."
+                               % (tid, rev, len(strokes)))
+                msg["slate"] = os.path.join(repo.answers, base + ".png")
+                with open(repo.messages_path, "a", encoding="utf-8") as fh:
+                    fh.write(json.dumps(msg) + "\n")
+                self.server.hub.worker.dirty.set()
+                self.note("slate page %d: %d strokes, SENT as %s rev %d answering %s"
+                          % (n, len(strokes), tid, rev, record["answers"] or "-"))
+                return self.send_json({"ok": True, "page": n, "turn": tid, "rev": rev})
             self.server.hub.worker.dirty.set()
             self.note("slate page %d: %d strokes, saved only (not sent)"
                       % (n, len(payload.get("strokes") or [])))

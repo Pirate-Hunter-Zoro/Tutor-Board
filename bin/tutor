@@ -1336,11 +1336,12 @@ def headless(cfg, course, agent_name, session):
         except (subprocess.TimeoutExpired, OSError) as exc:
             log.write("!! handoff failed: %s\n" % exc)
 
-    agent_state(live, state="stopped")
-    try:
-        os.remove(os.path.join(live, "agent.json"))
-    except OSError:
-        pass
+    # Keep the record and say what happened to it. Deleting it makes the board
+    # say "no tutor attached", which is the same thing it says when a course
+    # never had one -- and the two want different things from the person reading
+    # it. `state: stopped` reads on the board as "tutor stopped, nothing is
+    # reading the board", which is the truth and is actionable.
+    agent_state(live, state="stopped", restarting=False, stopped_at=time.time())
     print("stopped after %d turn(s)" % turns)
     return 0
 
@@ -1421,6 +1422,15 @@ def cmd_restart(cfg, args):
         # precisely the continuity a different tutor picks up from.
         was_name = st.get("agent")
         name = resolve_agent(cfg, c) or was_name
+        # Say, on disk, that this is a RESTART and not a death. The board reads
+        # this record to decide what to tell the person holding the iPad, and a
+        # daemon being bounced looks from there exactly like one that died: the
+        # chip goes to "no tutor attached" and the empty-board banner appears,
+        # in the middle of a lesson, because a fix was shipped. Reported as
+        # "No tutor attached. NOW the tutor just got attached, but this is
+        # spotty". It is one word in the record and it turns a dead end into
+        # "reattaching".
+        agent_state(c["root"] + "/live", restarting=True, stopped_at=time.time())
         was = st.get("pid")
         if not was:
             # A record with no pid in it. It happens: a daemon killed with its

@@ -1110,6 +1110,9 @@ function paintSession(state, push, agent, exported) {
   /* Only a record the server has judged stale means nobody is there. "Working"
      is emphatically attached: a turn in progress is the tutor doing its job, and
      a five-minute turn used to read on the iPad as a death. */
+  /* "reattaching" counts as attached: a daemon being bounced onto new code is
+     coming back in seconds, and telling somebody mid-lesson that nothing is
+     reading the board is both wrong and alarming. */
   attached = !!agent && agent.state !== "stale";
   working = !!agent && agent.state === "working";
   /* And say it where somebody about to tap is actually looking, not only in the
@@ -1128,6 +1131,8 @@ function paintSession(state, push, agent, exported) {
          in a terminal waiting for its person. "Attached" is the true word, and
          the useful one: somebody is on the other end. */
     : agent.state === "attached" ? (agent.agent || "assistant") + " attached"
+      /* Bounced onto new code, not dead. It comes back on its own. */
+    : agent.state === "reattaching" ? (agent.agent || "assistant") + " reattaching…"
       /* Only reached when the record exists but nothing recognises its state --
          a daemon whose process is gone. Say what that means for them. */
     : "tutor stopped — nothing is reading the board";

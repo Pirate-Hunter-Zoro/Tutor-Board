@@ -365,6 +365,29 @@ try:
           "uploaded" in method and "board eyes" in method)
     check("and that one must never sit unremarked",
           "unremarked" in method or "never let one sit" in method)
+
+    # An ORDINARY autosave must answer. Every save the slate makes while somebody
+    # is writing is `send: false`, and the send-only tail of the handler had been
+    # de-indented out of its `if` -- so every one of them ran code that builds a
+    # turn record, hit `record` before it was ever assigned, and killed the
+    # connection without a response. From the iPad: the strokes reached disk (the
+    # page file is written before the crash) and the board said `offline` anyway,
+    # for ever, because the answer never came back. Reported as "it also keeps
+    # failing to save". The real "saved" return underneath was unreachable.
+    code, doc = post("/slate/save", {"page": 1, "w": 800, "h": 600,
+                                     "strokes": [{"c": "#eee", "w": 2,
+                                                  "pts": [[1, 1], [2, 2]]}]})
+    check("an autosave answers instead of dropping the connection",
+          code == 200 and doc.get("ok") is True)
+    check("and says which page it saved", doc.get("page") == 1)
+    check("without inventing a turn nobody sent",
+          "turn" not in doc and not os.path.isdir(os.path.join(tmp, "live", "answers"))
+          or not os.listdir(os.path.join(tmp, "live", "answers")))
+    # And a save that IS a send still does the whole thing.
+    code, doc = post("/slate/save", {"page": 1, "w": 800, "h": 600, "send": True,
+                                     "strokes": [{"c": "#eee", "w": 2,
+                                                  "pts": [[1, 1], [2, 2]]}]})
+    check("and a send still starts a turn", code == 200 and bool(doc.get("turn")))
 finally:
     httpd.shutdown()
     shutil.rmtree(tmp, ignore_errors=True)
