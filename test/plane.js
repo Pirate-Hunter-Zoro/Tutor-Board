@@ -519,6 +519,62 @@ const heelSwipe = (id, x, y, dx, dy) => {
     window.fetch = realFetch;
   }
 
+  // A save the network refused must not become a permanent label.
+  //
+  // Reported from the board: "I also see an 'offline' next to the send button.
+  // What gives? It says claude listening at the top." The board had been
+  // flickering; one save fell into the gap; and the tag beside the send button
+  // said `offline` for the rest of the sitting -- while the page still owed the
+  // disk its strokes and nothing anywhere was retrying. The word was wrong, it
+  // never cleared, and the ink behind it was genuinely not saved.
+  {
+    const tries = [];
+    let refuse = true;
+    const realFetch = window.fetch;
+    window.fetch = (u, opts) => {
+      if (/slate\/save/.test(String(u))) {
+        tries.push(JSON.parse(opts.body));
+        if (refuse) return Promise.reject(new Error('no route to host'));
+        return Promise.resolve({ json: () => Promise.resolve({ ok: true, rev: 1 }) });
+      }
+      return new Promise(() => {});
+    };
+    const root3 = doc.createElement('div');
+    doc.body.appendChild(root3);
+    const s3 = window.Slate.create({ root: root3, compact: false });
+    const sheet3 = root3.querySelector('canvas.sl-sheet');
+    const tag = () => root3.querySelector('.sl-saved').textContent;
+    const pen3 = (type, x, y, id) => {
+      const ev = new window.Event(type, { bubbles: true, cancelable: true });
+      Object.assign(ev, { pointerId: id, pointerType: 'pen', pressure: 0.6,
+                          clientX: x, clientY: y, isPrimary: true });
+      ev.getCoalescedEvents = () => [ev];
+      sheet3.dispatchEvent(ev);
+    };
+    pen3('pointerdown', 120, 120, 71);
+    for (let i = 0; i < 6; i++) pen3('pointermove', 120 + i * 7, 120 + i * 5, 71);
+    pen3('pointerup', 170, 160, 71);
+
+    await s3.save(false);
+    await new Promise((r) => setTimeout(r, 5));
+    /^not saved/.test(tag())
+      ? ok('a refused save says it is retrying, not that the board is offline')
+      : fail('the tag beside the send button reads "' + tag() + '"');
+
+    const afterFirst = tries.length;
+    await new Promise((r) => setTimeout(r, 1400));
+    tries.length > afterFirst
+      ? ok('and it actually retries rather than leaving the ink where it is')
+      : fail('nothing retried; the strokes are still only in the browser');
+
+    refuse = false;
+    await new Promise((r) => setTimeout(r, 2600));
+    tag() === 'saved'
+      ? ok('and the moment one lands, the label clears itself')
+      : fail('the label stayed at "' + tag() + '" after a save succeeded');
+    window.fetch = realFetch;
+  }
+
   // The board asks the surface whether a hand is mid-answer before it moves the
   // page. A surface that cannot answer is a page that scrolls under a pen.
   typeof slate.busy === 'function'

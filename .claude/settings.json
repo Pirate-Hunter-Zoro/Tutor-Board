@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(board next*)",
+      "Bash(board recap*)",
+      "Bash(board status*)",
+      "Bash(board net*)",
+      "Bash(board doctor*)",
+      "Bash(board inbox*)",
+      "Bash(board slate*)",
+      "Bash(board wait*)",
+      "Bash(board eyes*)",
+      "Bash(board hw status*)",
+      "Bash(board hw list*)",
+      "Bash(board hw)",
+      "Bash(board review status*)",
+      "Bash(board review list*)",
+      "Bash(tutor where*)",
+      "Bash(tutor agent status*)",
+      "Bash(tutor --list)",
+      "Bash(tutor --agents)",
+      "Bash(./bin/board recap*)",
+      "Bash(./bin/board status*)",
+      "Bash(./bin/board slate*)",
+      "Bash(./bin/board wait*)",
+      "Bash(./bin/board hw status*)",
+      "Bash(./bin/board hw list*)",
+      "Bash(squeue)",
+      "Bash(squeue *)",
+      "Bash(curl -s http://127.0.0.1:*)",
+      "Bash(curl -s http://localhost:*)",
+      "Bash(curl -s localhost:*)",
+      "Bash(curl -sN http://127.0.0.1:*)",
+      "Bash(curl -s -o /dev/null -w *)",
+      "Bash(curl -s --max-time *)",
+      "Bash(bash test/all.sh*)",
+      "Bash(pdftotext *)",
+      "Bash(tr *)"
+    ]
+  }
+}

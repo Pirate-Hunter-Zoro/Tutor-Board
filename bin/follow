@@ -168,20 +168,51 @@ def active_course(cands):
     return best[1] if best else (cands[0] if cands else None)
 
 
+# What each board said, and when. See `probe`.
+_HEALTH = {}
+PROBE_FRESH = float(os.environ.get("FOLLOW_PROBE_FRESH", "5"))
+
+
 def probe(host, port, timeout=2.0):
     """What is answering on this host:port, or None. /health is the honest test.
 
     Returns the parsed health document rather than a yes/no, because both of the
     things this proxy has to decide are in it: which course this board is (`dir`),
     and which course the person actually asked for (`chosen`).
+
+    **One question per board per tick.** Deciding used to ask the same board over
+    the tailnet three separate times -- once to find it, once to ask whether it
+    has a tutor, once to ask whether it still has an allowance -- and every one of
+    those was a fresh two-second timeout that could fail on its own. A board could
+    therefore be alive for the purpose of holding the address and, in the same
+    tick, have no tutor and no allowance, because the second and third questions
+    timed out where the first did not. `has_tutor` cannot tell "it said no" from
+    "it did not answer", and neither can `limited`.
+
+    That is not a theoretical race. Measured on this pair while a lesson was
+    running: a Galois board with a tutor on the compute node, an empty Galois
+    board on the Mac, and the address moving between them -- the lesson appearing
+    and vanishing on the iPad, reported as "the board keeps flickering".
+
+    A short memo fixes it exactly: every question asked about a board during one
+    decision gets the same answer, so the answers cannot contradict each other.
+    It is deliberately shorter than the tick, so it is a memo and never a cache --
+    a board that died is noticed on the next decision, not five ticks later.
     """
+    key = (host, int(port))
+    now = time.time()
+    got = _HEALTH.get(key)
+    if got and now - got[0] < PROBE_FRESH:
+        return got[1]
     # One implementation, in boardlib, because there are two ways to ask and
     # which one works depends on the machine: an ordinary socket where tailscale
     # has a real interface, and the SOCKS proxy on a machine running tailscaled
     # in userspace mode, which cannot open a tailnet connection any other way.
     # This file used to do it the first way only, so on such a machine every
     # question about the other side answered "nobody is there".
-    return boardlib.board_health(host, port, timeout=timeout)
+    health = boardlib.board_health(host, port, timeout=timeout)
+    _HEALTH[key] = (now, health)
+    return health
 
 
 def identifies_as(health, name):
@@ -520,8 +551,11 @@ def choose_target(node, cands, prefer="local"):
          start a board there then lands on a live address rather than waiting for
          the next tick to be noticed.
 
-    Returns ((host, port), phrase); the exactness flag is spent here and does not
-    leave, because the follower's only question is whether the address moved.
+    Returns ((host, port), phrase, want); the exactness flag is spent here and
+    does not leave, because the follower's only question is whether the address
+    moved. `want` does leave, and it is what lets the follower tell a person
+    changing their mind -- act at once -- from two probes disagreeing about the
+    same unchanged choice, which is a wobble and must not move a lesson.
     """
     remote_choice = node_choice(node, cands)
     published = local_choice(cands)
@@ -577,15 +611,15 @@ def choose_target(node, cands, prefer="local"):
     graded = [(t, w, limited(t[0], t[1])) for t, w in order]
     for t, w, out in graded:
         if not out:
-            return (t[0], t[1]), w
+            return (t[0], t[1]), w, want
     if graded:
         t, w, _ = graded[0]
-        return (t[0], t[1]), w + " (out of allowance, and so is everywhere else)"
+        return (t[0], t[1]), w + " (out of allowance, and so is everywhere else)", want
 
     active = active_course(cands) if cands else None
     if active:
-        return ("127.0.0.1", local_port(active)), "here (nothing up yet)"
-    return None, None
+        return ("127.0.0.1", local_port(active)), "here (nothing up yet)", want
+    return None, None, want
 
 
 def handover(host, port, secret, log):
@@ -768,8 +802,39 @@ def follower(target, node, cands, log, prefer="local", secret=None):
     """
     interval = float(os.environ.get("FOLLOW_INTERVAL", "30"))
     was = None
+    was_want = None
+    pending = None          # a move that has not said the same thing twice yet
     while True:
-        now, where = choose_target(node, cands, prefer)
+        now, where, want = choose_target(node, cands, prefer)
+
+        # A move the CHOICE did not ask for has to say the same thing twice.
+        #
+        # Deciding is a set of network probes, and a probe that times out is
+        # indistinguishable from a board saying no. So a slow tailnet can demote
+        # the board somebody is actually being taught on -- and the tick after,
+        # promote it again. On the iPad that is the lesson appearing and
+        # vanishing: "the board keeps flickering", reported while a Galois board
+        # with a tutor on the node and an empty Galois board on the Mac traded
+        # the address between them.
+        #
+        # The memo in `probe` stops one tick contradicting itself; this stops one
+        # tick contradicting the last. It applies ONLY when the person's choice
+        # has not changed and the board currently holding the address is still
+        # answering for the course that was chosen -- a tap moves the address at
+        # once, and so does the incumbent dying. Nothing waits for a machine that
+        # is broken; only a machine that is working is given the benefit of the
+        # doubt.
+        if (now and was and now != was and want == was_want
+                and identifies_as(probe(was[0], was[1]), want or "")):
+            if pending != now:
+                pending = now
+                log("not moving to %s:%d yet -- %s still answers for %s"
+                    % (now[0], now[1], was[0], want))
+                now = was
+        else:
+            pending = None
+
+        was_want = want
         if now and now != was:
             # Any move between machines strands a tutor, because the machine
             # being left goes on running perfectly well with nobody able to
@@ -804,7 +869,20 @@ def follower(target, node, cands, log, prefer="local", secret=None):
                 break
             # And the same question asked of a board rather than of a file, for
             # the machines where those two are not the same answer.
-            if _published_stamp() != published:
+            #
+            # `None` is "I could not ask", never "it changed". Without that
+            # distinction one refused connection a second is one full
+            # re-decision a second -- every one of them a fresh set of probes
+            # over the tailnet, every one another chance for a timeout to move
+            # the address. This wake was added to make a tap instant and, on a
+            # busy machine, it turned a slow wobble into a fast one.
+            now_pub = _published_stamp()
+            if now_pub is None:
+                continue
+            if published is None:
+                published = now_pub      # learned it; that is not a change
+                continue
+            if now_pub != published:
                 break
 
 

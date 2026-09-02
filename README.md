@@ -46,6 +46,51 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 2 September 2026
 >
+> **And then `offline` beside the send button, which was the same wound.** Reported with the
+> tutor plainly listening at the top of the same screen. That tag is set when a `/slate/save` is
+> refused — and it was set *and left there*: the word never cleared, nothing retried, and the page
+> still owed the disk its strokes. One save fell into a gap while the address was trading machines
+> and the label stayed for the rest of the sitting.
+>
+> Underneath it, a worse one. A failed save correctly leaves the page dirty; the drain that runs
+> when a save settles then asks for the next dirty page, gets that same page straight back, and
+> tries again with nothing in between — **a tight loop hammering a socket that is not there**, for
+> as long as the board is unreachable. Now: a refused save says *not saved — retrying*, backs off
+> to fifteen seconds, holds the queue while it waits, and clears itself the moment one lands.
+> `test/plane.js` refuses every save, watches it retry, then lets one through and checks the label
+> goes back to `saved`. Shell version `board-shell-v68`.
+>
+> **The board kept flickering, and it was the address trading a lesson for an empty room.**
+> Reported in three words from the iPad, mid-proof. The state it was reported in, measured rather
+> than guessed: a Galois board on the compute node with a tutor and the lesson in it — *Ch 03 —
+> Rings*, two cards — and a Galois board on the Mac with **no tutor and nothing on it**, both up,
+> both claiming the same chosen course. The address traded between them, so the lesson appeared,
+> vanished, and came back.
+>
+> The follower already has the rule that should decide this: a board with a tutor beats an empty
+> room with the same claim. What defeated it is that **deciding asked each board over the tailnet
+> three separate times** — once to find it, once for `has_tutor`, once for `limited` — and neither
+> of the last two can tell *it said no* from *it did not answer*. So one slow probe made a board
+> alive enough to hold the address and, in the same decision, tutorless. A memo in `probe` now
+> gives every question asked about a board during one decision the same answer. It is deliberately
+> shorter than the tick: a memo, never a cache, so a board that died is noticed on the next
+> decision rather than five ticks later.
+>
+> **And a decision can still disagree with the last one**, so a move the *choice* did not ask for
+> now has to say the same thing twice before the address follows it. Only then — a tap moves it at
+> once, and so does the board holding it going quiet. Nothing waits on a machine that is broken;
+> only a machine that is working gets the benefit of the doubt. `choose_target` returns the course
+> it decided for, which is how those two are told apart.
+>
+> **The one-second wake made it worse, and that was mine, from this morning.** It compares what a
+> local board publishes, and a probe it could not make was reading as *it changed* — so one refused
+> connection a second became one full re-decision a second, each of them a fresh set of tailnet
+> probes and another chance for a timeout to move the address. A wake added to make a tap instant
+> had turned a slow wobble into a fast one. `None` is now "I could not ask", never "it changed".
+>
+> `test/choice.py` reproduces the flicker against a machine that answers every other question, and
+> fails on the old code.
+>
 > **The Mac never has to be visited again.** Asked for in these words: *"make and ship something
 > that once I run it on the mac, it will always periodically pull and run this catch-up... I only
 > want to have to do this one more time."*

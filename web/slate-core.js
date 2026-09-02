@@ -1373,6 +1373,31 @@ function create(opts) {
   var saving = null;
   var changeSeq = 0;
 
+  /* Retrying a save the network refused. One timer, because every page that is
+     owed is in `dirtyPages` and one round drains all of them; and a backoff,
+     because a board that is down is usually down for more than a second. */
+  var retry = { at: null, wait: 1000, send: false, quiet: true, idx: null };
+
+  function retryLater(send, quiet, idx) {
+    retry.send = retry.send || !!send;      /* a send owed stays owed */
+    retry.quiet = quiet;
+    retry.idx = idx;
+    if (retry.at) return;
+    retry.at = setTimeout(function () {
+      retry.at = null;
+      retry.wait = Math.min(retry.wait * 2, 15000);
+      var wasSend = retry.send;
+      retry.send = false;
+      save(wasSend, retry.quiet, retry.idx);
+    }, retry.wait);
+  }
+
+  function retryDone() {
+    if (retry.at) { clearTimeout(retry.at); retry.at = null; }
+    retry.wait = 1000;
+    retry.send = false;
+  }
+
   /* A page that still owes the disk something. The one in hand first, because
      that is the one being written on. */
   function nextDirty() {
@@ -1414,6 +1439,7 @@ function create(opts) {
       /* Only if nothing was written while this was in the air. Otherwise the
          page on disk is already behind the page in hand, and saying "saved" is
          a lie that stops the next save from happening. */
+      retryDone();
       if ((pageSeq[idx] || 0) === at) {
         delete dirtyPages[idx];
         if (idx === current) {
@@ -1428,11 +1454,30 @@ function create(opts) {
         if (opts.onSend) opts.onSend(res || {});
       }
     }).catch(function () {
+      /* A failed save is not a state to sit in, and "offline" as a permanent
+         label beside the send button is the worst way to report it: the page
+         still owes the disk its strokes, nothing is retrying, and the word does
+         not go away when the connection comes back. Reported from the board with
+         the tutor plainly listening at the top of the same screen — the board
+         had been flickering, one save fell into the gap, and the label stayed
+         for the rest of the sitting.
+   
+         So: say what is true, keep the page dirty (it already is), and RETRY,
+         backing off to fifteen seconds. Whatever succeeds next clears it. */
       savedTag.classList.remove("busy");
-      savedTag.textContent = "offline";
+      savedTag.textContent = send ? "not sent — retrying" : "not saved — retrying";
+      retryLater(send, quiet, idx);
     });
     saving = done.then(function () {
       saving = null;
+      /* A retry owns the queue until it lands. Without this the drain below
+         re-saves the page that just failed, immediately, for ever: the failure
+         leaves it dirty (correctly — it still owes the disk), `nextDirty` hands
+         it straight back, and the next attempt fails the same way with nothing
+         between them. A board on a dead link was a tight loop hammering a socket
+         that was not there, which is also why the tag never had a chance to say
+         anything useful. */
+      if (retry.at) return;
       var next = nextDirty();
       if (next !== null) save(false, true, next);
     });

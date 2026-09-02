@@ -53,6 +53,21 @@ def check(m, cond):
 os.environ["BOARD_NO_TAILNET"] = "1"
 
 import boardlib                                              # noqa: E402
+import tempfile as _tf                                       # noqa: E402
+
+# And it must not read THIS machine's own record either. Every check below about
+# which board wins goes through `wanted_host` and `wanted_course`, both of which
+# read `chosen.json` -- so with a real one on disk the answers depend on whatever
+# course somebody last tapped on the machine running the tests. That is not a
+# fixture, it is the evening's state leaking into a suite, and it hid here for a
+# while: the preference checks passed while the real record happened to name no
+# host, and failed the moment one did. Isolated at the top, before anything
+# decides anything, rather than half way down where it used to be.
+_ISOLATED = _tf.mkdtemp(prefix="tutor-choice-")
+boardlib.CONFIG_DIR = _ISOLATED
+boardlib.CHOSEN = os.path.join(_ISOLATED, "chosen.json")
+check("the suite decides from a fixture, not from this machine's own record",
+      boardlib.chosen_course() == {})
 
 spec = importlib.util.spec_from_loader(
     "followcli",
@@ -283,8 +298,6 @@ check("a local board that is not this course does not win on being local",
 # the allowance: a board serving the course that was chosen beats one that is
 # not, on either machine.
 
-import tempfile as _tf                                       # noqa: E402
-
 _box = _tf.mkdtemp()
 boardlib.CHOSEN = os.path.join(_box, "chosen.json")
 boardlib.CONFIG_DIR = _box
@@ -504,7 +517,7 @@ check("the choice is read from whoever answers, not from a configured hostname",
       "hosts += [h for h in boardlib.tailnet_peers() if h != node]" in follow_src)
 check("and one probe implementation for both machines, so the machine that needs "
       "the SOCKS proxy is not the one asking without it",
-      "return boardlib.board_health(host, port, timeout=timeout)" in follow_src)
+      "health = boardlib.board_health(host, port, timeout=timeout)" in follow_src)
 check("the walk covers every course, because the other machine is running the "
       "ones it is running and not the four this one lists first",
       "for c in cands:" in follow_src and "cands[:4]" not in follow_src)
@@ -640,7 +653,15 @@ check("and a relayed name is a name, never a path",
 check("and the wake asks a board as well as reading a file, because those are "
       "not always the same answer",
       "def _published_stamp(" in follow_src
-      and "if _published_stamp() != published:" in follow_src)
+      and "if now_pub != published:" in follow_src)
+# But an unanswered probe is "I could not ask", never "it changed". Without that
+# one refused connection a second is one full re-decision a second, each of them
+# a fresh set of tailnet probes and another chance for a timeout to move the
+# address -- a wake added to make a tap instant, turning a slow wobble into a
+# fast one.
+check("and a probe it could not make does not count as a change",
+      "if now_pub is None:" in follow_src and "learned it; that is not a change"
+      in follow_src)
 
 # The third, and the one that made it switch BACK: a running board writes into
 # its own live/ constantly, so the course being LEFT went on touching its
@@ -704,6 +725,90 @@ check("a machine that answered once is asked at that port first",
 sw_src = open(os.path.join(ROOT, "web", "sw.js"), encoding="utf-8").read()
 check("the health check is never answered out of the cache",
       "health" in sw_src.split("var LIVE")[1].split("\n")[0])
+
+# ---- and the address does not flicker ---------------------------------------
+#
+# Reported from the board, mid-lesson: "The board keeps flickering..." -- and the
+# state it was reported in is the fixture below. A Galois board with a tutor on
+# the compute node, an empty Galois board on the Mac, both up, both claiming the
+# same chosen course. The lesson appeared and vanished on the iPad as the address
+# traded between them.
+#
+# Two causes, and the first is the one worth keeping a test for: deciding asked
+# each board over the tailnet THREE separate times -- once to find it, once for
+# `has_tutor`, once for `limited` -- and neither of the last two can tell "it
+# said no" from "it did not answer". So a board could be alive enough to hold the
+# address and, in the same decision, have no tutor, because one probe timed out
+# where another did not.
+
+follow._HEALTH.clear()
+
+flaky = {"n": 0}
+NODE_HEALTH = health("Galois-Theory", GAL, chosen="Galois-Theory", chosen_port=GAL_PORT)
+NODE_HEALTH["tutor"] = "listening"
+MAC_HEALTH = health("Galois-Theory", GAL, chosen="Galois-Theory", chosen_port=GAL_PORT)
+MAC_HEALTH["tutor"] = None
+
+
+def flaky_probe(host, port, timeout=2.0):
+    """The node answers, except on every second question about it."""
+    if host == HERE_:
+        return MAC_HEALTH
+    flaky["n"] += 1
+    return NODE_HEALTH if flaky["n"] % 2 else None
+
+
+follow.probe = flaky_probe
+boardlib.remember_chosen("Galois-Theory", GAL)
+follow.active_course = lambda cands: (cands[0] if cands else None)
+
+# Without a memo, the three questions disagree and the empty board wins. With
+# one, every question about a board in one decision gets the same answer.
+picked = set()
+for _ in range(6):
+    flaky["n"] = 0
+    got = follow.choose_target(NODE_, LOCAL, "local")[0]
+    picked.add(got)
+check("one flaky machine cannot make one decision contradict itself",
+      len(picked) == 1)
+
+# The memo is inside the real `probe`, and this module's copy has been
+# monkeypatched all the way down the file -- so ask the untouched one.
+follow2._HEALTH.clear()
+asked = {"n": 0}
+_real_health = boardlib.board_health
+boardlib.board_health = lambda host, port, timeout=2.0: (asked.update(n=asked["n"] + 1)
+                                                         or NODE_HEALTH)
+try:
+    follow2.probe("somewhere", 9999)
+    follow2.probe("somewhere", 9999)
+    follow2.probe("somewhere", 9999)
+    check("a board is asked once for one decision, not once per question",
+          asked["n"] == 1)
+    follow2._HEALTH[("somewhere", 9999)] = (0.0, None)    # older than the memo
+    follow2.probe("somewhere", 9999)
+    check("and it is a memo, not a cache: the next decision asks again",
+          asked["n"] == 2)
+finally:
+    boardlib.board_health = _real_health
+    follow2._HEALTH.clear()
+
+# The second cause: even a decision that is internally consistent can disagree
+# with the last one. A move the CHOICE did not ask for has to say the same thing
+# twice, and only while the board holding the address is still answering for the
+# course that was chosen -- a tap moves at once, and so does the incumbent dying.
+src2 = open(os.path.join(ROOT, "bin", "follow"), encoding="utf-8").read()
+check("a move nobody asked for must say the same thing twice",
+      "pending" in src2 and "not moving to %s:%d yet" in src2)
+check("and that only applies while the choice is unchanged",
+      "want == was_want" in src2)
+check("and while the board holding the address still answers for it",
+      'identifies_as(probe(was[0], was[1]), want or "")' in src2)
+check("so a tap is never delayed by it",
+      "choose_target" in src2 and "was_want = want" in src2)
+check("and the decision says which course it decided for, which is how those "
+      "two are told apart",
+      "return (t[0], t[1]), w, want" in src2)
 
 print("\n%d FAILURES" % len(errors) if errors else "\nthe address follows the choice")
 sys.exit(1 if errors else 0)
