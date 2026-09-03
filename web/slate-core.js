@@ -543,16 +543,52 @@ function create(opts) {
   /* ----------------------------------------------------------- the model */
   function page() { return pages[current]; }
 
+  /* THE PAGE'S NUMBER IS ITS NAME ON DISK, AND IT IS CARRIED, NOT COUNTED.
+
+     A page used to be addressed by where it sat in this array: the save posted
+     `page: index + 1`, and the server wrote `page-<that>.json`. Which is the
+     same sheet only while the numbers on disk are gapless -- and they are not,
+     because a file appears when a page is SAVED, so a page cut and never
+     written on leaves none. One gap and the array that comes back on the next
+     reload has slid down by one, every board points at its neighbour's sheet,
+     and the next stroke saves over a real page. See `lesson/slate.py`, which
+     has the measurements from the sitting where it was found.
+
+     So a page knows its own number from the moment it exists, keeps it for
+     ever, and that is what the save addresses. The index is presentation. */
+  function nextPageNo() {
+    var n = 0;
+    for (var i = 0; i < pages.length; i++) {
+      if (pages[i] && pages[i].n > n) n = pages[i].n;
+    }
+    return n + 1;
+  }
+
   function blankPage() {
     /* Exactly the surface it will be drawn on: no clamping, because clamping is
        what forces a scale factor, and a scale factor is what makes people zoom.
        A page from another device is a different size and simply scales to fit
        the width on arrival, like a photograph of a page would. */
     return {
+      n: nextPageNo(),
       w: Math.round(wrap.clientWidth || 900),
       h: Math.round(wrap.clientHeight || 520),
       strokes: [],
     };
+  }
+
+  /* Which sheet a page number is at, and the other way round. Everything
+     outside this component speaks numbers; everything inside it speaks
+     indices, and this is the whole of the border between them. */
+  function idxOf(n) {
+    for (var i = 0; i < pages.length; i++) {
+      if (pages[i] && pages[i].n === n) return i;
+    }
+    return -1;
+  }
+
+  function noOf(i) {
+    return (pages[i] && pages[i].n) || 0;
   }
 
   /* A step on the undo stack is the LIST of strokes, not a copy of them.
@@ -1821,7 +1857,11 @@ function create(opts) {
     var withPicture = !!send || leaving || !handBusy();
     if (withPicture) delete pictureOwed[idx];
     else armPicture();
-    var body = { page: idx + 1, w: p.w, h: p.h,
+    /* Its own number, never its position. A page whose number is somehow
+       missing -- a payload from a board older than this rule -- is given one
+       here rather than being written to whatever sheet its index names. */
+    if (!p.n) p.n = nextPageNo();
+    var body = { page: p.n, w: p.w, h: p.h,
                  strokes: p.strokes.map(stripDense),
                  png: withPicture ? toPNG(p, send ? 0 : PNG_IDLE_EDGE) : "",
                  send: !!send,
@@ -2123,6 +2163,14 @@ function create(opts) {
        refuse a sitting. */
     var untouched = pages.every(function (p) { return !p.strokes.length; });
     if (saved.length && untouched) {
+      /* The number comes off the server, which took it from the filename --
+         the one thing both sides can agree on. A page arriving without one is
+         from a board older than this rule; number it by position, which is
+         what that board meant by it. */
+      saved.forEach(function (p, i) {
+        if (typeof p.page === "number" && p.page > 0) p.n = p.page;
+        else if (!p.n) p.n = i + 1;
+      });
       pages = saved;
       current = pages.length - 1;
       dropInk();
@@ -2177,7 +2225,7 @@ function create(opts) {
   api.debug = function () {
     return { strokes: page() ? page().strokes.length : -1,
              drawing: !!drawing, w: sheet.width, h: sheet.height,
-             pages: pages.length, k: view.k };
+             pages: pages.length, at: noOf(current), k: view.k };
   };
   api.save = save;
   /* How much is on the current page. The host needs it to tell an answer from an
@@ -2248,11 +2296,24 @@ function create(opts) {
      -- which is a page of somebody's proof, deleted, because the tutor asked
      something else. */
   api.pages = function () { return pages.length; };
-  api.at = function () { return current; };
+  /* EVERY PAGE HANDED ACROSS THIS LINE IS A NUMBER.
+
+     The host records which sheet each board is on, in localStorage, and that
+     record outlives the array it was written against -- so it cannot be an
+     index into it. See `nextPageNo` above for what an index cost. */
+  api.at = function () { return noOf(current); };
+  /* Does a page with this number exist? What `n >= pages.length` used to be
+     asking, and the question the host actually has: a record naming a sheet
+     that is not here is a record that has rotted. */
+  api.hasPage = function (n) { return idxOf(n) >= 0; };
+  /* The trailing sheet, which is the one a new board may reuse if it belongs
+     to nobody. */
+  api.lastPage = function () { return noOf(pages.length - 1); };
   api.go = function (n) {
-    if (n === current || n < 0 || n >= pages.length) return current;
-    goTo(n);
-    return current;
+    var i = idxOf(n);
+    if (i < 0 || i === current) return noOf(current);
+    goTo(i);
+    return noOf(current);
   };
   /* A new blank page at the end, and go to it. Returns its index, which is what
      the host records against the question it belongs to.
@@ -2265,11 +2326,11 @@ function create(opts) {
   api.fresh = function (force) {
     if (!force && pages.length && !pages[pages.length - 1].strokes.length) {
       goTo(pages.length - 1);
-      return current;
+      return noOf(current);
     }
     pages.push(blankPage());
     goTo(pages.length - 1);
-    return current;
+    return noOf(current);
   };
 
   /* The same page again, as a page of its own, and go to it.
@@ -2280,8 +2341,8 @@ function create(opts) {
      a page that exists only in memory is a page that a reload turns back into
      nothing. */
   api.clone = function (n) {
-    var src = pages[n];
-    if (!src) return current;
+    var src = pages[idxOf(n)];
+    if (!src) return noOf(current);
     var copy = blankPage();
     copy.w = src.w;
     copy.h = src.h;
@@ -2294,7 +2355,7 @@ function create(opts) {
     pages.push(copy);
     goTo(pages.length - 1);
     markDirty();
-    return current;
+    return noOf(current);
   };
 
   /* Put the writing back on screen. The toolbar's ⤢ does this; so does the
@@ -2302,7 +2363,7 @@ function create(opts) {
      pinched off the glass. */
   api.fitInk = function () { fitContent(); };
   api.inkOn = function (n) {
-    var p = pages[n === undefined ? current : n];
+    var p = n === undefined ? pages[current] : pages[idxOf(n)];
     return p ? p.strokes.length : 0;
   };
   /* A picture of a page, drawn by the code that draws the live surface.
@@ -2320,13 +2381,14 @@ function create(opts) {
      is the one `fitPage` computes, so a dormant board is framed exactly as the
      live one frames a page it has just opened. */
   api.preview = function (n, cssW, cssH) {
-    var p = pages[n];
+    var i = idxOf(n);
+    var p = pages[i];
     if (!p) return "";
     var url = shoot(p, cssW, cssH);
     /* Painting a stroke caches its resampled curve. On the page in hand that is
        the point; on a page being photographed once it is memory held for nothing,
        and the pages not in hand are all of them. */
-    if (n !== current) p.strokes.forEach(function (st) { st.dense = null; });
+    if (i !== current) p.strokes.forEach(function (st) { st.dense = null; });
     return url;
   };
 
@@ -2428,7 +2490,7 @@ function create(opts) {
     pages.push(copy);
     goTo(pages.length - 1);
     markDirty();
-    return current;
+    return noOf(current);
   };
 
   /* The live canvas, for a board going live under a pen that has already landed

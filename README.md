@@ -44,7 +44,115 @@ which kind of subject it is and the board adapts.
 >   board that is answering) but it is worth confirming: the port the HTTPS name points at should
 >   be the course they are working in.
 >
-> ### Where this is right now, 3 September 2026
+> ### Where this is right now, 3 September 2026 (evening)
+>
+> **A new session had three kinks in it, and all three were the board being silent about
+> something it knew.** Reported on relaunching Galois Theory on the iPad against a tutor hosted
+> from the compute node: *"The tutor was sluggish to start up... But the tutor was just marked as
+> dead or not available or not listening in the app. If the tutor is 'waking' up, I should be told
+> that. It seemed to tell me the tutor was dead which put me in 'send again' mode leading to
+> massive confusion. And another issue is that none of the boards have my preserved written work on
+> them. I think the work is still saved."* Then, while it was being looked at: *"The tutor also
+> appears to be very non responsive. Now it's just hanging. I need you to make the tutor way more
+> robust. I don't ever want to be left hanging."*
+>
+> **A tutor coming up now says so, because the board had no word for it.** Starting one brings the
+> tailnet link up, starts the board, opens the sitting, reads the addresses back and catches the
+> repository up from the remote — and every second of that happens with the board ALREADY SERVING
+> the iPad. For the whole of it the only record on disk was the LAST run's, whose pid is gone,
+> which the board read as `stale` and said out loud as **"tutor stopped — nothing is reading the
+> board"**. That is the same sentence a course that never had a tutor gets, and it is the specific
+> thing that makes somebody send again. There is a `waking` state now, written before any of the
+> slow work — by the launcher the moment a start is decided, and again by the daemon with its real
+> pid — and it expires, so a start that fell over does not go on claiming to be in progress. The
+> chip says *claude is waking up…*, amber and pulsing rather than red.
+>
+> **And the catch-up moved off the request that asked for it.** `agent_start` was doing a
+> `git pull` — up to sixty seconds against a remote over a tailnet that may itself be coming
+> back — *before* it forked, inside the HTTP request from the iPad. `spawn.tutor_cli` allows that
+> request thirty seconds. So a slow remote did not make the start slow, it made the start get
+> KILLED before it had spawned anything, and the board then sat waiting on a record that was never
+> going to appear. Every session still begins by catching up; it now does it in the daemon, where
+> nobody is holding a request open.
+>
+> **Work handed in with nothing reading the board now starts a tutor.** `board wait` only ever
+> returns to a daemon that is already running, and nothing else drains the inbox — so a send to a
+> board whose tutor had died, or had never been started, went onto disk and stayed there. This was
+> also true of *ask the tutor to begin*, whose entire purpose is a board with nobody on it: a tap
+> with no daemon running was a tap that did nothing, for ever. Every route that appends to the
+> inbox calls `spawn.wake_tutor`, which is the same `tutor agent start` the hub tap and the login
+> hook use — one implementation — and is a no-op unless the board really is unattended.
+>
+> **Nothing a reader can be waiting on is silent any more, and that is the whole of "never left
+> hanging".** The strip under the lesson knew two things: the wire (*sending to the tutor*, which
+> expired after a hundred seconds and then vanished) and the turn (*the tutor is writing*). Between
+> them sat every state that actually goes wrong, and the strip's answer to all of them was to hide
+> itself — and a blank space where "sending" was is indistinguishable from a send that never left.
+> Worst of the three: **a turn that FAILED wrote `last_error` and went back to waiting**, so the
+> chrome said "claude listening", the strip disappeared, and the student was looking at their own
+> handed-in working with nothing coming and no way to know it. The daemon was robust; it recovered
+> from every one of those failures. It never told anybody one had happened.
+>
+> They are one question now — *is there something in the inbox that nothing has picked up* — and
+> the server answers it off disk (`notes.waiting`), which is what makes it survive a reload, a
+> second device, and the daemon being restarted underneath it. So the strip says *claude is still
+> waking up — your work is in its inbox and will be answered. No need to send again.*, or *no tutor
+> is reading the board*, or *claude's last turn failed — the turn ran too long and was stopped. Send
+> again to retry it.* A failure the daemon is retrying says so and is not painted as a dead end; an
+> allowance that has run out is named, because nothing is broken. Failures are stamped with when
+> they happened and stop being reported once a turn has succeeded — a failure from an hour ago is
+> history rather than news.
+>
+> **And a long turn is counted from the daemon's clock rather than this page's.** The elapsed time
+> started when the browser first SAW the working state, which on a reload, on a second device, or
+> on a board picked up halfway through is nowhere near when the turn began. A four-minute turn read
+> as "8s" to whoever had just picked the iPad up.
+>
+> **The preserved working was never lost. The arithmetic between the disk and the screen was.**
+> The surface took the list of saved pages as its array and addressed the page at index *i* on the
+> next save as `page-(i+1)`. That is the same sheet only while the numbers on disk are gapless —
+> and they never are, because a file appears when a page is SAVED, so a page cut and never written
+> on leaves none. In that sitting `page-01`, `-06`, `-08` and `-10` had never been saved, so after
+> a reload index 5 was `page-09`, and the next stroke on it was written to `page-06`.
+>
+> The fingerprint is all over that directory and it is unmistakable once you know to look:
+> `page-13`/`page-14` byte-identical, `page-21`/`page-22`, `page-34`/`page-35`,
+> `page-41`/`-42`/`-43` — each one a page written back out under its neighbour's number, silently,
+> while every board on the screen pointed at somebody else's sheet. It is also why
+> `live/slate/page-99.json` exists in a sitting that reached fifty-three pages.
+>
+> **A page is its number now, and it carries it.** The number comes off the FILENAME rather than
+> from the field inside the file — that field was written by whichever client saved it, and a
+> client that had already slid is a client whose field is wrong too; the filename is what the next
+> save will address, which makes it the only thing either side can agree on. Everything handed
+> across the slate's API is a number: `at`, `go`, `fresh`, `clone`, `inkOn`, `adoptInk`, `preview`,
+> and a new `hasPage` in place of comparing an index against a page count. The index is
+> presentation and never reaches disk.
+>
+> Which means the mapping in `localStorage` — *which board is on which sheet* — is finally a record
+> that can outlive the array it was written against, which it never could as a position. The key is
+> versioned for it (`board.pages.n`), because every record written before this was an index, there
+> is nothing in one that says so, and reading an index as a number is the same mistake in the other
+> direction. `repairPages` builds the mapping back out of the turns on disk, which is where the
+> authority always was: every answer handed in records the page it came off.
+>
+> Two smaller things fell out of the same read. `read_slate_pages` sorted by NAME, and the format
+> is `%02d` for numbers that run to 999 — so a sitting past a hundred pages came back with its last
+> hundred at the front. And a past board whose sheet no longer holds what came off it was already
+> handled: it is drawn from the FROZEN answer in `live/answers/`, which is written once and never
+> touched. That is why nothing was ever actually lost, and why the boards from that sitting come
+> back showing the real working even though their recorded page numbers predate this fix.
+>
+> `test/waking.py` holds the server side — a start with no pid yet, its expiry, a record from
+> another node, a stamped failure and its staleness, `notes.waiting` off disk, and the launcher's
+> own ordering. `test/hanging.js` asserts the board has words for every state a reader can be stuck
+> in, and against the old code it reproduces the report verbatim: *"tutor stopped — nothing is
+> reading the board"* for a tutor that is waking. `test/sheets.js` is the gap — the exact page
+> numbering that was on disk, and it asserts both that the board opens the right sheet and that the
+> save addresses it by number rather than writing over its neighbour. Shell version
+> `board-shell-v82`.
+>
+> ### Earlier on 3 September 2026
 >
 > **The lesson exports as the lesson, and the document can leave the app.** Two things asked for
 > from the iPad in one breath: *"fix the 'local iPad export' of the homework and tutor session
@@ -1518,6 +1626,13 @@ these tests fail, the test is right.
 | `shot.js` was deferred while `board.js` is not, so it did not exist when `board.js` reached for it and every photograph ended with a page of blank paper | `test/shot.js` |
 | Three places guessed where a course's build puts its homework PDF and all three were wrong, so `hw.json` recorded `"pdf": null` on a successful build and the download button for the write-up could never appear | `test/shot.py` |
 | A hand-written PDF whose cross-reference offsets are one byte out is a file no reader will open | `test/shot.py` |
+| A slate page was addressed by its POSITION in the list the server handed back, so one page cut and never written on — which leaves no file — slid every page after it onto its neighbour's number: every board came back pointing at somebody else's sheet, and the next stroke saved over a real page. Four pages byte-identical to their neighbours in one sitting, and nothing reported an error | `test/sheets.js` |
+| `read_slate_pages` sorted the pages by NAME, and `%02d` on numbers running to 999 means `page-100` sorts before `page-99`, so a sitting past a hundred pages came back with its last hundred at the front | `test/waking.py` |
+| Starting a tutor took several seconds of link, board, sitting and `git pull`, and for all of it the board read the last run's dead record and said *"tutor stopped — nothing is reading the board"* — the same sentence a course that never had a tutor gets, which is exactly what makes somebody send again | `test/waking.py`, `test/hanging.js` |
+| `agent_start` did a sixty-second `git pull` before it forked, inside a thirty-second request from the iPad — so a slow remote did not make the start slow, it made the start get killed before it spawned anything | `test/waking.py` |
+| A turn that failed wrote `last_error` and went back to waiting, so the chip said *listening*, the busy strip hid itself, and the student was looking at their own handed-in working with nothing coming and no way to know | `test/hanging.js` |
+| Work handed in to a board with no tutor attached went into the inbox and stayed there for ever — nothing drains it, and `board wait` only ever returns to a daemon already running. Including *ask the tutor to begin*, whose whole purpose is a board with nobody on it | `test/waking.py` |
+| The elapsed time on a turn was counted from when the BROWSER first saw the working state, so a four-minute turn read as "8s" to anyone who had just picked the iPad up or reloaded | `test/hanging.js` |
 | Asking the SVG for twice the pixels — to keep the type sharp on a retina screen — rasterises at the right size and loses every display formula and every radical sign, while the prose around them stays perfect | `test/shot.js` |
 | The drop overlay was painted over the lesson permanently — `[hidden]` loses to any author rule that sets a `display` | `test/hidden.js` |
 | A pen stroke silently did nothing, because no page existed until `/slate/state` answered | `test/interactive.js` |
@@ -3148,7 +3263,11 @@ to an offscreen canvas so only the live stroke is redrawn per frame — latency 
 
 Each page is saved twice: `live/slate/page-NN.json` holds the strokes as vectors, so the page
 survives a reload and reopens on any device; `live/slate/page-NN.png` is what the assistant opens
-and reads. The PNG is exactly what you see, paper colour included — inverting it would wreck a
+and reads. **`NN` is the page's identity, not its position** — it is carried by the page from the
+moment it exists and is what every save addresses. That sounds like pedantry and is not: a file
+appears only when a page is saved, so a page cut and never written on leaves a GAP, and a surface
+that addressed pages by where they sat in the list it got back wrote each one over its neighbour
+after every reload. See 3 September 2026 above for the wreckage. The PNG is exactly what you see, paper colour included — inverting it would wreck a
 colour you chose on purpose. Autosave runs about a second after the
 pen lifts. **Send** — always visible, outside the scrolling tool strip, because a Send button you have to
 scroll sideways to find is a Send button that does not exist — puts the page in the inbox and
@@ -3339,6 +3458,7 @@ live/
   cards/NNNN-*.md  the lesson, in order
   inbox/           messages.jsonl and uploads/
   slate/           page-NN.json (strokes) and page-NN.png (what the assistant reads)
+                   NN is the page's name, not its place in any list
   tikzcache/       compiled SVG, keyed by content hash
   archive/         previous lessons, filed by `board open` or `board archive`
   .board.json      which node, which pid, which port
@@ -3653,7 +3773,13 @@ node test/sizing.js      that every screen size opens at natural writing size
 node test/link.js        that an unreachable board says so instead of looking empty
 node test/theme.js       that the dark theme reaches the whole window, not just the content
 node test/shot.js        that the photographed lesson is the lesson, and nothing else is
+node test/sheets.js      that a slate page is addressed by its number, so a gap in the
+                         numbering cannot slide every board onto its neighbour's sheet
+node test/hanging.js     that the board has words for every state a reader can be stuck
+                         in -- a tutor waking, a turn that failed, nobody attached
 python3 test/shot.py     that the photograph becomes a PDF that actually opens
+python3 test/waking.py   that a tutor coming up says so, and that work handed in is
+                         never answered by silence
 python3 test/annotate.py that marks on a card are anchored to it and can be sent
 python3 test/begin.py    that the first turn of a session can come from the device
 python3 test/homework.py that a sitting finds its problem set, in either layout

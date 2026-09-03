@@ -850,7 +850,7 @@ const heelSwipe = (id, x, y, dx, dy) => {
 
     const before = sent.length;
     s2.fresh(true);                          // the page moves under them
-    s2.at() === 1
+    s2.at() === 2
       ? ok('a new page can open while a save is still in the air')
       : fail('the page did not move (at ' + s2.at() + ')');
 
@@ -983,7 +983,7 @@ const heelSwipe = (id, x, y, dx, dy) => {
 
   // The photograph is framed the same way, because it stands for the same page.
   window.__transforms.length = 0;
-  const url = slate.preview(0, 900, 500);
+  const url = slate.preview(1, 900, 500);
   const drew = window.__transforms[0] || null;
   url ? ok('a dormant board still gets a picture')
       : fail('no preview was produced at all');

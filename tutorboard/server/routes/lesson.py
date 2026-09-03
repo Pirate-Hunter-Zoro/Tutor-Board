@@ -241,6 +241,13 @@ def post(h, repo, path):
             line += " " + sense.session_sense(repo)
         with open(repo.messages_path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(dict(record, text=line)) + "\n")
+        # Including "ask the tutor to begin", which is the one signal whose
+        # whole purpose is a board with nobody on it. It used to put a line in
+        # an inbox and hope: a tap on that button with no daemon running was a
+        # tap that did nothing for ever, and the board went on saying "no tutor
+        # attached" with the request sitting on disk beside it.
+        if spawn.wake_tutor(repo):
+            h.note("nothing was reading the board; starting a tutor")
         h.server.hub.worker.dirty.set()
         return h.send_json({"ok": True, "turn": tid, "rev": rev})
     return NOT_MINE

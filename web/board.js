@@ -1141,6 +1141,19 @@ function paintWaiting(data) {
     els.begin.disabled = true;          /* asking again now writes a second card */
     return;
   }
+  /* A START IS IN FLIGHT, AND "ask again" IS THE WRONG THING TO OFFER.
+
+     Tapping begin on an unattended board now STARTS a tutor -- the request
+     used to go into an inbox nobody was reading and sit there. So the empty
+     board's own words have to follow the start, or the one button on the
+     screen goes on inviting the tap that produces a second opening card. */
+  if (asked && lastLive && lastLive.agent
+      && lastLive.agent.state === "waking") {
+    els.emptyLead.textContent = "The tutor is starting up…";
+    els.begin.textContent = "starting the tutor";
+    els.begin.disabled = true;
+    return;
+  }
   els.emptyLead.textContent = asked ? "The tutor has not written anything yet."
                                     : "Nothing on the board yet.";
   els.begin.textContent = asked ? "ask again" : "ask the tutor to begin";
@@ -1211,6 +1224,10 @@ function paintSession(state, push, agent, exported) {
   /* "reattaching" counts as attached: a daemon being bounced onto new code is
      coming back in seconds, and telling somebody mid-lesson that nothing is
      reading the board is both wrong and alarming. */
+  /* "waking" counts as attached for exactly the reason "reattaching" does, and
+     it is the more common of the two: a tutor coming up is a tutor, and telling
+     somebody mid-lesson that nothing is reading the board is both wrong and the
+     specific thing that makes them send again. */
   attached = !!agent && agent.state !== "stale";
   working = !!agent && agent.state === "working";
   /* And say it where somebody about to tap is actually looking, not only in the
@@ -1224,6 +1241,20 @@ function paintSession(state, push, agent, exported) {
     els.agent.dataset.state = agent.state || "stale";
     els.agent.textContent =
       agent.state === "working" ? (agent.agent || "assistant") + " is working"
+      /* STARTING ONE IS NOT INSTANT, AND SILENCE READS AS DEATH.
+
+         A start brings the tailnet link up, starts the board, opens the
+         sitting, reads the addresses back and catches the repository up from
+         the remote -- all of it with the board already serving this page. Until
+         there was a word for it, the record on disk was the LAST run's, whose
+         pid is gone, and the board said "tutor stopped, nothing is reading the
+         board". Reported from a relaunch: "It seemed to tell me the tutor was
+         dead which put me in 'send again' mode leading to massive confusion."
+
+         The ellipsis is deliberate and so is the ordering: this is the first
+         thing the strip is asked about, because it is the state most likely to
+         be misread as the worst one. */
+    : agent.state === "waking" ? (agent.agent || "assistant") + " is waking up…"
     : agent.state === "listening" ? (agent.agent || "assistant") + " listening"
       /* An interactive assistant is not listening to the board -- it is sitting
          in a terminal waiting for its person. "Attached" is the true word, and
@@ -1231,6 +1262,7 @@ function paintSession(state, push, agent, exported) {
     : agent.state === "attached" ? (agent.agent || "assistant") + " attached"
       /* Bounced onto new code, not dead. It comes back on its own. */
     : agent.state === "reattaching" ? (agent.agent || "assistant") + " reattaching…"
+    : agent.state === "wrapping up" ? (agent.agent || "assistant") + " wrapping up…"
       /* Only reached when the record exists but nothing recognises its state --
          a daemon whose process is gone. Say what that means for them. */
     : "tutor stopped — nothing is reading the board";
@@ -2753,7 +2785,21 @@ var liveSlot = null;
    sheet behind. `a` is where the board sits: the newest board of a question
    floats to the end of that question's run, because an answer belongs under the
    feedback it is answering, and it stops floating the moment it is frozen. */
-var PAGES_KEY = "board.pages";
+/* `p` IS A PAGE NUMBER NOW, NOT AN INDEX INTO THE SURFACE'S ARRAY.
+
+   It was an index, and an index is a position in a list this record outlives:
+   the list comes back from the server on every reload with only the pages that
+   were ever SAVED in it, so one page cut and never written on slid every board
+   after it onto its neighbour's sheet. Reported as "none of the boards have my
+   preserved written work on them", with the working sitting on disk the whole
+   time. `lesson/slate.py` carries the measurements.
+
+   The key is versioned because of it: every record written before this line was
+   an index, there is nothing in it that says so, and reading one as a number is
+   the same class of mistake in the other direction. A bumped key throws them
+   away and `repairPages` builds the mapping back out of the turns on disk,
+   which is where the authority always was. */
+var PAGES_KEY = "board.pages.n";
 var boardPage = {};
 var pagesLoaded = false;
 
@@ -2875,7 +2921,7 @@ function pageOf(key) {
    looks like from the outside and is exactly what it is. The slate cannot know;
    it deals in ink, not in questions. */
 function pageOwnedByOther(n, key) {
-  if (n === undefined || n < 0) return false;
+  if (n === undefined || !n) return false;
   for (var k in boardPage) {
     if (k !== key && boardPage[k].p === n) return true;
   }
@@ -2898,7 +2944,7 @@ function syncSlots(qids, runEndOf, turns) {
   var handedIn = {};                  /* question -> the page its answer came off */
   (turns || []).forEach(function (t) {
     if (!t || t.kind !== "ink" || !t.answers) return;
-    if (typeof t.page === "number") handedIn[t.answers] = t.page - 1;
+    if (typeof t.page === "number") handedIn[t.answers] = t.page;
   });
   var ready = !!(writer && writer.ready && writer.ready());
   qids.forEach(function (q) {
@@ -2959,7 +3005,7 @@ function sentAnswers() {
    Returns the answer that came off it, which is the thing to show and the thing
    to put back. */
 function lostAnswer(key, share) {
-  if (!writer || !writer.pages) return null;
+  if (!writer || !writer.pages || !writer.hasPage) return null;
   var q = slotQ(key);
   var answer = sentAnswers()[q];
   if (!answer) return null;
@@ -2990,14 +3036,14 @@ function lostAnswer(key, share) {
      names, there is nothing to repair and nothing to reclaim. Where NO board
      holds it the record has genuinely rotted, and the old behaviour is right. */
   if (typeof answer.page === "number") {
-    var from = answer.page - 1;
+    var from = answer.page;
     if (page !== from) {
       var held = false;
       slotsOf(q).forEach(function (k) { if (pageOf(k) === from) held = true; });
       if (held) return null;
     }
   }
-  if (page === undefined || page >= writer.pages()) return answer;
+  if (page === undefined || !writer.hasPage(page)) return answer;
   if (typeof answer.strokes === "number" && writer.inkOn
       && writer.inkOn(page) < answer.strokes * (share === undefined ? 1 : share)) {
     return answer;
@@ -3143,13 +3189,12 @@ function reclaimAnswer(key) {
    and nothing to move. */
 function repairPages() {
   if (!writer || !writer.ready || !writer.ready()) return;
-  var n = writer.pages();
   var sentOn = {};
   lastTurns.forEach(function (t) {
     if (!t || t.kind !== "ink" || !t.answers) return;
     if (typeof t.page !== "number") return;
-    var page = t.page - 1;                 /* the record is one-based */
-    if (page < 0 || page >= n) return;
+    var page = t.page;                     /* the sheet's own number */
+    if (!writer.hasPage(page)) return;
     var have = sentOn[t.answers];
     if (!have || (t.t || 0) >= have.t) sentOn[t.answers] = { t: t.t || 0, page: page };
   });
@@ -3182,7 +3227,7 @@ function repairPages() {
     var key = keys[keys.length - 1];
     var now = boardPage[key].p;
     var rotten = now === undefined
-              || now >= n
+              || !writer.hasPage(now)
               || pageOwnedByOther(now, key)
               || (writer.inkOn && writer.inkOn(now) === 0 && writer.inkOn(want) > 0)
               || (pageOwner[now] && pageOwner[now] !== q);
@@ -3489,6 +3534,9 @@ var SIGNAL_LABEL = { done: "ready to check", help: "needs help", confused: "conf
    experience from one you cannot. */
 var busySince = 0;
 var busyTurn = -1;
+/* The words a stall is being reported with, so the ticker does not overwrite
+   them with "the tutor is writing" one second later. */
+var busyStalled = null;
 var busyFrom = 0;
 var busyTimer = null;
 /* WHEN SEND WAS TAPPED, AND WHETHER ANYTHING HAS ANSWERED YET.
@@ -3539,6 +3587,110 @@ function newestCard(data) {
   return newest;
 }
 
+/* NOTHING THE READER CAN BE WAITING ON IS ALLOWED TO BE SILENT.
+
+   This strip used to know two things: the wire (`sending to the tutor`) and the
+   turn (`the tutor is writing`). Between them sat every state that actually
+   goes wrong, and the strip's answer to all of them was to hide itself:
+
+   - A tutor still coming up. The send lands in the inbox, nothing takes it, and
+     after a hundred seconds the strip vanished. A blank space where "sending"
+     was is indistinguishable from a send that never left.
+   - A turn that FAILED. The daemon writes `last_error` and goes back to
+     waiting, so the chrome says "claude listening", the strip goes, and the
+     student is looking at their own working with nothing coming and no way to
+     know it. "I don't ever want to be left hanging" is this one.
+   - A course with no tutor attached at all, where the work is being filed into
+     an inbox nobody is reading.
+
+   All three are now the same question -- IS THERE SOMETHING IN THE INBOX THAT
+   NOTHING HAS PICKED UP -- and the server answers it off disk (`notes.waiting`),
+   which is what makes it survive a reload, a second device and the daemon being
+   restarted underneath it. The browser's own `sendingAt` covers only the
+   sub-second before the first payload comes back, which is all it was ever
+   qualified to talk about.
+
+   The order below is the order of urgency, and it is deliberate: a turn in
+   progress beats a failure that is now being retried, which beats work sitting
+   unclaimed, which beats the wire. */
+function longAgo(ms) {
+  var secs = Math.max(0, Math.round(ms / 1000));
+  if (secs < 60) return secs + "s";
+  var mins = Math.floor(secs / 60);
+  if (mins < 60) return mins + "m " + (secs % 60) + "s";
+  return Math.floor(mins / 60) + "h " + (mins % 60) + "m";
+}
+
+/* What to say about a tutor that is not currently writing, given that something
+   is sitting in the inbox for it. Returns null when there is nothing to say. */
+function stalledWord(st, waiting) {
+  var who = (st && st.agent) || "the tutor";
+
+  /* A FAILED TURN IS NEWS ON ITS OWN, AND CANNOT WAIT ON THE INBOX TO SAY SO.
+
+     `board wait` marks a message read the moment it hands it over, which is
+     what consuming it means -- so by the time a turn fails, the message it
+     failed on is READ and there is nothing sitting in the inbox to notice. The
+     daemon also re-queues it internally rather than marking it unread again.
+     So this is asked first and asked independently: the one state where the
+     student has handed work in, the tutor took it, and no card is ever coming
+     is precisely the state that leaves no trace anywhere else.
+
+     Timed from the failure rather than from the send, because that is the fact
+     -- how long ago it fell over -- and it is the one a person can act on. */
+  var failed = st && st.failure
+    ? { text: (st.retrying
+               ? who + " hit a problem and is trying again"
+               : who + "'s last turn failed")
+            + " — " + failWord(st.failure.error)
+            + (st.retrying ? "." : ". Send again to retry it."),
+        bad: !st.retrying,
+        since: Date.now() - (st.failure.at || 0) * 1000 }
+    : null;
+
+  /* NEWEST FACT WINS. Somebody who sends again after a failure has made the
+     send the newer thing that happened, and going on about the old failure over
+     the top of it is the board talking about the past. The other way round -- a
+     failure since the last unclaimed send -- and the failure is the news. */
+  if (!waiting) return failed;
+  if (failed && (st.failure.at || 0) >= (waiting.since || 0)) return failed;
+  var held = Date.now() - (waiting.since || 0) * 1000;
+  /* The first couple of seconds belong to the wire and to the daemon's quarter
+     second poll. Announcing a stall there would make every ordinary send flash
+     a warning -- but not at the cost of dropping a failure that is still the
+     standing fact about this tutor. */
+  if (held < 4000) return failed;
+  var many = waiting.count > 1 ? " (" + waiting.count + " things waiting)" : "";
+  if (!st || st.state === "stale") {
+    return { text: "handed in — but no tutor is reading the board" + many
+                 + ". It will be answered as soon as one is attached.",
+             bad: true, since: held };
+  }
+  if (st.state === "waking") {
+    return { text: who + " is still waking up — your work is in its inbox"
+                 + many + " and will be answered. No need to send again.",
+             since: held };
+  }
+  if (st.state === "reattaching") {
+    return { text: who + " is restarting — your work is in its inbox" + many
+                 + " and will be answered when it comes back.", since: held };
+  }
+  /* Attached, no failure, and still nothing taken. Rare, and worth saying
+     plainly rather than pretending: the daemon polls every quarter second, so
+     this means it is busy with something that is not this. */
+  return { text: who + " has not picked this up yet" + many + ".", since: held };
+}
+
+/* A daemon's error string is for a log. This is for somebody holding an iPad. */
+function failWord(err) {
+  var e = String(err || "");
+  if (/allowance/i.test(e)) return "its usage allowance has run out here";
+  if (/egress|network/i.test(e)) return "this machine cannot reach the internet";
+  if (/timed out/i.test(e)) return "the turn ran too long and was stopped";
+  if (/^exit /.test(e)) return "the assistant exited (" + e + ")";
+  return e || "no detail";
+}
+
 function paintBusy(data) {
   if (!els.busy) return;
   var st = data.agent || null;
@@ -3546,6 +3698,23 @@ function paintBusy(data) {
   /* The tutor has picked it up, or given up waiting for it to be picked up. */
   if (working || Date.now() - sendingAt > SENDING_FOR) sendingAt = 0;
   if (!working) {
+    var stalled = data.archived ? null : stalledWord(st, data.waiting);
+    if (stalled) {
+      els.busy.hidden = false;
+      els.busy.classList.toggle("busy-bad", !!stalled.bad);
+      els.busyText.textContent = stalled.text;
+      els.busySince.textContent = longAgo(stalled.since);
+      /* Counted from the message's own timestamp, so the number does not restart
+         at zero every time the payload changes. `busySince` is the clock the
+         ticker reads. */
+      busySince = Date.now() - stalled.since;
+      busyTurn = -1;
+      busyStalled = stalled.text;
+      if (!busyTimer) busyTimer = setInterval(tickBusy, 1000);
+      return;
+    }
+    busyStalled = null;
+    els.busy.classList.remove("busy-bad");
     if (sendingAt && !data.archived) {
       /* Not "the tutor is writing" -- it has not been handed anything yet, and
          saying so would be the board guessing. This is the half-second of the
@@ -3564,11 +3733,19 @@ function paintBusy(data) {
     if (busyTimer) { clearInterval(busyTimer); busyTimer = null; }
     return;
   }
+  busyStalled = null;
+  els.busy.classList.remove("busy-bad");
   /* A new turn restarts the clock; the same turn continuing does not. */
   var turn = st.turns || 0;
   if (busyTurn !== turn || !busySince) {
     busyTurn = turn;
-    busySince = Date.now();
+    /* THE DAEMON'S CLOCK, NOT THIS PAGE'S.
+
+       This used to start counting when the browser first SAW the working state,
+       which on a reload, on a second device, or on a board opened halfway
+       through a turn is nowhere near when the turn began -- so a four-minute
+       turn read as "8s" to whoever had just picked the iPad up. */
+    busySince = st.turn_started ? st.turn_started * 1000 : Date.now();
     busyFrom = newestCard(data);
   }
 
@@ -3595,9 +3772,14 @@ function paintBusy(data) {
 
 function tickBusy() {
   if (!els.busy || els.busy.hidden || !busySince) return;
+  els.busySince.textContent = longAgo(Date.now() - busySince);
+  /* A stall keeps its own words -- they say what is wrong, which the writing
+     message does not, and the number beside them is doing the counting. */
+  if (busyStalled) {
+    els.busyText.textContent = busyStalled;
+    return;
+  }
   var secs = Math.max(0, Math.round((Date.now() - busySince) / 1000));
-  els.busySince.textContent = secs < 60 ? secs + "s"
-    : Math.floor(secs / 60) + "m " + (secs % 60) + "s";
   /* Past a couple of minutes, silence stops being reassuring. Say that this one
      is long rather than letting the number say it alone. */
   els.busyText.textContent = secs > 150
@@ -3751,14 +3933,14 @@ function restoreAnswer() {
   if (liveSlot && boardPage[liveSlot] && writer.fresh) {
     var rec = boardPage[liveSlot];
     var want = rec.p;
-    if (want === undefined || want >= writer.pages()) {
+    if (want === undefined || !writer.hasPage(want)) {
       /* Nobody has written on this board yet. A blank page at the end, unless
          the page in hand is still blank -- in which case it is already the right
          one, and adding another would leave an empty page behind on every board.
          That reuse is right only while the blank page belongs to nobody: hand it
          to a second board and the two share a sheet, which is one board changing
          when you write on another. */
-      want = writer.fresh(pageOwnedByOther(writer.pages() - 1, liveSlot));
+      want = writer.fresh(pageOwnedByOther(writer.lastPage(), liveSlot));
       rec.p = want;
       savePages();
     } else if (pageOwnedByOther(want, liveSlot)) {
@@ -4222,11 +4404,13 @@ els.skip.onclick = function () {
 
 els.begin.onclick = function () {
   els.begin.disabled = true;
-  /* Do not claim it is being waited on when nothing is there to wait. The turn
-     is still sent -- the inbox keeps it, and whoever attaches next reads it --
-     but "waiting for the tutor" when no tutor exists is the board lying. */
+  /* Say which of the two this is. With a tutor attached the request is being
+     waited on; with none, the send STARTS one (see `spawn.wake_tutor`) and the
+     honest word for that is "starting", not "nobody is reading this" -- which
+     was true when the request went into an inbox and stayed there, and is a
+     needless fright now that it does not. */
   els.begin.textContent = attached ? "asked — waiting for the tutor"
-                                   : "sent, but no tutor is attached to read it";
+                                   : "asked — starting the tutor…";
   sentAt = Date.now();
   say("begin").catch(function () {
     els.begin.disabled = false;

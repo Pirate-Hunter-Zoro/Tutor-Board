@@ -10,6 +10,21 @@ import time
 
 from . import paths
 
+# How long a tutor is allowed to be waking up before the board stops believing
+# it. Generous, because the slow part is a `git pull` against a remote and a
+# tailnet coming back after an allocation ended, and neither is quick on a
+# compute node; short enough that a start which died leaves a board that says so.
+WAKING_GRACE = 300
+
+
+def waking_now(record):
+    """Is this `waking` record still plausibly a start in flight?"""
+    try:
+        since = time.time() - float(record.get("waking_at") or 0)
+    except (TypeError, ValueError):
+        return False
+    return 0 <= since <= WAKING_GRACE
+
 
 def board_is_running(pid, root):
     """Is this pid genuinely our board for this repository?
@@ -76,6 +91,35 @@ def agent_is_attached(record, host):
         return False
     if record.get("host") and record["host"] != host:
         return False
+    # A TUTOR ON ITS WAY UP IS NOT A TUTOR THAT DIED.
+    #
+    # Starting one is not instant and never was: the launcher brings the tailnet
+    # link up, starts the board, opens the sitting, reads the addresses back and
+    # catches the repository up from the remote before the daemon exists to have
+    # a pid. All of that happens with the board ALREADY SERVING the iPad, so for
+    # the whole of it the only record on disk was the last run's -- whose pid is
+    # gone, which read as `stale`, which the board says out loud as "tutor
+    # stopped -- nothing is reading the board".
+    #
+    # Reported from the iPad on a relaunch, and the consequence is the damage
+    # rather than the wording: "It seemed to tell me the tutor was dead which
+    # put me in 'send again' mode leading to massive confusion." The one thing
+    # that must never happen here is the board saying nothing is listening while
+    # something is in the middle of arriving.
+    #
+    # So a start writes `waking` before it does any of the slow work, and a
+    # waking record is attached without a pid -- there is nothing to check yet.
+    # It expires, because a start that fell over must not go on claiming to be
+    # in progress for the rest of the evening; `WAKING_GRACE` is that window.
+    if record.get("state") == "waking":
+        # The launcher writes this before it forks, so there is nothing to check
+        # but the clock. The daemon then rewrites it with its own pid, and from
+        # that moment a start that DIED is knowable immediately rather than
+        # having to wait out the grace -- which matters, because a board that
+        # goes on promising a tutor for five minutes is its own kind of lie.
+        if not waking_now(record):
+            return False
+        return pid_alive(record["pid"]) if record.get("pid") else True
     if record.get("mode") == "interactive":
         return pid_alive(record.get("pid"), record.get("cmd"))
     # A daemon records its own pid, and a process either exists or it does not --

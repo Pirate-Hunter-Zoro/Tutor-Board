@@ -6,11 +6,12 @@ implementation rather than two that drift.
 """
 
 import os
+import subprocess
+import sys
+import threading
+import time
 
 from .. import paths
-import subprocess
-import threading
-import sys
 
 
 def board_cli(repo, args, timeout=90):
@@ -55,3 +56,54 @@ def tutor_cli(args, timeout=30):
         return p.returncode, p.stdout.decode("utf-8", "replace")
     except (OSError, subprocess.TimeoutExpired) as exc:
         return 1, str(exc)
+
+
+# ---------------------------------------------------------------------------
+# work handed in with nobody to read it
+# ---------------------------------------------------------------------------
+# A message going into the inbox did not start a tutor, and the inbox is not a
+# queue anybody drains: `board wait` only ever returns to a daemon that is
+# already running. So a send to a board whose tutor had died, or had never been
+# started, or was still coming up when the allocation that held the last one
+# ended, went onto disk and stayed there. The board said "listening" or said
+# nothing, and the person who had just handed in an hour of working waited.
+#
+# Reported as: "the tutor was just marked as dead... which put me in 'send
+# again' mode", and then "I don't ever want to be left hanging."
+#
+# So handing work in wakes a tutor. It is the same `tutor agent start` the hub
+# tap and the login hook use -- one implementation -- and it is safe to call
+# whenever, because that command refuses when a record is already live or
+# already waking. The debounce here is for the case it cannot see: several sends
+# in the same second, each forking a launcher that has not yet written the
+# record the next one would read.
+_WOKE = {}
+WAKE_DEBOUNCE = 20.0
+
+
+def wake_tutor(repo):
+    """Start this course's tutor if nothing is reading the board. Never blocks.
+
+    Returns whether an attempt was actually made, which is what the caller wants
+    for its log line -- not whether a tutor is now up, because nothing that
+    takes as long as a start can be reported by the request that triggered it.
+    """
+    from ..lesson import state
+
+    try:
+        agent = state.load_agent(repo)
+    except Exception:                                        # noqa: BLE001
+        agent = None
+    # A record the board would paint as attached, waking, working or
+    # reattaching. Only a genuinely dead one gets past here.
+    if agent and agent.get("state") not in ("stale", "stopped"):
+        return False
+
+    course = os.path.basename(os.path.abspath(repo.root))
+    now = time.time()
+    if now - _WOKE.get(course, 0) < WAKE_DEBOUNCE:
+        return False
+    _WOKE[course] = now
+    threading.Thread(target=tutor_cli, args=(["agent", "start", course],),
+                     kwargs={"timeout": 60}, daemon=True).start()
+    return True

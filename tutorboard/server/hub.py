@@ -61,6 +61,11 @@ class Hub:
             "push": state.load_push(self.repo),
             "export": state.load_export(self.repo),
             "agent": state.load_agent(self.repo),
+            # What is in the inbox that nothing has taken. The board's answer to
+            # "I sent that and nothing is happening", and it comes off disk
+            # rather than out of the browser's memory so it is still true after
+            # a reload. See `notes.waiting`.
+            "waiting": notes.waiting(self.repo),
             "history": len(archive.list_archive(self.repo)),
         }
         # Only in a homework sitting, and read from the .tex itself rather than

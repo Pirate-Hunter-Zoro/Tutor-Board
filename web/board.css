@@ -152,7 +152,16 @@ body { background: var(--paper); min-height: 100vh; min-height: 100dvh; }
   background: var(--ask);
   animation: pulse 1.1s ease-in-out infinite;
 }
+/* Coming up, or coming back. Amber and pulsing, because both are "wait a
+   moment" rather than "green, go" and emphatically rather than "dead". */
+.agent[data-state="waking"]::before,
+.agent[data-state="reattaching"]::before,
+.agent[data-state="wrapping up"]::before {
+  background: var(--ask);
+  animation: pulse 1.6s ease-in-out infinite;
+}
 .agent[data-state="stale"]::before { background: var(--bad); }
+.agent[data-state="stale"] { color: var(--bad); }
 .agent[data-state="none"] { color: var(--bad); }
 .agent[data-state="none"]::before {
   background: transparent; border: 1px solid var(--bad);
@@ -450,7 +459,16 @@ body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180de
   animation: busypulse 1.4s ease-in-out infinite;
 }
 @keyframes busypulse { 0%, 100% { opacity: .25 } 50% { opacity: 1 } }
-.busy-since { color: var(--ink-3); opacity: .75; font-variant-numeric: tabular-nums; }
+.busy-since { color: var(--ink-3); opacity: .75; font-variant-numeric: tabular-nums;
+              flex: none; align-self: flex-start; }
+/* A stall is not a pulse. Something is wrong or something is waiting, and an
+   animation that says "in progress" is the wrong thing on both. */
+.busy-bad { color: var(--bad); align-items: flex-start; }
+.busy-bad .busy-dot { background: var(--bad); animation: none; margin-top: .35rem; }
+/* Long enough to be a sentence now: it says what is wrong and what to do, and
+   the strip has to wrap rather than clip it. */
+.busy { flex-wrap: nowrap; }
+.busy #busy-text { min-width: 0; }
 
 /* ---------- answering a question in a code project ---------- */
 #codeanswer {

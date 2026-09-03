@@ -783,7 +783,7 @@ const farDown = Object.assign({}, withNew, {
     // what to watch. A question filed while the count cannot be believed is a
     // question filed against the wrong page, permanently — and it is written to
     // storage, so it outlives the reload that caused it.
-    const KEY = 'board.pages:Galois Theory:-';
+    const KEY = 'board.pages.n:Galois Theory:-';
     const filedIn = () => {
       try { return JSON.parse(window.localStorage.getItem(KEY) || '{}'); }
       catch (e) { return {}; }
@@ -943,7 +943,7 @@ const farDown = Object.assign({}, withNew, {
   es.onmessage({ data: JSON.stringify(two) });
   await sleep(20);
 
-  const KEY2 = 'board.pages:Galois Theory:-';
+  const KEY2 = 'board.pages.n:Galois Theory:-';
   const filed = () => {
     try { return JSON.parse(window.localStorage.getItem(KEY2) || '{}'); }
     catch (e) { return {}; }

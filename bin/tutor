@@ -589,6 +589,22 @@ def agent_state(live, **kw):
     return st
 
 
+def mark_waking(live, agent_name, pid=None):
+    """Record that a tutor is on its way up, before anything slow is attempted.
+
+    Written by both halves of a start -- the launcher that decides, and the
+    daemon that then spends several seconds bringing a link, a board and a
+    sitting up before it can listen. Either is enough on its own, which matters
+    because a person can start a daemon directly and never go through the other.
+    """
+    try:
+        return agent_state(live, agent=agent_name, pid=pid, state="waking",
+                           waking_at=time.time(), restarting=False,
+                           last_error=None, failed_at=0, host=this_host())
+    except OSError:
+        return None
+
+
 def headless_stop(cfg, args):
     stopped = 0
     for c in courses(cfg):
@@ -897,6 +913,12 @@ def agent_start(cfg, course, agent_name, session=None):
     live_dir = os.path.join(root, "live")
     st = agent_live(root)
     if st:
+        # A start already in flight is not a reason to start a second one, and
+        # it is not "already listening" either -- saying so to whoever asked
+        # would be the same lie the board was telling.
+        if st.get("state") == "waking":
+            return 0, "%s is already waking up in %s" % (st.get("agent"),
+                                                         course["dir"])
         return 0, "%s already listening in %s" % (st.get("agent"), course["dir"])
     if not agent_name:
         return 1, "no agent resolved for %s" % course["dir"]
@@ -908,11 +930,28 @@ def agent_start(cfg, course, agent_name, session=None):
         return 1, ("'%s' needs `%s`, which is not on the path here; "
                    "try: tutor --agents" % (agent_name, gone))
 
-    # Catch up before the assistant reads anything -- including the HANDOFF.md
-    # another machine may have written at the end of the last session.
-    sync(root, quiet=True)
-
     os.makedirs(live_dir, exist_ok=True)
+    # SAY THAT A TUTOR IS COMING, BEFORE ANYTHING SLOW HAPPENS.
+    #
+    # This is the first moment anything knows a start has been decided, and
+    # until now it was also the last moment before several seconds of silence:
+    # the board is already up and serving the iPad, and the only record on disk
+    # was the previous run's -- pid gone, which the board reads as "tutor
+    # stopped, nothing is reading the board". Reported from a relaunch: "the
+    # tutor was just marked as dead or not available... which put me in 'send
+    # again' mode leading to massive confusion."
+    #
+    # `waking` expires on its own (see `processes.WAKING_GRACE`), so a start
+    # that dies here does not leave the board claiming one is on the way.
+    mark_waking(live_dir, agent_name)
+
+    # The catch-up moved INTO the daemon. It is a `git pull` against a remote
+    # over a tailnet that may itself be coming back up, and it was being done
+    # here -- inside the request that asked for a tutor. `spawn.tutor_cli` gives
+    # this thirty seconds and `sync` alone allows sixty, so a slow remote did
+    # not make the start slow, it made the start get KILLED before it had
+    # spawned anything, and the board then sat on a record that never appeared.
+    # Nothing downstream needs the pull to have happened before the fork.
     # `--respawn` says this daemon was started by machinery rather than by a
     # person, and the only thing it changes is that the spawned process does NOT
     # record a course choice. Every caller here is a machine deciding to put a
@@ -946,9 +985,17 @@ def agent_stop(course, wait=False):
     st = agent_live(course["root"])
     if not st:
         return 0, "nothing was listening in %s" % course["dir"]
+    # A record written by the launcher before the fork has no pid yet. There is
+    # nothing to signal; the daemon it is waiting for will find the record gone.
+    if not st.get("pid"):
+        try:
+            os.remove(os.path.join(course["root"], "live", "agent.json"))
+        except OSError:
+            pass
+        return 0, "the start in %s was called off" % course["dir"]
     try:
         os.kill(st["pid"], signal.SIGTERM)
-    except OSError as exc:
+    except (OSError, TypeError, ValueError) as exc:
         return 1, str(exc)
     if wait:
         for _ in range(120):
@@ -1037,6 +1084,15 @@ def headless(cfg, course, agent_name, session):
     root = course["root"]
     live = os.path.join(root, "live")
     os.makedirs(live, exist_ok=True)
+    # Before the link, the board, the sitting and the catch-up -- all of which
+    # take time the person holding the iPad is already watching. With a real pid
+    # this time, so a start that dies is noticed by the pid test rather than
+    # having to wait out the grace.
+    mark_waking(live, agent_name, pid=os.getpid())
+    # Moved here from `agent_start`, so the request that asks for a tutor does
+    # not wait on a remote. Every session still begins by catching up; it just
+    # does it where there is nobody watching the clock.
+    sync(root, quiet=True)
     logpath = os.path.join(live, "agent.log")
     log = open(logpath, "a", buffering=1)
     host = this_host()
@@ -1058,7 +1114,8 @@ def headless(cfg, course, agent_name, session):
                           "handoff": handoff_clause(root)})
 
     agent_state(live, host=host, agent=agent_name, pid=os.getpid(),
-                started=time.time(), state="listening", turns=0, last_error=None)
+                started=time.time(), state="listening", turns=0,
+                last_error=None, failed_at=0, waking_at=0)
     print(net.rstrip())
     print("\n%s is listening in %s. Send from the board; nothing here needs a keyboard."
           % (agent_name, course["dir"]))
@@ -1134,7 +1191,12 @@ def headless(cfg, course, agent_name, session):
             agent_state(live, agent=agent_name, fallback=False)
 
         turns += 1
-        agent_state(live, state="working", turns=turns)
+        # `turn_started` is the daemon's clock, and the board needs it: its own
+        # measure of how long a turn has been going starts when it first SEES
+        # the working state, which on a reload or a second device is nowhere
+        # near when the turn began.
+        agent_state(live, state="working", turns=turns,
+                    turn_started=time.time(), last_error=None, failed_at=0)
         log.write("\n=== %s turn %d ===\n%s\n" % (time.strftime("%H:%M:%S"), turns, out))
 
         # Keep saying so while the turn runs. The heartbeat used to be written
@@ -1226,7 +1288,7 @@ def headless(cfg, course, agent_name, session):
                           % (agent_name,
                              time.strftime("%H:%M", time.localtime(until))))
                 agent_state(live, state="listening", last_error="out of allowance",
-                            limited=until)
+                            failed_at=time.time(), limited=until)
                 # The student sent something and got nothing. Whoever ends up
                 # answering it, it is the same message.
                 pending = out
@@ -1275,7 +1337,8 @@ def headless(cfg, course, agent_name, session):
             if not egress.egress_ok():
                 log.write("!! nothing can get out from here; the turn may not be "
                           "the tutor's fault\n")
-                agent_state(live, state="listening", last_error="no egress")
+                agent_state(live, state="listening", last_error="no egress",
+                            failed_at=time.time())
                 fixed, detail = egress.rotate_exit_node(
                     log=lambda m: log.write("   %s\n" % m))
                 if fixed:
@@ -1287,7 +1350,12 @@ def headless(cfg, course, agent_name, session):
                 else:
                     log.write("!! egress still broken (%s); turns will keep "
                               "failing until the network is fixed\n" % detail)
-            agent_state(live, state="listening", last_error=err)
+            # Stamped, so the board can tell a failure that just happened from
+            # one an hour ago -- and can say so at all, which it could not. A
+            # student whose working was handed in and answered by nothing is the
+            # one state this tool must never present as normal.
+            agent_state(live, state="listening", last_error=err,
+                        failed_at=time.time(), retrying=pending is not None)
         else:
             carried = 1 if fresh else carried + 1
             # A turn that worked on the agent we actually want is proof the
@@ -1296,7 +1364,8 @@ def headless(cfg, course, agent_name, session):
             if agent_name == wanted and limits.limited_until():
                 log.write("-- a turn went through; the allowance is back\n")
                 limits.clear_limited()
-            agent_state(live, state="listening", last_error=None)
+            agent_state(live, state="listening", last_error=None,
+                        failed_at=0, retrying=False)
 
     # The last turn, and the only one the student never sees.
     if turns:

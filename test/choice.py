@@ -423,9 +423,13 @@ print()
 import subprocess                                            # noqa: E402
 
 src_tutor = open(os.path.join(ROOT, "bin", "tutor"), encoding="utf-8").read()
+# The whole of `agent_start`, rather than a fixed number of characters from its
+# head: a window measured in bytes fails the moment somebody explains something
+# in the function, which is not a property worth asserting.
 i = src_tutor.index("def agent_start(")
+agent_start_src = src_tutor[i:src_tutor.index("def agent_stop(", i)]
 check("every daemon machinery starts is marked as a respawn",
-      '"--respawn"' in src_tutor[i:i + 2000])
+      '"--respawn"' in agent_start_src)
 
 home = tempfile.mkdtemp()
 courses_dir = os.path.join(home, "courses")

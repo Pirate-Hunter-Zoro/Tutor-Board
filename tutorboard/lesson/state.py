@@ -26,6 +26,13 @@ def load_agent(repo):
             st = json.load(fh)
     except (OSError, ValueError):
         return None
+    if st.get("state") == "waking" and processes.waking_now(st):
+        # Say so, rather than letting the pid test below judge a record that has
+        # no pid yet. This is the state the board most needs to be able to
+        # paint: a start is in flight, nothing is lost, and the thing NOT to do
+        # is send again. See `processes.agent_is_attached`.
+        st["failure"] = None
+        return st
     if not processes.agent_is_attached(st, machine.node_name()):
         # A daemon being BOUNCED is not a daemon that died, and the board is the
         # only place anybody finds out which it was. A restart marks the record
@@ -34,7 +41,42 @@ def load_agent(repo):
         # tutor attached" -- which is what a course that never had one says, and
         # is a dead end in the middle of a lesson.
         st["state"] = "reattaching" if _reattaching(st) else "stale"
+    # And whatever went wrong last, if it is still news. See `_failure`.
+    st["failure"] = _failure(st)
     return st
+
+
+# WHAT A FAILED TURN LOOKS LIKE FROM THE IPAD, WHICH USED TO BE NOTHING AT ALL.
+#
+# A turn that fails writes `state: listening, last_error: <why>` and goes back
+# to waiting. Every one of those words is true and not one of them reached the
+# reader: the board painted "claude listening", the busy strip went away, and
+# the student was left looking at a lesson with their working handed in and no
+# answer coming -- with the chrome cheerfully saying the tutor was fine.
+#
+# Reported as "the tutor also appears to be very non responsive. Now it's just
+# hanging. I need you to make the tutor way more robust. I don't ever want to be
+# left hanging." The daemon was robust; it recovered from every one of those
+# failures. It just never told anybody one had happened.
+#
+# So the failure is stamped with when it happened and handed over, and it is
+# only reported while it is still the newest thing that has happened to this
+# tutor -- a turn that has since succeeded clears it, and one from an hour ago
+# is history rather than news.
+FAILURE_FRESH = 900
+
+
+def _failure(st):
+    """The last turn's failure, if it is still the newest thing to report."""
+    if not st.get("last_error"):
+        return None
+    try:
+        at = float(st.get("failed_at") or 0)
+    except (TypeError, ValueError):
+        return None
+    if not at or time.time() - at > FAILURE_FRESH:
+        return None
+    return {"error": st["last_error"], "at": at}
 
 
 # How long a restart is given before the board stops calling it a restart. Long

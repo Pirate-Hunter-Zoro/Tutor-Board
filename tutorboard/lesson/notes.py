@@ -23,6 +23,39 @@ def load_messages(repo, limit=60):
     return out[-limit:]
 
 
+# WHAT WAS HANDED IN THAT NOTHING HAS PICKED UP, AND FOR HOW LONG.
+#
+# The board could say "sending to the tutor" and it could say "the tutor is
+# writing", and between those two there is a third state it had no word for: the
+# work is in the inbox, on disk, and no tutor has taken it. That is what a start
+# still coming up looks like, what a daemon whose turn just failed looks like,
+# and what a course with no tutor at all looks like -- and the board's own answer
+# to it was a strip that vanished after a hundred seconds and left a blank space,
+# which reads exactly like "nothing happened, send it again".
+#
+# `read` is set by `board inbox`, which is what consuming a message IS, so an
+# unread line is by definition something no tutor has taken. Measured from the
+# message's own timestamp, so it survives a reload, a second device, and the
+# tutor being restarted underneath it -- none of which the browser's own clock
+# survives.
+def waiting(repo, limit=400):
+    """The oldest thing in the inbox nobody has picked up, and how many there are."""
+    oldest, count = None, 0
+    for rec in load_messages(repo, limit=limit):
+        if rec.get("read"):
+            continue
+        count += 1
+        try:
+            at = float(rec.get("t") or 0)
+        except (TypeError, ValueError):
+            continue
+        if at and (oldest is None or at < oldest):
+            oldest = at
+    if not count:
+        return None
+    return {"since": oldest, "count": count}
+
+
 def load_notes_sent(repo):
     """Which cards' marks have already been handed to the tutor.
 

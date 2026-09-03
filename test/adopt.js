@@ -92,7 +92,7 @@ function surface(saved, onPages) {
   // the first thing it asks is how many pages there are. If that number is still
   // the stand-in when it is asked, everything downstream of it is wrong.
   let sawCount = null, sawInk = null;
-  const s = surface(4, (api) => { sawCount = api.pages(); sawInk = api.inkOn(0); });
+  const s = surface(4, (api) => { sawCount = api.pages(); sawInk = api.inkOn(1); });
   await sleep(40);
 
   sawCount === 4
@@ -120,10 +120,10 @@ function surface(saved, onPages) {
     : fail('the surface would not cut a page');
   await sleep(40);
 
-  s.api.pages() === 4 && s.api.inkOn(0) === 1
+  s.api.pages() === 4 && s.api.inkOn(1) === 1
     ? ok('and the saved sitting is still adopted over it')
     : fail('two blank sheets refused an evening on disk (' + s.api.pages()
-           + ' pages, ' + s.api.inkOn(0) + ' strokes on the first)');
+           + ' pages, ' + s.api.inkOn(1) + ' strokes on the first)');
   s.window.close();
 }
 
@@ -135,7 +135,7 @@ function surface(saved, onPages) {
   s.api.load({ w: 1130, h: 1514, strokes: [{ c: '#eee', w: 3, pts: [[10, 10], [20, 20]] }] });
   await sleep(40);
 
-  s.api.pages() === 1 && s.api.inkOn(0) === 1
+  s.api.pages() === 1 && s.api.inkOn(1) === 1
     ? ok('a stroke made before the answer came back still beats the server')
     : fail('writing in the first half-second was overwritten by the saved pages');
   s.window.close();
@@ -186,8 +186,11 @@ function surface(saved, onPages) {
 
   // The rotted record: the second question filed onto the first one's sheet,
   // which is one board changing when you write on the other.
-  const KEY = 'board.pages:Galois Theory:-';
-  window.localStorage.setItem(KEY, JSON.stringify({ '0001': 0, '0005': 0 }));
+  // A page is named by its NUMBER now, not by where it sits in the array the
+  // surface happens to have built -- so the record says page 1, and page 1 is
+  // page 1 whatever else is or is not on disk beside it.
+  const KEY = 'board.pages.n:Galois Theory:-';
+  window.localStorage.setItem(KEY, JSON.stringify({ '0001': 1, '0005': 1 }));
 
   for (const f of ['typeface.js', 'macros.js', 'slate-core.js', 'annotate.js', 'board.js']) {
     try { window.eval(fs.readFileSync(path.join(WEB, f), 'utf8')); }
@@ -218,12 +221,12 @@ function surface(saved, onPages) {
     // A question is a chain of boards; the record is about the attempt in hand,
     // which for both of these questions is the first and only one.
     const pageOfQ = (q) => (filed[q + '#0'] || {}).p;
-    pageOfQ('0005') === 3
+    pageOfQ('0005') === 4
       ? ok('a question filed onto another question\'s sheet is put back on the '
            + 'page the record says it was sent from')
       : fail('the rotted mapping stood: question 0005 is still on page '
              + pageOfQ('0005') + ', sharing with 0001');
-    pageOfQ('0001') === 0
+    pageOfQ('0001') === 1
       ? ok('and the question that was not sent keeps the page it had')
       : fail('a mapping with no record behind it was overwritten anyway');
   }
@@ -276,9 +279,9 @@ function surface(saved, onPages) {
     : new Promise(() => {}));
 
   // Swapped: 0001 on the page 0005 was sent from, and 0005 on 0001's.
-  const KEY = 'board.pages:Galois Theory:-';
-  window.localStorage.setItem(KEY, JSON.stringify({ '0001#0': { p: 3 },
-                                                    '0005#0': { p: 1 } }));
+  const KEY = 'board.pages.n:Galois Theory:-';
+  window.localStorage.setItem(KEY, JSON.stringify({ '0001#0': { p: 4 },
+                                                    '0005#0': { p: 2 } }));
 
   for (const f of ['typeface.js', 'macros.js', 'slate-core.js', 'annotate.js', 'board.js']) {
     try { window.eval(fs.readFileSync(path.join(WEB, f), 'utf8')); }
@@ -307,7 +310,7 @@ function surface(saved, onPages) {
     let filed = {};
     try { filed = JSON.parse(window.localStorage.getItem(KEY) || '{}'); } catch (e) {}
     const pageOfQ = (q) => (filed[q + '#0'] || {}).p;
-    pageOfQ('0001') === 1 && pageOfQ('0005') === 3
+    pageOfQ('0001') === 2 && pageOfQ('0005') === 4
       ? ok('two boards holding each other\'s working are put back where the '
            + 'record says each answer was written')
       : fail('the swap stood: 0001 is on page ' + pageOfQ('0001')

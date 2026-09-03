@@ -135,11 +135,11 @@ boards().length === 0
 
 // Something is written on it.
 slate.load({ w: 1130, h: 1514, strokes: [ink(1)] });
-const firstPage = slate.at();
+const firstPage = slate.at();        // its number, which is what a turn records
 
 // ------------------------------------- sending, on its own, does not end it
 es.onmessage({ data: lesson([q1], [
-  { id: 't0001', rev: 1, kind: 'ink', answers: '0001', t: t0 + 150, page: firstPage + 1,
+  { id: 't0001', rev: 1, kind: 'ink', answers: '0001', t: t0 + 150, page: firstPage,
     strokes: 1, png: '/answers/t0001-r1.png', ink: '/answers/t0001-r1.json' },
 ]) });
 await sleep(40);
@@ -153,7 +153,7 @@ boards().length === 0 && slate.pages() === 1
 // --------------------------------- the tutor answers, and the attempt is over
 const fb = card('0002', 'note', 'the third line does not follow', 2);
 es.onmessage({ data: lesson([q1, fb], [
-  { id: 't0001', rev: 1, kind: 'ink', answers: '0001', t: t0 + 150, page: firstPage + 1,
+  { id: 't0001', rev: 1, kind: 'ink', answers: '0001', t: t0 + 150, page: firstPage,
     strokes: 1, png: '/answers/t0001-r1.png', ink: '/answers/t0001-r1.json' },
 ]) });
 await sleep(40);
@@ -173,23 +173,23 @@ doc.querySelector('[data-card="0002"]').nextElementSibling === writer()
 slate.pages() === 2
   ? ok('the next attempt is a page of its own')
   : fail('the next attempt did not get its own page (' + slate.pages() + ')');
-slate.inkOn(1) === 1 && slate.at() === 1
+slate.inkOn(2) === 1 && slate.at() === 2
   ? ok('opened on a copy, so everything written so far is still under the pen')
   : fail('the new board came up blank, losing the working it should carry '
-         + '(page ' + slate.at() + ', ' + slate.inkOn(1) + ' strokes)');
+         + '(page ' + slate.at() + ', ' + slate.inkOn(2) + ' strokes)');
 
 // ------------------------------------------------------------- independently
 slate.load({ w: 1130, h: 1514, strokes: [ink(2), ink(3)] });
 await sleep(20);
-slate.inkOn(0) === 1 && slate.inkOn(1) === 2
+slate.inkOn(1) === 1 && slate.inkOn(2) === 2
   ? ok('and writing on it leaves the board above exactly as it was')
   : fail('the two boards are one sheet: writing on the later one changed the '
-         + 'earlier (' + slate.inkOn(0) + ' and ' + slate.inkOn(1) + ' strokes)');
+         + 'earlier (' + slate.inkOn(1) + ' and ' + slate.inkOn(2) + ' strokes)');
 
 // A second reply with nothing handed in since does NOT cut a third board: it is
 // the answer to an attempt that ends it, not any card at all.
 es.onmessage({ data: lesson([q1, fb, card('0003', 'note', 'and check the sign', 3)], [
-  { id: 't0001', rev: 1, kind: 'ink', answers: '0001', t: t0 + 150, page: firstPage + 1,
+  { id: 't0001', rev: 1, kind: 'ink', answers: '0001', t: t0 + 150, page: firstPage,
     strokes: 1, png: '/answers/t0001-r1.png', ink: '/answers/t0001-r1.json' },
 ]) });
 await sleep(40);
@@ -209,10 +209,10 @@ await sleep(40);
 boards().length === 2
   ? ok('a second attempt answered leaves a second board behind it')
   : fail('the chain stopped at one (' + boards().length + ' kept)');
-slate.pages() === 3 && slate.inkOn(2) === 2
+slate.pages() === 3 && slate.inkOn(3) === 2
   ? ok('and the third attempt opens on a copy of the second')
   : fail('the third attempt did not carry the working forward ('
-         + slate.pages() + ' pages, ' + slate.inkOn(2) + ' strokes on the last)');
+         + slate.pages() + ' pages, ' + slate.inkOn(3) + ' strokes on the last)');
 
 // Every board in the chain says which attempt it is, so two pictures of similar
 // working are not two mysteries.
@@ -240,7 +240,7 @@ await sleep(40);
   const first = boards()[0];
   first.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true }));
   await sleep(40);
-  !writer().hidden && slate.at() === 0
+  !writer().hidden && slate.at() === 1
     ? ok('touching an earlier attempt opens the real surface on that page')
     : fail('an earlier board cannot be written on (page ' + slate.at() + ')');
   doc.querySelector('[data-card="0001"]').nextElementSibling === writer()
@@ -292,7 +292,7 @@ await sleep(40);
   slate.inkOn(slate.at()) === 2
     ? ok('and the working is under the pen')
     : fail('the carried board is empty (' + slate.inkOn(slate.at()) + ' strokes)');
-  slate.inkOn(2) === 2
+  slate.inkOn(3) === 2
     ? ok('while the board it came from is untouched')
     : fail('carrying the working over took it away from where it was');
   doc.getElementById('carry').hidden
@@ -303,7 +303,7 @@ await sleep(40);
 
 // ------------------------------------------------- and the record survives it
 {
-  const KEY = 'board.pages:Galois Theory:-';
+  const KEY = 'board.pages.n:Galois Theory:-';
   let map = {};
   try { map = JSON.parse(window.localStorage.getItem(KEY) || '{}'); } catch (e) {}
   const mine = Object.keys(map).filter((k) => k.indexOf('0001#') === 0).sort();
@@ -332,7 +332,7 @@ await sleep(40);
 // holds a different 228. Every frozen answer was correct and distinct the whole
 // time. The boards were pointing at a moving target.
 const mapping = () =>
-  JSON.parse(window.localStorage.getItem('board.pages:Galois Theory:-') || '{}');
+  JSON.parse(window.localStorage.getItem('board.pages.n:Galois Theory:-') || '{}');
 // The pen goes back on the glass for each of these, and comes off again: a
 // synthetic pointerdown with no lift leaves the surface believing a hand is on
 // it, and the board will not move a page under a hand.
@@ -352,7 +352,7 @@ const lift = () => {
   slate.go(p9);
   slate.load({ w: 1130, h: 1514, strokes: [ink(1), ink(2), ink(3)] });
   const sent = { id: 't0009', rev: 1, kind: 'ink', answers: '0009', t: t0 + 900,
-                 page: p9 + 1, strokes: 3,
+                 page: p9, strokes: 3,
                  png: '/answers/t0009-r1.png', ink: '/answers/t0009-r1.json' };
   frozen['/answers/t0009-r1.json'] =
     { w: 1130, h: 1514, strokes: [ink(1), ink(2), ink(3)] };
@@ -441,7 +441,7 @@ const lift = () => {
   slate.go(p15);
   slate.load({ w: 1130, h: 1514, strokes: [ink(1), ink(2), ink(3), ink(4)] });
   const sent15 = { id: 't0015', rev: 1, kind: 'ink', answers: '0015', t: t0 + 1500,
-                   page: p15 + 1, strokes: 4,
+                   page: p15, strokes: 4,
                    png: '/answers/t0015-r1.png', ink: '/answers/t0015-r1.json' };
   frozen['/answers/t0015-r1.json'] =
     { w: 1130, h: 1514, strokes: [ink(1), ink(2), ink(3), ink(4)] };
@@ -479,7 +479,7 @@ const lift = () => {
   slate.go(p13);
   slate.load({ w: 1130, h: 1514, strokes: [ink(4), ink(5)] });
   const older = { id: 't0013', rev: 1, kind: 'ink', answers: '0013', t: t0 + 1300,
-                  page: p13 + 1, strokes: 2, png: '/answers/t0013-r1.png' };
+                  page: p13, strokes: 2, png: '/answers/t0013-r1.png' };
   es.onmessage({ data: lesson([q1, q13], [older]) });
   await sleep(40);
   lift();
@@ -522,7 +522,7 @@ const lift = () => {
   for (let i = 0; i < 12; i++) many.push(ink(i));
   slate.load({ w: 1130, h: 1514, strokes: many });
   const sent17 = { id: 't0017', rev: 1, kind: 'ink', answers: '0017', t: t0 + 1700,
-                   page: p17 + 1, strokes: 12,
+                   page: p17, strokes: 12,
                    png: '/answers/t0017-r1.png', ink: '/answers/t0017-r1.json' };
   frozen['/answers/t0017-r1.json'] = { w: 1130, h: 1514, strokes: many };
 
@@ -620,7 +620,7 @@ const lift = () => {
   for (let i = 0; i < 12; i++) lot.push(ink(60 + i));
   slate.load({ w: 1130, h: 1514, strokes: lot });
   const sent19 = { id: 't0019', rev: 1, kind: 'ink', answers: '0019', t: t0 + 1900,
-                   page: p19 + 1, strokes: 12,
+                   page: p19, strokes: 12,
                    png: '/answers/t0019-r1.png', ink: '/answers/t0019-r1.json' };
   frozen['/answers/t0019-r1.json'] = { w: 1130, h: 1514, strokes: lot };
   es.onmessage({ data: lesson([q1, q19], [sent19]) });
