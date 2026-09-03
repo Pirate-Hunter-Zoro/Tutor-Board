@@ -840,6 +840,56 @@ def tool_sync(cfg, quiet=False):
     return tool_adopt(cfg)
 
 
+# The parts of `live/` that are the transcript rather than runtime state: what a
+# lesson IS, and what it would be a bug to lose. `live/state.json` and
+# `live/text/` are not here on purpose -- those are a snapshot by nature and the
+# newest one is the right one.
+TRANSCRIPT_DIRS = ("live/slate", "live/answers", "live/cards", "live/annotations")
+TRANSCRIPT_FILES = ("live/turns.jsonl",)
+
+
+def archived_names(root):
+    """Every basename anywhere under `live/archive/`, which is where a filed
+    lesson's pages, answers and cards legitimately go."""
+    names = set()
+    base = os.path.join(root, "live", "archive")
+    for here, _dirs, files in os.walk(base):
+        for name in files:
+            names.add(name)
+    return names
+
+
+def keep_transcript_files(root, git, note):
+    """Refuse to commit the disappearance of anything that is the lesson.
+
+    Called with the index already staged. Anything staged as a deletion under a
+    transcript directory, whose basename is not now in the archive, is checked
+    back out of HEAD -- which un-stages the deletion and puts the file back on
+    disk in one move.
+    """
+    paths = list(TRANSCRIPT_DIRS) + list(TRANSCRIPT_FILES)
+    p = git("diff", "--cached", "--name-only", "--diff-filter=D", "--", *paths)
+    if p.returncode != 0:
+        return []
+    gone = [l.strip() for l in p.stdout.decode("utf-8", "replace").splitlines()
+            if l.strip()]
+    if not gone:
+        return []
+    filed = archived_names(root)
+    put_back = [g for g in gone if os.path.basename(g) not in filed]
+    if not put_back:
+        return []
+    # In batches, because a filed chapter can be hundreds of files and a command
+    # line has a limit.
+    for i in range(0, len(put_back), 200):
+        git("checkout", "HEAD", "--", *put_back[i:i + 200])
+    note("transcript: put back %d file(s) another machine's snapshot dropped: %s"
+         % (len(put_back),
+            ", ".join(os.path.basename(x) for x in put_back[:6])
+            + (" …" if len(put_back) > 6 else "")))
+    return put_back
+
+
 def sync_transcript(root, log=None):
     """Commit and push the lesson transcript, pulling first.
 
@@ -875,6 +925,25 @@ def sync_transcript(root, log=None):
             out = p.stdout.decode("utf-8", "replace").strip().splitlines()
             note("transcript: not pulled (%s)" % (out[-1] if out else "pull failed"))
         git("add", "-A", "live")
+        # A TRANSCRIPT IS APPEND-ONLY, SO A COMMIT MUST NEVER SAY A PAGE IS GONE.
+        #
+        # Two clones run this on a beat over the same course, and `git add -A`
+        # commits a SNAPSHOT of whichever working tree it is standing in. Neither
+        # machine has the other's newest pages, so each snapshot deletes the
+        # other's -- and the next fast-forward pull checks that snapshot out and
+        # removes the files from disk. Measured on Galois Theory: `live/slate/`
+        # pages 50 to 53, written between 10:13 and 10:25, present in one line of
+        # history and physically absent from the working tree by 11:09. From the
+        # iPad that is "none of the boards have my preserved written work on them"
+        # with the work genuinely gone from the sheet it was on.
+        #
+        # Nothing in this tool ever deletes a slate page, an answer or a card
+        # except `board archive`, which RENAMES it under `live/archive/` -- so a
+        # deletion whose basename is somewhere in the archive is accounted for and
+        # anything else is a snapshot talking about a machine it is not on. Those
+        # are put back, on disk as well as in the index, which also repairs a
+        # clone that has already been clobbered by a pull.
+        keep_transcript_files(root, git, note)
         if git("diff", "--cached", "--quiet").returncode == 0:
             return
         if git("commit", "-m", "lesson transcript").returncode != 0:

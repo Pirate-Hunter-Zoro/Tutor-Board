@@ -143,6 +143,21 @@ which kind of subject it is and the board adapts.
 > touched. That is why nothing was ever actually lost, and why the boards from that sitting come
 > back showing the real working even though their recorded page numbers predate this fix.
 >
+> **And a fourth thing turned up while looking, which had already eaten pages off the disk.** Two
+> clones run the transcript beat over the same course, and `git add -A live` commits a SNAPSHOT of
+> whichever working tree it is standing in. Neither machine has the other's newest pages, so each
+> snapshot DELETES the other's — and the next fast-forward pull checks that snapshot out and removes
+> the files. Measured on this course: `live/slate/` pages 50 to 53, written between 10:13 and 10:25
+> that morning, present in one line of history and physically absent from the working tree by 11:09.
+> From the iPad that is the same sentence as the mapping bug — *"none of the boards have my
+> preserved written work"* — except that this time the work really had gone from the sheet.
+>
+> Nothing in this tool ever deletes a slate page, an answer or a card except `board archive`, which
+> RENAMES it under `live/archive/`. So a staged deletion whose basename is somewhere in the archive
+> is accounted for, and anything else is a snapshot talking about a machine it is not on: those are
+> checked back out of `HEAD`, on disk as well as in the index, which also repairs a clone that has
+> already been clobbered. The four pages were recovered from the divergent line and put back.
+>
 > `test/waking.py` holds the server side — a start with no pid yet, its expiry, a record from
 > another node, a stamped failure and its staleness, `notes.waiting` off disk, and the launcher's
 > own ordering. `test/hanging.js` asserts the board has words for every state a reader can be stuck
@@ -1626,6 +1641,7 @@ these tests fail, the test is right.
 | `shot.js` was deferred while `board.js` is not, so it did not exist when `board.js` reached for it and every photograph ended with a page of blank paper | `test/shot.js` |
 | Three places guessed where a course's build puts its homework PDF and all three were wrong, so `hw.json` recorded `"pdf": null` on a successful build and the download button for the write-up could never appear | `test/shot.py` |
 | A hand-written PDF whose cross-reference offsets are one byte out is a file no reader will open | `test/shot.py` |
+| Two clones ran the transcript beat over one course, and `git add -A live` commits a snapshot of the working tree it is standing in — so each machine's commit deleted the other's newest slate pages and answers, and the next fast-forward pull removed them from disk. Four pages of a morning's working went that way | `keep_transcript_files` in `bin/tutor`, `test/waking.py` |
 | A slate page was addressed by its POSITION in the list the server handed back, so one page cut and never written on — which leaves no file — slid every page after it onto its neighbour's number: every board came back pointing at somebody else's sheet, and the next stroke saved over a real page. Four pages byte-identical to their neighbours in one sitting, and nothing reported an error | `test/sheets.js` |
 | `read_slate_pages` sorted the pages by NAME, and `%02d` on numbers running to 999 means `page-100` sorts before `page-99`, so a sitting past a hundred pages came back with its last hundred at the front | `test/waking.py` |
 | Starting a tutor took several seconds of link, board, sitting and `git pull`, and for all of it the board read the last run's dead record and said *"tutor stopped — nothing is reading the board"* — the same sentence a course that never had a tutor gets, which is exactly what makes somebody send again | `test/waking.py`, `test/hanging.js` |

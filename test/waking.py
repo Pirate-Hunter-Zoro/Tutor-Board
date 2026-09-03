@@ -225,6 +225,90 @@ for mod in ("writing", "lesson"):
     check("handing work in through %s.py wakes a tutor" % mod,
           "spawn.wake_tutor(repo)" in routes)
 
+# --------------------------------- a transcript never commits its own loss
+print()
+print("-- and a beat never commits the disappearance of somebody's working --")
+
+# Two clones run `sync_transcript` on a beat over the same course, and `git add
+# -A live` commits a SNAPSHOT of whichever working tree it is standing in.
+# Neither machine has the other's newest pages, so each snapshot DELETES the
+# other's, and the next fast-forward pull checks it out and removes the files
+# from disk. Measured on Galois Theory: `live/slate/` pages 50 to 53, written
+# between 10:13 and 10:25, present in one line of history and physically absent
+# from the working tree by 11:09.
+import subprocess                                              # noqa: E402
+
+TUTOR = os.path.join(ROOT, "bin", "tutor")
+git_ok = subprocess.run(["git", "--version"], stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL).returncode == 0
+
+if not git_ok:
+    print("skip  git is not available")
+else:
+    work = tempfile.mkdtemp(prefix="transcript-")
+
+    def g(*args):
+        return subprocess.run(["git"] + list(args), cwd=work,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              timeout=60)
+
+    g("init", "-q", "-b", "main")
+    g("config", "user.email", "t@t")
+    g("config", "user.name", "t")
+    for d in ("live/slate", "live/answers", "live/cards", "live/archive"):
+        os.makedirs(os.path.join(work, d), exist_ok=True)
+    for n in (1, 2, 3):
+        open(os.path.join(work, "live/slate/page-%02d.json" % n), "w").write("{}")
+    open(os.path.join(work, "live/answers/t0001-r1.json"), "w").write("{}")
+    open(os.path.join(work, "live/cards/0001-first.md"), "w").write("card")
+    g("add", "-A")
+    g("commit", "-q", "-m", "a lesson")
+
+    # What the other machine's snapshot does: two pages and an answer vanish
+    # from the working tree, having never been deleted by anything here.
+    for rel in ("live/slate/page-02.json", "live/slate/page-03.json",
+                "live/answers/t0001-r1.json"):
+        os.remove(os.path.join(work, rel))
+    # And one that IS accounted for: filed away by `board archive`, which
+    # renames it under `live/archive/`.
+    os.makedirs(os.path.join(work, "live/archive/2026-09-03"), exist_ok=True)
+    os.rename(os.path.join(work, "live/cards/0001-first.md"),
+              os.path.join(work, "live/archive/2026-09-03/0001-first.md"))
+
+    # The real function, lifted out of `bin/tutor` -- which has no `.py` on the
+    # end of it and cannot be imported. Just the transcript block: importing the
+    # whole launcher would run its argument parsing.
+    ns = {"os": os, "subprocess": subprocess}
+    tutor_src = open(TUTOR, encoding="utf-8").read()
+    i = tutor_src.index("TRANSCRIPT_DIRS = (")
+    j = tutor_src.index("def sync_transcript(")
+    exec(compile(tutor_src[i:j], "<tutor>", "exec"), ns)
+
+    def gg(*args, **kw):
+        return subprocess.run(["git"] + list(args), cwd=work,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              timeout=kw.get("timeout", 60))
+
+    said = []
+    gg("add", "-A", "live")
+    put = ns["keep_transcript_files"](work, gg, said.append)
+
+    check("a slate page that vanished with nothing to account for is put back",
+          os.path.isfile(os.path.join(work, "live/slate/page-02.json"))
+          and os.path.isfile(os.path.join(work, "live/slate/page-03.json")))
+    check("and so is a frozen answer, which is the copy that cannot be redrawn",
+          os.path.isfile(os.path.join(work, "live/answers/t0001-r1.json")))
+    check("on disk as well as in the index, so the board can read it again",
+          gg("diff", "--cached", "--name-only", "--diff-filter=D", "--",
+             "live/slate").stdout.decode().strip() == "")
+    check("a card that `board archive` filed away is a deletion that IS "
+          "accounted for, and stays deleted",
+          not os.path.isfile(os.path.join(work, "live/cards/0001-first.md")))
+    check("and the beat says what it put back rather than doing it silently",
+          any("put back" in s for s in said))
+    check("with nothing missing, it does nothing at all",
+          ns["keep_transcript_files"](work, gg, said.append) == [])
+
 print()
 print(("%d FAILURES" % len(fails)) if fails
       else "a tutor says when it is waking, and silence is never the answer")
