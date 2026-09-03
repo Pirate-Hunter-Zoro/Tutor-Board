@@ -324,6 +324,67 @@ def main():
     else:
         bad("one of the two downloads still renders in the tab")
 
+    # And the whole chain, from the URL to the header, without a socket. The
+    # two checks above are about shape; this is the thing a browser actually
+    # reads, and it is the difference between a share sheet and a preview.
+    from tutorboard.server.handler import Handler           # noqa: E402
+
+    class Caught(Exception):
+        pass
+
+    class FakeHandler:
+        """Enough of the handler for send_file to do its work and be watched."""
+
+        head_only = False
+        INLINE_OK = Handler.INLINE_OK
+        send_file = Handler.send_file
+
+        def __init__(self):
+            self.sent = None
+
+        def send_bytes(self, body, ctype, cache=False, nosniff=False,
+                       extra=None, status=200):
+            self.sent = {"len": len(body), "ctype": ctype, "extra": extra,
+                         "status": status}
+
+    with open(os.path.join(fake.live, "export.json"), "w", encoding="utf-8") as fh:
+        json.dump({"ok": True, "pdf": good_rel, "at": time.time()}, fh)
+
+    h = FakeHandler()
+    taking.get(h, fake, "/download/lesson")
+    got = h.sent or {}
+    if got.get("status") == 200 and got.get("ctype") == "application/pdf":
+        ok("asking for the lesson gets a PDF back")
+    else:
+        bad("the lesson download returned %r" % (got,))
+    disp = (got.get("extra") or ("", ""))[1]
+    if (got.get("extra") or ("",))[0] == "Content-Disposition" \
+            and disp.startswith("attachment;") and "Galois-Theory" in disp:
+        ok("as an attachment named for its course (%s)" % disp)
+    else:
+        bad("the response header is %r, so an iPad previews it instead of "
+            "offering to save it" % (got.get("extra"),))
+
+    # The write-up, by the SET's name: a course numbers its homework
+    # `ch07-homework.tex` in one place and `hw04.tex` in another, and the set is
+    # what a person calls it either way.
+    with open(os.path.join(fake.live, "hw.json"), "w", encoding="utf-8") as fh:
+        json.dump({"ok": True, "pdf": good_rel, "set": "ch07", "at": time.time()}, fh)
+    h2 = FakeHandler()
+    taking.get(h2, fake, "/download/homework")
+    disp2 = ((h2.sent or {}).get("extra") or ("", ""))[1]
+    if "ch07" in disp2 and disp2.startswith("attachment;"):
+        ok("and the write-up comes down under the name of its set (%s)" % disp2)
+    else:
+        bad("the write-up download is named %r" % (disp2,))
+
+    # A kind nobody asked about is not this module's business.
+    h3 = FakeHandler()
+    if taking.get(h3, fake, "/download/../../etc/passwd") is not None:
+        ok("and a URL it does not recognise is left to the other routes")
+    else:
+        bad("the download route answered for a path it does not own")
+
     print()
     if fails:
         print("%d FAILURES" % len(fails))
