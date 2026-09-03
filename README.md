@@ -167,7 +167,18 @@ which kind of subject it is and the board adapts.
 > repository has four such pairs on disk — so a deletion paired with an addition of the same bytes
 > is reported as a RENAME, and a rename is not a deletion. The files this exists to protect are
 > precisely the ones that would hide behind it. The four pages were recovered from the divergent
-> line and put back.
+> line and put back; the board serves all fifty-four again.
+>
+> **What is NOT fixed, and needs a person: two machines are running a beat on the same course.**
+> This node and the Mac mini each hold a clone of Galois Theory and each has a tutor pushing
+> `live/` every ninety seconds — the lesson advanced on the Mac's clone (card 0050, `t0011-r19`)
+> while the slate pages advanced here. The guards above make that non-destructive, which is the
+> urgent half, but they cannot make it CONVERGE: `--ff-only` refuses a diverged branch by design,
+> so the beat now logs `not possible to fast-forward` for ever and the transcript stops reaching
+> the remote. It was merged by hand twice and diverged again inside ninety seconds both times,
+> because the other beat is still running. A course wants one owner, and which machine that is
+> tonight is not a decision this file can make: stop the tutor on the other one
+> (`tutor agent stop Galois-Theory` there), or point the address at it and stop this one.
 >
 > `test/waking.py` holds the server side — a start with no pid yet, its expiry, a record from
 > another node, a stamped failure and its staleness, `notes.waiting` off disk, and the launcher's
