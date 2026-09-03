@@ -226,10 +226,15 @@ await sleep(30);
 
 // 4. Where the eye lands. The writing surface is the last thing in the lesson,
 //    so the bottom of the document is the wrong answer by construction.
+// Card 0007 is written in several paragraphs, because a reply usually is, and
+// because a one-block card has nothing to reveal a block at a time.
+const manyBlocks = Object.assign(card('0007', 'wrong', 'nearly', 7),
+  { body: 'The third line does not follow.\n\nTake the fixed field first.\n\n'
+          + 'Then count the cosets.\n\nTry it again from there.' });
 const withNew = Object.assign({}, lesson, {
   cards: lesson.cards.concat([card('0005', 'lesson', 'what a normal subgroup is', 5),
                               card('0006', 'wrong', 'still not the coset', 6),
-                              card('0007', 'wrong', 'nearly', 7)]),
+                              manyBlocks]),
 });
 {
   // A card whose first line is ALREADY on the glass is not scrolled to. It grows
@@ -261,6 +266,32 @@ const withNew = Object.assign({}, lesson, {
   jumpEl.hidden
     ? ok('and offers no jump, because there is nothing to jump to')
     : fail('a jump was offered to a card that is on screen');
+}
+
+// 4a. And it arrives a block at a time, not as one wall of text.
+{
+  const fresh = nodeFor('0007');
+  const body = fresh && fresh.querySelector('.body');
+  const blocks = body ? Array.from(body.children) : [];
+  if (blocks.length < 2) {
+    ok('a one-block card has nothing to reveal (skipped)');
+  } else {
+    const shown = blocks.filter((b) => !b.hidden).length;
+    shown === 1
+      ? ok('a card that has just arrived shows its first block and holds the rest')
+      : fail(shown + ' of ' + blocks.length + ' blocks were shown at once — the '
+             + 'card is still landing as one wall of text');
+  }
+  // And nothing is hidden BEFORE the mathematics has been measured: KaTeX
+  // cannot measure what is display:none, and a formula measured at zero width
+  // comes back wrong for the rest of the sitting.
+  const js2 = fs.readFileSync(path.join(WEB, 'board.js'), 'utf8');
+  const order = js2.indexOf('freshNodes.forEach(typeset)')
+                < js2.indexOf('freshCards.forEach(revealLines)');
+  order
+    ? ok('and the reveal runs after the typesetting, never before it')
+    : fail('blocks are hidden before KaTeX has measured them, which breaks '
+           + 'display mathematics');
 }
 
 // 4b. And a card whose first line is BELOW the fold is OFFERED, not taken to.

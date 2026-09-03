@@ -46,6 +46,57 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 2 September 2026
 >
+> **The message was there. Nobody was looking at it.** Reported after the send feedback shipped:
+> *"when I hit 'Send', I am immediately scrolled to where I want to be, and shortly see the 'the
+> tutor is writing' message, but I want to IMMEDIATELY see a message like 'sending to tutor' in the
+> time before the 'tutor is writing' message shows up."* It said exactly that, on the frame of the
+> tap — under the writing surface, which at the moment of a tap is off the bottom of the glass,
+> because the reader is halfway up a page of their own working. `revealSent` brought them down to it
+> only after the round trip, by which time the tutor had often already reported working. The landing
+> happens on the tap now. The settling repeats are unchanged, and still stand down the moment a card
+> arrives.
+>
+> **And a card arrives a block at a time.** Asked as a matter of style: *"is there a way you could
+> stylistically have the response from the tutor show up line by line instead of all just being
+> thrown in one text block at once?"* A card is a file and arrives whole, so there is nothing to
+> stream — this is a reveal of something already in hand, which is the honest version of the effect
+> and the only one that cannot show a half-parsed formula. Blocks rather than lines, because the
+> children of the body are what markdown produced and splitting inside a paragraph would break
+> typeset mathematics. It runs AFTER the typesetting pass, never before: KaTeX cannot measure what
+> is `display:none`, and a formula measured at zero width stays wrong for the rest of the sitting.
+> The whole reveal is capped at 1.4s so a long card never becomes something you wait for, any touch
+> of the page shows the rest at once, and it only applies to a card whose first line is already on
+> the glass — animating one nobody is looking at is just a page changing height under a reader. It
+> pairs with the rule above: the reader is stationary and the card grows downward into the space
+> where "the tutor is writing" was.
+>
+> **A pinch stretches the picture it already has.** Reported from the iPad: *"occasional glitching
+> out/lagging on the writing board when I try to zoom out. It was non responsive to my touch for a
+> few seconds, and then it was fine."*
+>
+> Zooming out is the one gesture the cull cannot help with. The visible box grows, so fewer strokes
+> are off-screen, so a rebuild that drew forty draws four hundred — and the view is baked into the
+> cache, so it did that on every frame of the pinch. The few seconds are the pinch; the "fine" is
+> the frame after it, when there is one repaint instead of sixty.
+>
+> Two answers. While two fingers are down the cache is not rebuilt at all: it is blitted with the
+> transform carrying the view it was drawn at to the view now — the same trick every map does, and
+> the same trade, a moment of softness while the gesture is live and crisp again on release, for one
+> `drawImage` a frame whatever is on the page. And nothing is drawn finer than a pixel: the curve is
+> resampled to about one logical unit, so zoomed out to a fifth it carried five points per pixel on
+> the glass, and zooming out is precisely when a page is at its most expensive to draw. The thinned
+> lists are kept per stroke per step so a pinch does not rebuild them every frame, endpoints are
+> always kept so nothing gets shorter, and a stroke being written is never thinned.
+>
+> **The test for the erase repair had been measuring the wrong thing for a fortnight,** and the
+> thinning is what exposed it. It compared an erase against a "full repaint" taken at a *different
+> zoom* — `fitInk`, which frames the whole page — and that was only ever a comparison while the cost
+> of a repaint did not depend on the zoom. It also counted the pen coming off, which invalidates the
+> whole cache, so the number it called "the erase" was mostly one full repaint at the end. It now
+> measures the SWEEP, which is the part a hand waits on, against a repaint at the same view, and
+> asserts the clip actually happened — a hole with no other ink in it has no strokes to put back, so
+> counting strokes alone proved nothing. `test/plane.js`. Shell version `board-shell-v79`.
+>
 > **The tap is answered on the frame it happened.** Asked for as: *"make the time between me
 > hitting 'send' and something else happening more snappy so I don't get tempted to double send. If
 > it takes a minute for it to say 'tutor is responding', say 'sending to tutor' until that happens.

@@ -867,6 +867,37 @@ function create(opts) {
       return s.hl ? base
                   : Math.round(base * (0.5 + 0.85 * ((a[2] + b[2]) / 2)) * 4) / 4;
     };
+    /* AND NOTHING IS DRAWN FINER THAN A PIXEL.
+
+       The curve is resampled to about one LOGICAL unit, which is what makes it
+       read as smooth at natural size. Zoomed out to a quarter that is four
+       points per pixel on the glass: four times the line segments, for a picture
+       that cannot show the difference. And zooming out is exactly when a page is
+       at its most expensive to draw, because the cull has nothing left to throw
+       away -- the whole page is on screen. So it is the cheapest possible place
+       to stop paying.
+
+       Kept on the stroke, per step, so a pinch does not rebuild these lists on
+       every frame. Endpoints are always in, so a stroke never gets shorter.
+       A stroke being WRITTEN is never thinned: `from` means the live tail, one
+       stroke, where the cost is nothing and the shape is everything. */
+    var step = from ? 1 : Math.max(1, Math.floor(1 / Math.max(view.k, 0.0001)));
+    if (step > 1) {
+      if (!s._thin || s._thin.step !== step || s._thin.of !== pts.length) {
+        var thin = [];
+        for (var t = 0; t < pts.length; t += step) thin.push(pts[t]);
+        if (thin[thin.length - 1] !== pts[pts.length - 1]) thin.push(pts[pts.length - 1]);
+        s._thin = { step: step, of: pts.length, pts: thin };
+      }
+      pts = s._thin.pts;
+      if (pts.length === 1) {
+        c.beginPath();
+        c.arc(pts[0][0], pts[0][1], base * (0.5 + 0.85 * pts[0][2]) / 2, 0, 6.2832);
+        c.fill();
+        c.restore();
+        return;
+      }
+    }
     var i = Math.max(1, from || 1);
     while (i < pts.length) {
       var w = wOf(pts[i - 1], pts[i]);
@@ -892,7 +923,57 @@ function create(opts) {
     paintPaper(cacheCtx, p, view.k);
     paintStrokes(cacheCtx, p, seenBox(), tool.paper === "black");
     cacheValid = true;
+    /* Which view this bitmap IS. A pinch shows it again, stretched, rather than
+       paying to draw the page once per frame -- see `zooming`. */
+    cacheAt = { k: view.k, ox: view.ox, oy: view.oy };
     repairBox = null;                 /* everything is fresh; nothing is owed */
+  }
+
+  /* A PINCH STRETCHES THE PICTURE IT ALREADY HAS.
+
+     Zooming out is the one gesture that defeats the cull: the visible box grows,
+     so fewer strokes are off-screen, so a rebuild that used to draw forty draws
+     four hundred -- and it did that on every frame of the pinch, because the view
+     is baked into the cache and the cache is rebuilt whenever the view moves.
+     Reported from the iPad: "occasional glitching out/lagging on the writing
+     board when I try to zoom out. It was non responsive to my touch for a few
+     seconds, and then it was fine." The few seconds are the pinch; the "fine" is
+     the frame after it, when there is one repaint to do instead of sixty.
+
+     So while two fingers are down the cache is not rebuilt at all. It is blitted
+     with the transform that carries the view it was drawn at to the view now --
+     the same trick every map does, and the same trade: a moment of softness
+     while the gesture is live, crisp again on release, and the gesture itself
+     costs one `drawImage` a frame whatever is on the page.
+
+     The timer is the safety net. A pinch that ends without a lift the surface
+     hears about -- a contact cancelled, the app backgrounded -- must not leave
+     the page soft for ever. */
+  var cacheAt = null;
+  var zooming = false;
+  var zoomTimer = null;
+
+  function zoomingNow() {
+    zooming = true;
+    if (zoomTimer) clearTimeout(zoomTimer);
+    zoomTimer = setTimeout(zoomSettled, 220);
+  }
+
+  function zoomSettled() {
+    if (zoomTimer) { clearTimeout(zoomTimer); zoomTimer = null; }
+    if (!zooming) return;
+    zooming = false;
+    invalidate();                     /* now draw it properly, once */
+  }
+
+  /* The cache, shown at a view it was not drawn at. */
+  function blitCache() {
+    var d = dpr();
+    var scale = view.k / cacheAt.k;
+    ctx.setTransform(scale, 0, 0, scale,
+                     (view.ox - cacheAt.ox * scale) * d,
+                     (view.oy - cacheAt.oy * scale) * d);
+    ctx.drawImage(cache, 0, 0);
   }
 
   /* What the rubber took out, in logical units, waiting to be repaired out of
@@ -1050,12 +1131,17 @@ function create(opts) {
 
   function draw() {
     if (!page()) return;
-    if (!cacheValid) rebuildCache();
-    else if (repairBox) { repairCache(repairBox); repairBox = null; }
+    /* Mid-pinch: stretch what is already drawn rather than drawing it again.
+       Only ever an approximation of a view the cache does hold -- with no cache
+       at all there is nothing to stretch and it has to be built. */
+    var stretch = zooming && cacheAt && cache.width > 0;
+    if (!cacheValid && !stretch) rebuildCache();
+    else if (cacheValid && repairBox) { repairCache(repairBox); repairBox = null; }
     var d = dpr();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, sheet.width, sheet.height);
-    ctx.drawImage(cache, 0, 0);
+    if (stretch) blitCache();
+    else ctx.drawImage(cache, 0, 0);
     ctx.setTransform(d * view.k, 0, 0, d * view.k, d * view.ox, d * view.oy);
 
     if (drawing && drawing !== "erasing") {
@@ -1243,6 +1329,7 @@ function create(opts) {
       if (ids.length === 2) {
         var a = touches[ids[0]], b = touches[ids[1]];
         pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), k: view.k };
+        zoomingNow();
       }
       /* A finger scrolls unless it has been told to write. It used to be the
          other way about until a pen had been seen at least once, which meant the
@@ -1296,6 +1383,7 @@ function create(opts) {
       if (ids.length === 2 && pinch) {
         var a = touches[ids[0]], b = touches[ids[1]];
         var r = sheetRect();
+        zoomingNow();
         setZoom(pinch.k * (Math.hypot(a.x - b.x, a.y - b.y) / pinch.d),
                 (a.x + b.x) / 2 - r.left, (a.y + b.y) / 2 - r.top);
         return;
@@ -1408,7 +1496,11 @@ function create(opts) {
     /* fall through: a contact that was never a palm ends normally */
     if (ev && touches[ev.pointerId]) {
       delete touches[ev.pointerId];
-      if (Object.keys(touches).length < 2) pinch = null;
+      if (Object.keys(touches).length < 2) {
+        pinch = null;
+        /* Both fingers accounted for: draw it properly now. */
+        zoomSettled();
+      }
     }
     if (dragging) { dragging = null; markDirty(); invalidate(); return; }
     if (lasso) {
@@ -1463,6 +1555,9 @@ function create(opts) {
     if (!(e.ctrlKey || e.metaKey)) return;
     e.preventDefault();
     var r = sheetRect();
+    /* Same as a pinch: a wheel arrives in a burst, and each notch would
+       otherwise rebuild the page. The timer inside it is what ends the burst. */
+    zoomingNow();
     setZoom(view.k * (e.deltaY < 0 ? 1.08 : 0.93), e.clientX - r.left, e.clientY - r.top);
   }, { passive: false });
 
@@ -2124,6 +2219,10 @@ function create(opts) {
     return tool.finger;
   };
   api.view = function () { return { k: view.k, fit: view.fit, ox: view.ox, oy: view.oy }; };
+  /* The zoom, as a multiple of the fit -- the same number the toolbar shows.
+     Symmetric with `view` above, and the only way to ask what a page costs to
+     draw at a given magnification without two fingers on the glass. */
+  api.zoom = function (mult) { setZoom(view.fit * mult); };
   /* Put a previously sent answer back on the surface so it can be corrected.
      Feedback on an answer you can no longer edit is feedback you cannot act on,
      which was the whole complaint. Replaces the current page; the undo stack

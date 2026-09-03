@@ -654,6 +654,7 @@ function render(data) {
   }
   var wanted = [];
   var anythingNew = false;
+  var freshCards = [];
 
   items.forEach(function (item) {
     var stamp = item.key + (item.turn ? ":r" + (item.turn.rev || 1) : "");
@@ -702,6 +703,7 @@ function render(data) {
     node.dataset.key = wantKey;
     if (item.card) {
       var c = item.card;
+      if (fresh) freshCards.push(node);
       node.className = "card" + (fresh ? " fresh" : "");
       node.dataset.kind = c.kind;
       node.dataset.card = c.id;      /* what an annotation is anchored to */
@@ -983,6 +985,10 @@ function render(data) {
      just inserted. */
   freshNodes.forEach(typeset);
   freshNodes.length = 0;
+  /* After the typesetting, never before: KaTeX measures what it renders, and it
+     cannot measure what is display:none. */
+  if (!firstPaint) freshCards.forEach(revealLines);
+  freshCards.length = 0;
 
   /* The ink layer is per card and idempotent: reconciled nodes keep the layer
      they already had, new ones get one. Then the saved marks are laid back
@@ -1391,6 +1397,64 @@ function revealNewest(smooth) {
   }
   if (smooth) window.scrollTo({ top: top, behavior: "smooth" });
   else window.scrollTo(0, top);
+}
+
+/* A CARD ARRIVES A LINE AT A TIME.
+
+   Asked for as a matter of style, and it is: "is there a way you could
+   stylistically have the response from the tutor show up line by line instead of
+   all just being thrown in one text block at once?" A card is a file and it
+   arrives whole -- there is nothing to stream -- so this is a reveal of
+   something already in hand, which is the honest version of the effect and the
+   only one that cannot show a half-parsed formula.
+
+   It pairs with the rule above it. The reader is stationary and the card grows
+   downward into the space under their working, so a card that appears a
+   paragraph at a time reads as the tutor writing rather than as a wall landing.
+
+   Blocks, not lines: the children of the body, which is what markdown produced.
+   A paragraph, a formula, a list, a figure. Splitting inside them would break
+   typeset mathematics, and hiding anything BEFORE KaTeX has measured it would
+   break it too -- so this runs after the typesetting pass, never before.
+
+   The whole reveal is capped at REVEAL_ALL, because a long card must not become
+   a thing you wait for. And it only ever applies to a card whose first line is
+   already on the glass: the point is to watch it arrive, and animating a card
+   nobody is looking at is a page quietly changing height under a reader. */
+var REVEAL_STEP = 90;
+var REVEAL_ALL = 1400;
+
+function revealLines(card) {
+  if (!card || card._revealing) return;
+  var body = card.querySelector(".body");
+  if (!body) return;
+  var kids = [];
+  for (var i = 0; i < body.children.length; i++) {
+    if (!body.children[i].hidden) kids.push(body.children[i]);
+  }
+  if (kids.length < 2) return;
+  var box = card.getBoundingClientRect();
+  if (!(box.top < window.innerHeight)) return;   /* nobody is watching */
+
+  card._revealing = true;
+  var step = Math.max(30, Math.min(REVEAL_STEP, REVEAL_ALL / kids.length));
+  for (var k = 1; k < kids.length; k++) kids[k].hidden = true;
+  var at = 1;
+  var tick = function () {
+    /* A hand on the page outranks a flourish: show the rest at once rather than
+       making somebody wait on an animation to read what has already arrived. */
+    if (handledAt > card._revealFrom) {
+      for (var n = at; n < kids.length; n++) kids[n].hidden = false;
+      card._revealing = false;
+      return;
+    }
+    kids[at].hidden = false;
+    at++;
+    if (at < kids.length) setTimeout(tick, step);
+    else card._revealing = false;
+  };
+  card._revealFrom = Date.now();
+  setTimeout(tick, step);
 }
 
 /* ------------------------------------------------------- keeping the place --
@@ -3155,6 +3219,22 @@ var SENDING_FOR = 100000;
 function saySending() {
   sendingAt = Date.now();
   if (lastLive) paintBusy(lastLive);
+  /* AND GO AND LOOK AT IT, NOW.
+
+     The strip lives under the writing surface, and at the moment of the tap the
+     reader is wherever they finished writing -- halfway up a page of working,
+     with the foot of the surface and everything under it off the bottom of the
+     glass. So the message was being posted somewhere nobody was looking, and by
+     the time `revealSent` brought them down to it -- after the round trip -- the
+     tutor had often already reported working, and what they arrived to was "the
+     tutor is writing". Reported as: "I want to IMMEDIATELY see a message like
+     'sending to tutor' in the time before the 'tutor is writing' message shows
+     up." It was there. They were not.
+
+     The landing was always going to happen; this is only it happening on the tap
+     rather than on the reply to it. `revealSentSettling` still re-lands once the
+     receipt has settled, and still stands down the moment a card arrives. */
+  revealSent();
 }
 
 /* The newest card's mtime -- a correction to an existing card counts as much as

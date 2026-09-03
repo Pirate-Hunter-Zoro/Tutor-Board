@@ -432,30 +432,112 @@ const heelSwipe = (id, x, y, dx, dy) => {
     slate.load({ w: 1130, h: 60 * 90 + 200, strokes: many });
     await new Promise((r) => setTimeout(r, 5));
 
+    // The SWEEP, measured before the pen comes off. That is the part that used to
+    // cost a whole-page repaint per sample -- a Pencil sends four a frame -- and
+    // it is the part a hand is waiting on. The lift is a separate frame and
+    // rebuilds the cache once, which is not what anybody feels.
+    //
+    // Compared against a full repaint AT THE SAME VIEW. It used to be compared
+    // against `fitInk`, which zooms out to frame the whole page: fine while the
+    // cost of a repaint did not depend on the zoom, and not a comparison at all
+    // now that it does -- see the thinning case below.
     slate.tool('erase');
     window.__paints = {};
     pen('pointerdown', 70, 70, 21);
     for (let i = 1; i <= 8; i++) pen('pointermove', 70 + i * 4, 70 + i, 21);
-    pen('pointerup', 104, 78, 21);
     await new Promise((r) => setTimeout(r, 20));
     const during = window.__paints.stroke || 0;
+    const clipped = window.__paints.clip || 0;
+    pen('pointerup', 104, 78, 21);
+    await new Promise((r) => setTimeout(r, 20));
 
-    // What a full repaint of that page costs, for comparison: the same surface,
-    // told the whole cache is stale.
     slate.tool('pen');
     window.__paints = {};
-    slate.fitInk();
+    slate.relayout();
     await new Promise((r) => setTimeout(r, 20));
     const full = window.__paints.stroke || 0;
 
-    during > 0
-      ? ok('rubbing out repaints the hole it made')
-      : fail('erasing painted nothing at all, so the ink is still on screen');
+    // A clip is the repair: the rectangle the removed ink covered, painted over
+    // with the paper and whatever else reaches into it. Counting STROKES here
+    // would prove nothing -- a hole with no other ink in it has no strokes to
+    // put back, which is the common case and was hidden before only because
+    // this number used to include the pen coming off.
+    clipped > 0
+      ? ok('rubbing out repairs the rectangle it emptied (' + clipped + ' clip(s))')
+      : fail('the erase sweep clipped nothing, so it is repainting the sheet');
     during * 3 < full
-      ? ok('and not the rest of the page with it (' + during + ' line calls, '
-           + 'where a full repaint is ' + full + ')')
-      : fail('an erase still costs a whole-page repaint (' + during + ' of '
+      ? ok('and not the rest of the page with it (' + during + ' line calls in '
+           + 'the sweep, where a repaint of what is on screen is ' + full + ')')
+      : fail('an erase sweep still costs a whole repaint (' + during + ' of '
              + full + ' line calls), which is the pause that was reported');
+
+    // ---- zooming out is the one gesture the cull cannot help with ----------
+    //
+    // The visible box grows, so fewer strokes are off-screen, so a repaint that
+    // drew a handful draws the lot -- and the view is baked into the cache, so
+    // it did that on every frame of the pinch. Reported from the iPad:
+    // "occasional glitching out/lagging on the writing board when I try to zoom
+    // out. It was non responsive to my touch for a few seconds, and then it was
+    // fine." The few seconds are the pinch.
+    //
+    // Two answers, and this is the first: the curve is resampled to about one
+    // logical unit, so zoomed out to a quarter it carries four points per pixel
+    // on the glass. Nothing is drawn finer than a pixel any more.
+    window.__paints = {};
+    slate.relayout();
+    await new Promise((r) => setTimeout(r, 20));
+    const atNatural = window.__paints.lineTo || 0;
+    slate.zoom(0.2);
+    await new Promise((r) => setTimeout(r, 30));
+    window.__paints = {};
+    slate.relayout();
+    await new Promise((r) => setTimeout(r, 20));
+    const zoomedOut = window.__paints.lineTo || 0;
+    zoomedOut > 0 && zoomedOut < atNatural
+      ? ok('a page drawn zoomed out costs less, not more (' + zoomedOut
+           + ' line calls against ' + atNatural + ' at natural size)')
+      : fail('zoomed out to a fifth the page costs ' + zoomedOut
+             + ' line calls against ' + atNatural + ' at natural size: detail '
+             + 'is being drawn finer than the screen can show it');
+
+    // And the second answer: while two fingers are down, nothing is drawn at
+    // all. The cache is blitted with the transform that carries the view it was
+    // drawn at to the view now -- one `drawImage` a frame, whatever is on the
+    // page -- and the crisp repaint happens once, when the fingers come off.
+    slate.zoom(1);
+    await new Promise((r) => setTimeout(r, 30));
+    const twoDown = (a, b) => {
+      [[41, 200, 200], [42, 400, 400]].forEach(([id, x, y]) => {
+        const ev = new window.Event('pointerdown', { bubbles: true, cancelable: true });
+        Object.assign(ev, { pointerId: id, pointerType: 'touch', pressure: 0,
+                            clientX: x, clientY: y, isPrimary: id === 41 });
+        doc.querySelector('#slate canvas.sl-sheet').dispatchEvent(ev);
+      });
+    };
+    twoDown();
+    window.__paints = {};
+    slate.zoom(0.5);
+    await new Promise((r) => setTimeout(r, 30));
+    const mid = window.__paints.stroke || 0;
+    const blits = window.__paints.drawImage || 0;
+    mid === 0 && blits > 0
+      ? ok('and a zoom with two fingers down draws no strokes at all, just the '
+           + 'picture it already had (' + blits + ' blit(s))')
+      : fail('a pinch frame repainted ' + mid + ' stroke(s) — the page is being '
+             + 'redrawn under the gesture, which is the lag that was reported');
+
+    [41, 42].forEach((id) => {
+      const up = new window.Event('pointerup', { bubbles: true, cancelable: true });
+      Object.assign(up, { pointerId: id, pointerType: 'touch', pressure: 0,
+                          clientX: 300, clientY: 300, isPrimary: id === 41 });
+      doc.querySelector('#slate canvas.sl-sheet').dispatchEvent(up);
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    (window.__paints.stroke || 0) > mid
+      ? ok('and the fingers coming off is what pays for the crisp one')
+      : fail('the page was never redrawn properly after the pinch, so it stays '
+             + 'soft');
+
     slate.tool('pen');
     slate.clear();
   }
