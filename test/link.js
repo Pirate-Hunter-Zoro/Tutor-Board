@@ -1066,6 +1066,64 @@ if (es && window.Annotate) {
   else fail('the server copy clobbered live ink — strokes lose their tails');
 }
 
+// --- and a document you can take with you ------------------------------------
+//
+// The repository copy is the archival one and is committed exactly as before.
+// This is the other half, asked for from the iPad: "when we save the .pdf, we
+// should also have the option to download it locally on the iPad so I can save
+// it to files in my iCloud, get it on my phone, and email it to my prof,
+// lickety split. Also, I want the ability to do this with the written up work
+// too." A compute node is not a place an iPad can reach.
+if (es) {
+  var getLink = doc.getElementById('pushed-get');
+  var hwBtn = doc.getElementById('btn-export-hw');
+
+  getLink ? ok('the banner carries a way to take the document with you')
+          : fail('there is no download at all, so a PDF stays on the node');
+  hwBtn ? ok('and the written-up work has a button of its own')
+        : fail('the only way to compile the write-up is still a terminal');
+  if (getLink) {
+    getLink.hasAttribute('download')
+      ? ok('marked as a download, which is what opens the share sheet')
+      : fail('the link renders the PDF in the tab instead of offering to save '
+             + 'it, which on an iPad is a preview with no way into Files');
+    getLink.hidden
+      ? ok('and it is not offered before there is anything to offer')
+      : fail('a download is offered for a document that does not exist yet');
+  }
+
+  // A failed export must not offer one. A .tex that would not compile is not a
+  // document, and handing over a broken one is worse than handing over nothing.
+  window.__render && window.__render();
+  var b5 = { state: { course: 'G', session: 'lecture', mode: 'math' },
+             cards: [], turns: [], messages: [], uploads: [], slate: [],
+             push: null, agent: { agent: 'claude', state: 'listening' },
+             export: { ok: false, at: Date.now() / 1000, tex: 'transcripts/x.tex',
+                       detail: '! Undefined control sequence' } };
+  es.onmessage({ data: JSON.stringify(b5) });
+  getLink && getLink.hidden
+    ? ok('a failed export offers nothing to download')
+    : fail('the board offered a download for an export that did not compile');
+
+  var b6 = { state: { course: 'G', session: 'lecture', mode: 'math' },
+             cards: [], turns: [], messages: [], uploads: [], slate: [],
+             push: null, agent: { agent: 'claude', state: 'listening' },
+             export: { ok: true, at: Date.now() / 1000,
+                       pdf: 'transcripts/galois-theory-v3.pdf',
+                       tex: 'transcripts/galois-theory-v3.tex', detail: '' } };
+  es.onmessage({ data: JSON.stringify(b6) });
+  if (getLink && !getLink.hidden && /download\/lesson$/.test(getLink.getAttribute('href') || ''))
+    ok('and an export that compiled offers the lesson to be saved');
+  else fail('a compiled export offers no download (href '
+            + (getLink && getLink.getAttribute('href')) + ')');
+  // The filename is the SERVER's business -- it knows the course and the set --
+  // so the attribute stays empty and the response names the file. Setting it
+  // here would get the name wrong in exactly the place it matters.
+  if (getLink && !getLink.getAttribute('download'))
+    ok('and lets the response name the file, which is where the course is known');
+  else fail('the board names the download itself: ' + getLink.getAttribute('download'));
+}
+
 // --- saving must not depend on the tutor -------------------------------------
 // Sessions end by being abandoned: a lid closes, an allocation expires, somebody
 // puts the iPad down. Until now the only route to the push was a prompt that

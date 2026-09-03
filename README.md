@@ -46,6 +46,42 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 2 September 2026
 >
+> **A document you can take with you.** Asked for from the iPad: *"when we save the .pdf, we should
+> also have the option to download it locally on the iPad so I can save it to files in my iCloud,
+> get it on my phone, and email it to my prof, lickety split... I want an option to export the
+> written up homework as well as the lesson."* With the emphasis stated twice: **both PDFs stay in
+> the course repository and stay tracked in git**, exactly as before. That is the archival copy and
+> nothing about it changed. This is the other half — a compute node is not a place an iPad can
+> reach, and a tailnet path is not something anybody can hand to a professor.
+>
+> Three parts. `send_file` can be told to hand a file OVER rather than show it: a PDF is in the
+> inline-safe list, so a browser given one renders it in the tab, which on an iPad is a preview with
+> no obvious route into Files. An attachment goes to the share sheet, and from there to iCloud, a
+> phone, or an email. The banner that already reports an export now carries **save a copy** beside
+> it, offered only when there is actually a PDF — a `.tex` that would not compile is not a document,
+> and handing over a broken one is worse than handing over nothing.
+>
+> And the written-up work has a button at last. It had none: the only way to compile the thing an
+> evening was actually spent writing was a terminal, which is the one thing the board exists to
+> abolish. `/hw/build` presses `board hw build` — the same compile the tutor runs and the same one a
+> push runs before it commits a stale PDF, so there is one compiler and one record of what LaTeX
+> said, which is also why a failure appears on the iPad instead of in a log nobody reads.
+>
+> **The client never names a path**, and that is the whole of the security argument. It names a KIND
+> — the lesson, or the write-up — and `routes/taking.py` resolves it through the records the board
+> already keeps: `live/export.json` and `live/hw.json`. A query parameter carrying a repo-relative
+> path is a directory traversal waiting to be written and would buy nothing; there are two documents
+> and the board knows where both of them are. The resolved path is still checked — it must end in
+> `.pdf`, exist, and be inside the repository — because a record is on disk, disk is editable, and
+> "it was ours a moment ago" is not a property that survives. `test/document.py` tries a path
+> climbing out of the repository, an absolute path elsewhere, a `.tex`, a PDF that is not there, and
+> no record at all.
+>
+> The file arrives named for its course (`Galois-Theory-ch07-homework.pdf`), because in a Files app
+> it sits beside everything else a person owns and `ch07-homework.pdf` says neither whose it is nor
+> what it is from — and the name comes from the SERVER, which is the only side that knows the course
+> and the set. Shell version `board-shell-v80`.
+>
 > **The message was there. Nobody was looking at it.** Reported after the send feedback shipped:
 > *"when I hit 'Send', I am immediately scrolled to where I want to be, and shortly see the 'the
 > tutor is writing' message, but I want to IMMEDIATELY see a message like 'sending to tutor' in the

@@ -552,6 +552,17 @@ body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180de
 .pushed.bad #pushed-text {
   font-family: var(--mono); font-size: .76rem;
 }
+/* Taking the document with you. Given a real target size, because it is tapped
+   with a thumb, and put where the eye already is -- beside the line that says
+   the document exists. */
+.pushed-get {
+  flex: none; cursor: pointer; text-decoration: none;
+  font: inherit; font-family: var(--ui); font-size: .78rem; font-weight: 700;
+  padding: .35rem .7rem; border-radius: .35rem;
+  border: 1px solid var(--note); background: var(--note); color: #fff;
+}
+.pushed-get:hover { filter: brightness(1.1); }
+
 #pushed-close {
   margin-left: auto; flex: none; cursor: pointer;
   border: 0; background: none; font: inherit; color: var(--ink-3);

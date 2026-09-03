@@ -242,6 +242,88 @@ def main():
     else:
         print("skip  no LaTeX on this machine, so the compile is not checked")
 
+    # ---------------------------- and it can be taken off the board -------
+    #
+    # The repository copy is the archival one and none of the above changes.
+    # But a compute node is not a place an iPad can reach and a tailnet path is
+    # not something anybody can hand to a professor, so a document that exists
+    # only there is one the person who asked for it cannot use. Asked for in
+    # those terms: "so I can save it to files in my iCloud, get it on my phone,
+    # and email it to my prof, lickety split."
+    #
+    # THE CLIENT NEVER NAMES A PATH. It names a kind, and the route resolves it
+    # through the records the board already keeps -- because a query parameter
+    # carrying a repo-relative path is a directory traversal waiting to be
+    # written, and there is nothing it would buy: there are two documents and
+    # the board knows where both of them are. These cases are the proof that the
+    # resolution is the fence.
+    from tutorboard.server.routes import taking            # noqa: E402
+
+    class FakeRepo:
+        def __init__(self, root):
+            self.root = root
+            self.live = os.path.join(root, "live")
+
+        def state(self):
+            return {"course": "Galois Theory"}
+
+    fake = FakeRepo(root)
+    os.makedirs(fake.live, exist_ok=True)
+
+    good_rel = os.path.join(document.OUT_DIR, "probe-v1.pdf")
+    good = os.path.join(root, good_rel)
+    os.makedirs(os.path.dirname(good), exist_ok=True)
+    with open(good, "wb") as fh:
+        fh.write(b"%PDF-1.4 probe")
+    if taking._pdf_in(fake, good_rel):
+        ok("a PDF the board itself recorded resolves")
+    else:
+        bad("a real exported PDF was refused by the download route")
+
+    refuse = [
+        ("../../../../etc/passwd", "a path climbing out of the repository"),
+        ("/etc/passwd", "an absolute path somewhere else"),
+        (os.path.join(document.OUT_DIR, "probe-v1.tex"), "a .tex rather than a .pdf"),
+        (os.path.join(document.OUT_DIR, "nothing-v9.pdf"), "a PDF that is not there"),
+        (None, "no record at all"),
+    ]
+    for evil, why in refuse:
+        if taking._pdf_in(fake, evil) is None:
+            ok("and refuses " + why)
+        else:
+            bad("the download route accepted " + why)
+
+    # The name it arrives under has to say whose it is and what it is from: in a
+    # Files app it sits beside everything else a person owns, and
+    # `ch07-homework.pdf` is not enough to tell.
+    named = taking._named(fake, "ch07-homework")
+    if named.lower().startswith("galois"):
+        ok("and the file arrives named for its course (%s.pdf)" % named)
+    else:
+        bad("the download is named '%s', which says nothing about the course" % named)
+    if taking._named(fake, "galois-theory-v3") == "galois-theory-v3":
+        ok("without saying it twice when the name already carries it")
+    else:
+        bad("the course is prefixed onto a name that already carries it")
+
+    # And the handler has to say SAVE THIS rather than show it. A PDF is in the
+    # inline-safe list, so a browser handed one renders it in the tab -- which
+    # on an iPad is a preview with no obvious route into Files, and the whole
+    # point of this was the share sheet.
+    hsrc = open(os.path.join(TOOL, "tutorboard", "server", "handler.py"),
+                encoding="utf-8").read()
+    if "def send_file(self, path, cache=False, untrusted=False, download=None)" in hsrc:
+        ok("and the handler can be told to hand a file over rather than show it")
+    else:
+        bad("send_file has no download mode, so a PDF opens in the tab instead "
+            "of reaching the share sheet")
+    tsrc = open(os.path.join(TOOL, "tutorboard", "server", "routes", "taking.py"),
+                encoding="utf-8").read()
+    if tsrc.count("download=") == 2:
+        ok("and both documents are handed over, not shown")
+    else:
+        bad("one of the two downloads still renders in the tab")
+
     print()
     if fails:
         print("%d FAILURES" % len(fails))

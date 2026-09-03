@@ -427,6 +427,14 @@ tutorboard/
   judgement is actually reached, because fetching the frozen strokes and waiting for a hand to come
   off the glass are not decisions. And a sheet that has GAINED ink since the ruling is a sheet
   somebody is using: abandon, do not re-judge. `test/chain.js` holds all three and each fails alone.
+- **A document lives in the repository AND can leave on the device.** Both PDFs -- the lesson
+  export and the written-up problem set -- are built into the course repo and tracked in git; that
+  is the archival copy and it is not negotiable. `routes/taking.py` is the other half, and its rule
+  is that **the client never names a path**: it names a kind, and the route resolves it through
+  `live/export.json` or `live/hw.json`. Never add a path or filename parameter to it -- that is a
+  directory traversal waiting to be written, and there are two documents. The resolved path is
+  checked anyway (inside the repo, ends in `.pdf`, exists), because a record is on disk and disk is
+  editable. `test/document.py` holds the refusals.
 - **A CARD ARRIVING NEVER MOVES THE READER.** It grows into view. The reader is stationary and the
   text grows downward past them, which is what every chat page on the web does and what was asked
   for in those words. The layout grants it for nothing: the student's working keeps its place in the

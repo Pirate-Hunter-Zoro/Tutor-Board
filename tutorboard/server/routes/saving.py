@@ -27,6 +27,27 @@ def post(h, repo, path):
         h.server.hub.worker.dirty.set()
         return h.send_json(record)
 
+    if path == "/hw/build":
+        # THE WRITTEN-UP WORK IS A DOCUMENT TOO.
+        #
+        # A lesson had a button and a problem set did not, so the only way to
+        # compile the thing an evening was actually spent writing was a
+        # terminal -- which is the one thing the board exists to abolish, and it
+        # was asked for in those terms: "I want an option to export the written
+        # up homework as well as the lesson."
+        #
+        # `board hw build` is the compile, unchanged: the same one the tutor
+        # runs, the same one a push runs before it commits a stale PDF, so
+        # there is one compiler and one record of what it said. This only
+        # presses the button.
+        try:
+            rec = git.run_hw_build(repo)
+        except Exception as e:                       # noqa: BLE001
+            rec = {"ok": False, "detail": "build failed: %s" % e}
+        git._DIRTY["value"] = None      # a new PDF is uncommitted; say so
+        h.server.hub.worker.dirty.set()
+        return h.send_json(rec)
+
     if path == "/export":
         # The whole conversation as one document. It can take a minute of
         # LaTeX, so the board is told what happened rather than left to

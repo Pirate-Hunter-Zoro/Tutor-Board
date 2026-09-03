@@ -75,6 +75,45 @@ def hw_needs_building(repo):
     return st["name"]
 
 
+def run_hw_build(repo):
+    """Compile the write-up because somebody asked, and hand back the record.
+
+    `build_before_push` compiles only when the PDF is stale, which is right for
+    a push -- there is no reason to spend a minute of LaTeX on a document that is
+    already current. This one is a person pressing a button, and it always runs:
+    "build it" that quietly does nothing is a button you press twice.
+
+    The record comes back off `hw.json` rather than being reconstructed here, so
+    the board is told exactly what the CLI recorded -- including `pdf`, which is
+    what a download needs, and the LaTeX tail, which is what a failure needs.
+    """
+    try:
+        st = homework.status(repo.root, repo.state())
+    except Exception:                                        # noqa: BLE001
+        st = None
+    if not st or not st.get("rel") or not st.get("name"):
+        return {"ok": False,
+                "detail": "no problem set is bound to this sitting, so there is "
+                          "nothing to write up. `board hw use <set>` names one."}
+    cli = os.path.join(paths.TOOL, "bin", "board")
+    if not os.path.exists(cli):
+        return {"ok": False, "detail": "the board CLI is not where it should be"}
+    try:
+        p = subprocess.run([sys.executable, cli, "hw", "build"], cwd=repo.root,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           timeout=300)
+        out = p.stdout.decode("utf-8", "replace").strip()
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return {"ok": False, "set": st.get("name"), "detail": str(exc)}
+    try:
+        with open(os.path.join(repo.live, "hw.json"), "r", encoding="utf-8") as fh:
+            rec = json.load(fh)
+    except (OSError, ValueError):
+        rec = {"ok": False, "set": st.get("name"), "detail": out[-1600:]}
+    rec.setdefault("set", st.get("name"))
+    return rec
+
+
 def build_before_push(repo):
     """Compile the write-up, so what is committed is the document and not just
     its source.

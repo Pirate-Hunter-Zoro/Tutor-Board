@@ -60,6 +60,10 @@
   <button id="btn-print" title="print or save as PDF">⎙  print</button>
   <button id="btn-export" title="this lesson — both halves of it — as a numbered PDF kept in the repository">⇩  export this lesson</button>
   <button id="btn-export-all" title="every lesson in this course as one document">⇩  export the whole course</button>
+  <!-- The written-up work is a document too, and it had no button: the only way
+       to compile the thing an evening was actually spent writing was a terminal,
+       which is the one thing this page exists to abolish. -->
+  <button id="btn-export-hw" title="compile the problem set you are writing up, and keep it in the repository">⇩  export the written-up homework</button>
   <button id="btn-reload" title="reload the app">↻  reload the app</button>
 </div>
 
@@ -81,6 +85,13 @@
 <div id="pushed" class="pushed" hidden>
   <span id="pushed-icon" class="pushed-icon"></span>
   <span id="pushed-text"></span>
+  <!-- ...and onto the device it is being read on.
+       The repository copy is the archival one and is committed exactly as
+       before. This is the other half: a compute node is not a place an iPad can
+       reach, and a tailnet path is not something anybody can hand to a
+       professor. `download` plus the server's Content-Disposition puts it in the
+       share sheet, and from there into Files, iCloud, a phone, or an email. -->
+  <a id="pushed-get" class="pushed-get" download hidden>save a copy</a>
   <button id="pushed-close" type="button" title="dismiss">✕</button>
 </div>
 

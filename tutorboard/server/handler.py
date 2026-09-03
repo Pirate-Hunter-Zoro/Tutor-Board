@@ -19,7 +19,7 @@ from http.server import BaseHTTPRequestHandler
 from .. import paths
 from ..lesson import cards
 from . import routes
-from .routes import lesson, machines, pages, saving, writing   # noqa: F401
+from .routes import lesson, machines, pages, saving, taking, writing   # noqa: F401
 
 WEB = paths.WEB
 
@@ -108,7 +108,17 @@ class Handler(BaseHTTPRequestHandler):
     # .svg would otherwise run script on this origin.
     INLINE_OK = {"image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf"}
 
-    def send_file(self, path, cache=False, untrusted=False):
+    def send_file(self, path, cache=False, untrusted=False, download=None):
+        """`download` is a filename, and it means SAVE THIS rather than show it.
+
+        A PDF is in `INLINE_OK`, so a browser handed one renders it in the tab --
+        which is the right default for looking at a figure and the wrong one for
+        a document somebody asked to keep. On an iPad an inline PDF is a preview
+        with no obvious route into Files; an attachment goes straight to the
+        share sheet, and from there to iCloud, a phone, or an email to a
+        professor. So the caller says which it wants, and the filename is the
+        name the file will have on the other side.
+        """
         if not os.path.isfile(path):
             self.send_bytes(b"not found", "text/plain", status=404)
             return
@@ -116,7 +126,10 @@ class Handler(BaseHTTPRequestHandler):
         if path.endswith(".svg") and not untrusted:
             ctype = "image/svg+xml"
         extra = None
-        if untrusted and ctype not in self.INLINE_OK:
+        if download:
+            extra = ("Content-Disposition",
+                     'attachment; filename="%s"' % download)
+        elif untrusted and ctype not in self.INLINE_OK:
             ctype = "application/octet-stream"
             extra = ("Content-Disposition",
                      'attachment; filename="%s"' % os.path.basename(path))
@@ -158,7 +171,7 @@ class Handler(BaseHTTPRequestHandler):
         if re.match(r"^/slate/page-\d+\.png$", path):
             return self.send_file(os.path.join(repo.slate, os.path.basename(path)))
 
-        for mod in (routes.pages, routes.lesson, routes.writing,
+        for mod in (routes.pages, routes.taking, routes.lesson, routes.writing,
                     routes.machines):
             answered = mod.get(self, repo, path)
             if answered is not routes.NOT_MINE:

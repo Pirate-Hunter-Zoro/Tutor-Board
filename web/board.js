@@ -82,6 +82,7 @@ var els = {
   pushed: document.getElementById("pushed"),
   pushedIcon: document.getElementById("pushed-icon"),
   pushedText: document.getElementById("pushed-text"),
+  pushedGet: document.getElementById("pushed-get"),
   carry: document.getElementById("carry"),
   busy: document.getElementById("busy"),
   busyText: document.getElementById("busy-text"),
@@ -1271,18 +1272,53 @@ function paintSession(state, push, agent, exported) {
   els.pushed.hidden = false;
   els.pushed.className = "pushed " + (last.ok ? "ok" : "bad");
   els.pushedIcon.textContent = last.ok ? "✓" : "✕";
+  /* AND A WAY TO TAKE IT WITH YOU.
+
+     The repository copy is the archival one and nothing about it changes. But a
+     compute node is not a place an iPad can reach, and a tailnet path is not
+     something anybody can hand to a professor -- so a document that exists only
+     there is a document the person who asked for it cannot use. Asked for in
+     exactly those terms: "so I can save it to files in my iCloud, get it on my
+     phone, and email it to my prof, lickety split."
+
+     Offered only when there IS a PDF: a `.tex` that failed to compile is not a
+     document, and a button that hands over a broken one is worse than no
+     button. */
+  offerDownload(last === exported ? (last.ok && last.pdf ? "/download/lesson" : null)
+                                  : (last.kind === "hw" && last.ok && last.pdf
+                                     ? "/download/homework" : null));
   if (last === exported) {
     els.pushedText.textContent = last.ok
       ? (last.pdf || last.tex) + " — saved in the repository, and staged for "
         + "the next save"
       : "Export failed — "
         + ((last.detail || "no detail").split("\n")[0] || "no detail");
+  } else if (last.kind === "hw") {
+    els.pushedText.textContent = last.ok
+      ? (last.pdf || last.set || "the write-up")
+        + " — compiled, kept in the repository, and staged for the next save"
+      : "The write-up did not compile — "
+        + (lastLine(last.detail || "") || "no detail");
   } else if (last.ok) {
     var first = (last.detail || "").split("\n").filter(function (l) { return l.trim(); });
     els.pushedText.textContent = (first[first.length - 1] || "pushed") + " · " + last.iso;
   } else {
     els.pushedText.textContent = "Push failed — " + (last.detail || "no detail");
   }
+}
+
+/* The link that hands a document over, or nothing at all.
+
+   `download` on the anchor plus the server's `Content-Disposition` is what makes
+   an iPad offer the share sheet rather than previewing the PDF in the tab. The
+   filename is the server's business -- it knows the course and the set -- so
+   this does not set one: an empty `download` attribute means "use what the
+   response says", which is the only version that gets the name right. */
+function offerDownload(url) {
+  if (!els.pushedGet) return;
+  if (!url) { els.pushedGet.hidden = true; els.pushedGet.removeAttribute("href"); return; }
+  els.pushedGet.href = url;
+  els.pushedGet.hidden = false;
 }
 
 /* The whole conversation as one document.
@@ -1292,6 +1328,39 @@ function paintSession(state, push, agent, exported) {
    cards and the pages that were handed in, in the order they happened -- kept
    in the repository under a numbered name, because "which one is the latest"
    should not mean reading a timestamp. */
+/* The written-up work, compiled and kept -- and then handed over.
+
+   `board hw build` is the compile, unchanged: the same one the tutor runs and
+   the same one a push runs before it commits a stale PDF, so there is one
+   compiler and one record of what LaTeX said. This only presses the button, and
+   then offers the result the same way the lesson export does.
+
+   `kind: "hw"` is what tells the banner which of the two documents it is
+   looking at, and therefore which download to offer. */
+function doExportHomework() {
+  els.pushed.hidden = false;
+  els.pushed.className = "pushed";
+  els.pushedIcon.textContent = "…";
+  els.pushedText.textContent = "compiling the write-up — LaTeX takes a moment…";
+  offerDownload(null);
+  return fetch("/hw/build", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}"
+  }).then(function (r) { return r.json(); })
+    .then(function (rec) {
+      rec = rec || {};
+      rec.kind = "hw";
+      rec.at = Date.now() / 1000;
+      paintSession({}, rec, null, null);
+    })
+    .catch(function () {
+      els.pushed.className = "pushed bad";
+      els.pushedIcon.textContent = "✕";
+      els.pushedText.textContent = "Could not reach the board to compile it";
+    });
+}
+
 function doExport(scope) {
   els.pushed.hidden = false;
   els.pushed.className = "pushed";
@@ -1299,6 +1368,7 @@ function doExport(scope) {
   els.pushedText.textContent = scope === "all"
     ? "building the whole course — LaTeX takes a moment…"
     : "building this lesson as a PDF…";
+  offerDownload(null);           /* not the last document's link, while this builds */
   return fetch("/export", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -3878,6 +3948,7 @@ document.getElementById("btn-theme").onclick = function () {
 document.getElementById("btn-print").onclick = function () { window.print(); };
 document.getElementById("btn-export").onclick = function () { doExport("lesson"); };
 document.getElementById("btn-export-all").onclick = function () { doExport("all"); };
+document.getElementById("btn-export-hw").onclick = doExportHomework;
 document.getElementById("btn-reload").onclick = function () { location.reload(); };
 /* Nothing live has ever arrived, so the shell itself may be a cached one --
    reload rather than merely re-open the stream. */
