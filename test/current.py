@@ -151,9 +151,23 @@ finally:
 # A round on a machine with nothing to do must do nothing, and say so. Run the
 # real script, with the supervisor stubbed out -- registering a launchd agent
 # from a test suite would be a rude thing to do to somebody's machine.
+#
+# AND WITH THE COURSES POINTED SOMEWHERE ELSE, which is not a nicety. This runs
+# the real `--run`, a round can end in `catch-up.sh`, and `catch-up.sh` moves
+# working trees. Until 2026-09-03 it ran against the actual home: on a machine
+# where the tool was behind, the round exec'd itself `--after-pull`, which
+# reaches step 4 unconditionally, and every course beside the tool was caught up
+# because somebody ran the test suite. Two research repositories lost their
+# uncommitted work four times in an afternoon that way. A test does not get to
+# touch anything it did not create.
 env = dict(os.environ)
 env["TUTOR_CURRENT_NO_SUPERVISOR"] = "1"
 env["HOME"] = tempfile.mkdtemp(prefix="tutor-current-home-")
+env["TUTORBOARD_COURSES"] = tempfile.mkdtemp(prefix="tutor-current-courses-")
+os.makedirs(os.path.join(env["TUTORBOARD_COURSES"], "Tutor-Board"), exist_ok=True)
+check("a round can be pointed at courses of its own, so running the tests "
+      "cannot move somebody's working tree",
+      'TUTORBOARD_COURSES' in open(SCRIPT, encoding="utf-8").read())
 try:
     p = subprocess.run(["bash", SCRIPT, "--run"], env=env, cwd=ROOT,
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=300)
@@ -170,9 +184,12 @@ try:
           bool(doc.get("iso")) and bool(doc.get("last")))
     check("and the heartbeat names the commit the machine is actually on",
           bool(doc.get("head")))
+    check("and a round that catches up says which courses it was for",
+          "catching up" not in out or ":" in out)
 except subprocess.TimeoutExpired:
     check("a round runs to completion on a machine with nothing to do", False)
 finally:
+    shutil.rmtree(env["TUTORBOARD_COURSES"], ignore_errors=True)
     shutil.rmtree(env["HOME"], ignore_errors=True)
 
 # Everything that briefs a person points at it.

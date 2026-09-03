@@ -22,23 +22,43 @@
 #  It is machine-agnostic on purpose. Run it on either host; it works out what
 #  this one is.
 #
-#  Nothing here destroys work that is not already pushed: a course whose history
-#  has diverged is TAGGED before it is reset, so `git tag` still names the old
-#  state and `git reset --hard <tag>` brings it back.
+#  Nothing here destroys work that is not already pushed, and as of 2026-09-03
+#  that is true rather than merely intended:
+#
+#    * A repository already sitting on origin is LEFT ALONE, uncommitted work
+#      and all. It has nothing to catch up to, so there is nothing to put right.
+#    * A repository that does have to move gets its uncommitted work STASHED
+#      first -- `git stash list` names it, `git stash pop` is the way back.
+#    * A repository holding commits origin does not have is TAGGED before it is
+#      reset, so `git reset --hard <tag>` brings those commits back.
+#
+#  The three used to be one branch, and it reset anything DIRTY. A repository
+#  sitting exactly on origin with somebody's afternoon in the working tree took
+#  that branch: the tag was placed at HEAD, which already was origin, so it
+#  preserved nothing, and the reset threw the afternoon away to move the
+#  repository nowhere. That is what these three cases exist to keep apart.
 # ===========================================================================
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-COURSES="$(dirname "$HERE")"
+# The courses are this repository's siblings. TUTORBOARD_COURSES overrides that
+# for the test, which needs a tree of its own: what the course loop DOES to a
+# repository is the part of this script worth testing, and it cannot be tested
+# against the real home without doing it to the real home.
+COURSES="${TUTORBOARD_COURSES:-$(dirname "$HERE")}"
 TUTOR="$HERE/bin/tutor"
 BOARD="$HERE/bin/board"
 
 TIDY=0
 REPORT=0
+COURSES_ONLY=0
 for a in "$@"; do
   case "$a" in
     --tidy)   TIDY=1 ;;
     --report) REPORT=1 ;;
+    # Just the course loop: no pulling the tool, no restarting anything. The
+    # test uses it; a person has no reason to.
+    --courses-only) COURSES_ONLY=1 ;;
     -h|--help) sed -n '3,12p' "${BASH_SOURCE[0]}" | sed 's/^#  \{0,1\}//'; exit 0 ;;
   esac
 done
@@ -46,8 +66,24 @@ done
 say()  { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 line() { printf '   %s\n' "$*"; }
 
+# ------------------------------------------------------------------ the log
+# What ran this, and where from. It exists because a round of this script reset
+# two repositories that nobody present could account for, and working out what
+# had invoked it took longer than fixing what it did. One block per run,
+# appended, naming the host and the whole parent chain.
+CATCHUP_LOG="${TUTORBOARD_CATCHUP_LOG:-$HOME/.tutorboard-catch-up.log}"
+{
+  printf '%s  host=%s  pid=%s  args=%s\n' \
+    "$(date '+%Y-%m-%d %H:%M:%S')" "$(hostname -s 2>/dev/null)" "$$" "${*:-none}"
+  _p="${PPID:-0}"
+  while [ "${_p:-0}" -gt 1 ]; do
+    printf '    <- %-8s %s\n' "$_p" "$(ps -o args= -p "$_p" 2>/dev/null | head -c 200)"
+    _p="$(ps -o ppid= -p "$_p" 2>/dev/null | tr -d ' ')"
+  done
+} >> "$CATCHUP_LOG" 2>/dev/null
+
 # ---------------------------------------------------------------- the tool
-if [ "$REPORT" -eq 0 ]; then
+if [ "$REPORT" -eq 0 ] && [ "$COURSES_ONLY" -eq 0 ]; then
   say "the tool"
   before="$(git -C "$HERE" rev-parse HEAD 2>/dev/null)"
   if out="$(git -C "$HERE" pull --ff-only 2>&1)"; then
@@ -92,29 +128,59 @@ if [ "$REPORT" -eq 0 ]; then
       line "$name: no origin/$branch, left alone"
       continue
     fi
-    if git -C "$root" merge-base --is-ancestor HEAD "origin/$branch" 2>/dev/null; then
-      if git -C "$root" merge-base --is-ancestor "origin/$branch" HEAD 2>/dev/null \
-         && [ -z "$(git -C "$root" status --porcelain)" ]; then
+    # What is actually dirty, not counting the board's own scratch. A running
+    # board writes into `live/` continuously and none of it is work anybody
+    # meant to keep, so counting it made every course with a board on it look
+    # like it needed rescuing.
+    dirty="$(git -C "$root" status --porcelain 2>/dev/null | grep -v '^.. live/' || true)"
+
+    # Two ancestry questions, asked once and named, because the old single
+    # condition conflated "has work in the tree" with "is in the wrong place".
+    ahead=0; behind=0
+    git -C "$root" merge-base --is-ancestor HEAD "origin/$branch" 2>/dev/null || ahead=1
+    git -C "$root" merge-base --is-ancestor "origin/$branch" HEAD 2>/dev/null || behind=1
+
+    # CASE 1: nothing to catch up to. This is the one that used to destroy
+    # work. A repository sitting exactly on origin is already right, and there
+    # is no version of putting a machine right that involves deleting work from
+    # a machine that is already right.
+    if [ "$ahead" -eq 0 ] && [ "$behind" -eq 0 ]; then
+      if [ -n "$dirty" ]; then
+        line "$name: current, with uncommitted work left where it is"
+      else
         line "$name: current"
+      fi
+      continue
+    fi
+
+    # It has to move, so the working tree is about to be walked over. Uncommitted
+    # work goes into the stash BEFORE anything touches it -- the same promise
+    # `stay-current.sh` already keeps for the tool itself. If it will not stash,
+    # nothing else happens to this repository: an unmoved course is a nuisance,
+    # and a deleted afternoon is not.
+    if [ -n "$dirty" ]; then
+      if git -C "$root" stash push -u -m "catch-up $(date '+%Y-%m-%d %H:%M:%S')" >/dev/null 2>&1; then
+        line "$name: uncommitted work stashed — \`git -C $root stash pop\` is the way back"
+      else
+        line "$name: HAS UNCOMMITTED WORK THAT WOULD NOT STASH — left alone"
         continue
       fi
     fi
-    # Diverged, or dirty. The board writes into `live/` constantly, so this is
-    # ordinary rather than alarming -- but it means a fast-forward will refuse,
-    # and the whole point of running this is that the machine ends up matching
-    # what was pushed. Tag first: nothing is lost, it is just no longer checked
-    # out, and `git reset --hard <tag>` is the way back.
-    tag="before-catch-up-$(date +%Y%m%d-%H%M%S)"
-    if [ -n "$(git -C "$root" status --porcelain)" ] || \
-       ! git -C "$root" merge-base --is-ancestor HEAD "origin/$branch" 2>/dev/null; then
+
+    # CASE 2: this machine holds commits origin does not. Now the tag preserves
+    # something, which is the only case in which it ever did.
+    if [ "$ahead" -eq 1 ]; then
+      tag="before-catch-up-$(date +%Y%m%d-%H%M%S)"
       git -C "$root" tag -f "$tag" >/dev/null 2>&1
       git -C "$root" reset --hard "origin/$branch" >/dev/null 2>&1 \
-        && line "$name: reset to origin/$branch (old state kept as tag $tag)" \
+        && line "$name: diverged, reset to origin/$branch (its commits kept as tag $tag)" \
         || line "$name: COULD NOT RESET — look at it by hand"
       # Only the board's own scratch. A course may hold untracked work of the
       # person's -- a downloaded paper, a draft -- and this is not the command
       # that gets to decide about that.
       git -C "$root" clean -fdq -- live 2>/dev/null
+    # CASE 3: simply behind. Fast-forward, which is what the stash above made
+    # possible.
     else
       git -C "$root" merge --ff-only "origin/$branch" >/dev/null 2>&1 \
         && line "$name: fast-forwarded" \
@@ -124,7 +190,7 @@ if [ "$REPORT" -eq 0 ]; then
 fi
 
 # ------------------------------------------------------------- the processes
-if [ "$REPORT" -eq 0 ]; then
+if [ "$REPORT" -eq 0 ] && [ "$COURSES_ONLY" -eq 0 ]; then
   say "the boards, the tutors and the follower"
   # `tutor restart --tutors` owns what is safe to touch: boards answering on this
   # machine, the follower, and daemons that are not mid-turn. A board that comes

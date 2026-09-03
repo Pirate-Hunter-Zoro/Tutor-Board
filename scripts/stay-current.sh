@@ -35,7 +35,10 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-COURSES="$(dirname "$HERE")"
+# The courses are this repository's siblings. TUTORBOARD_COURSES overrides that
+# for the test, which must never run a round against somebody's actual home --
+# a round can end in `catch-up.sh`, and `catch-up.sh` moves working trees.
+COURSES="${TUTORBOARD_COURSES:-$(dirname "$HERE")}"
 LABEL="com.tutorboard.current"
 LABEL_PULL="com.tutorboard.pull"        # superseded by this; see install()
 LABEL_FOLLOW="com.tutorboard.follow"
