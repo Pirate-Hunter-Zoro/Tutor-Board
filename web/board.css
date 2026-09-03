@@ -562,6 +562,11 @@ body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180de
   border: 1px solid var(--note); background: var(--note); color: #fff;
 }
 .pushed-get:hover { filter: brightness(1.1); }
+/* It fetches the document and hands it to the share sheet, which takes a
+   moment on a long lesson. Disabled while that is in flight, and it has to LOOK
+   disabled: this is the control whose whole defect was a tap that appeared to
+   do nothing. */
+.pushed-get:disabled { opacity: .55; cursor: default; filter: none; }
 
 #pushed-close {
   margin-left: auto; flex: none; cursor: pointer;

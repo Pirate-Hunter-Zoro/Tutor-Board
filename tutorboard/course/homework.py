@@ -247,3 +247,47 @@ def status(root, state):
         "outstanding": outstanding(probs),
         "next": (outstanding(probs) or [None])[0],
     }
+
+
+def compiled_pdf(root, tex_path):
+    """Where the PDF for this `.tex` actually landed, or None.
+
+    Three callers wanted this and all three had their own guess, and all three
+    were wrong in the same way: look beside the source, then in `build/` NEXT TO
+    the source. A course's `scripts/build.sh` does neither -- it walks up from
+    the source to the nearest `chNN-*` / `hwNN` unit directory and compiles
+    there, so the write-up for `chapters/ch03-rings/homework/ch03-homework.tex`
+    comes out in `chapters/ch03-rings/build/`, one level ABOVE the directory
+    being searched. The guess found nothing, `hw.json` recorded `"pdf": null` on
+    a build that had just succeeded, and the board -- which offers the download
+    only when there IS a PDF -- never offered it. The document was on disk the
+    whole time and the button for it could not appear.
+
+    So this looks where the build actually puts things, in the order it decides:
+    beside the source, then `build/` beside it, then the unit's `build/`. And it
+    matches the SOURCE'S OWN basename rather than taking any PDF in the
+    directory -- a chapter's `build/` holds `ch03-notes.pdf` next to
+    `ch03-homework.pdf`, and a glob that returns whichever came first hands
+    somebody the reading for an evening they spent writing up exercises.
+    """
+    if not tex_path:
+        return None
+    base = os.path.splitext(os.path.basename(tex_path))[0]
+    here = os.path.dirname(os.path.abspath(tex_path))
+
+    places = [here, os.path.join(here, "build")]
+    # Up to the nearest unit directory, the way scripts/build.sh does it. Bounded
+    # by the repository, so a source outside it cannot walk the whole disk.
+    stop = os.path.abspath(root)
+    unit = here
+    while unit != stop and os.path.dirname(unit) != unit:
+        if re.match(r"^(ch\d+|hw\d+)", os.path.basename(unit)):
+            places.append(os.path.join(unit, "build"))
+            break
+        unit = os.path.dirname(unit)
+
+    for place in places:
+        candidate = os.path.join(place, base + ".pdf")
+        if os.path.isfile(candidate):
+            return candidate
+    return None

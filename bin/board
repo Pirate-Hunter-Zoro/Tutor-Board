@@ -45,7 +45,6 @@ card is you reviewing an answer; a `--review` sitting is the student revising fo
 a test. Different namespaces, same word.)
 """
 
-import glob
 import json
 import os
 import re
@@ -843,10 +842,10 @@ def hw_build(live, st):
     elif code != 0 and not out:
         out = ("FAILED: scripts/build.sh exited %d and printed nothing. It "
                "discards its own output; run it directly to see why." % code)
-    pdf = os.path.splitext(tex_path)[0] + ".pdf"
-    if not os.path.exists(pdf):
-        found = glob.glob(os.path.join(os.path.dirname(tex_path), "build", "*.pdf"))
-        pdf = found[0] if found else None
+    # Where the build actually put it -- `homework.compiled_pdf` knows, and it is
+    # the only thing that does. `pdf` is what a download resolves through, so a
+    # `null` here is a document on disk with no button on the iPad.
+    pdf = homework.compiled_pdf(live.root, tex_path)
     record = {"ok": code == 0, "at": time.time(),
               "iso": time.strftime("%Y-%m-%d %H:%M:%S"),
               "set": st["name"],
@@ -875,10 +874,7 @@ def hw_stale(live):
     tex = os.path.join(live.root, st["rel"])
     if not os.path.exists(tex):
         return None
-    pdf = os.path.splitext(tex)[0] + ".pdf"
-    if not os.path.exists(pdf):
-        found = glob.glob(os.path.join(os.path.dirname(tex), "build", "*.pdf"))
-        pdf = found[0] if found else None
+    pdf = homework.compiled_pdf(live.root, tex)
     if pdf and os.path.getmtime(pdf) >= os.path.getmtime(tex):
         return None
     return st

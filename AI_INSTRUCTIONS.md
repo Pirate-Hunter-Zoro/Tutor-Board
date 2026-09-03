@@ -77,7 +77,7 @@ tutorboard/
   machines.py           the other machines, and what each can teach
   net/                  reaching them: tailscale, socks, boards, egress
   course/               a course on disk: repo, config, document, homework,
-                        review, syllabus
+                        review, syllabus, screenshot
   lesson/               what is on the board now: cards, turns, notes, slate,
                         archive, state, git, uploads
   server/               the board itself: app, handler, hub, tikz, spawn,
@@ -107,6 +107,21 @@ tutorboard/
 
 ## Invariants
 
+- **NOTHING THAT HANDS A DOCUMENT OVER MAY NAVIGATE THE APP.** Installed to the home screen there
+  is no browser chrome, so anything opened in place has no back button and no way out short of
+  killing the app — and iOS ignores `download` on an anchor in a standalone web app and treats the
+  tap as a navigation, so `<a download href="...">` is that dead end and not a saved file. A
+  document is FETCHED and handed to the system as a file (`navigator.share`, which raises the sheet
+  over the board), and the last resort is a NEW context, never this one. `renderScratch` has said
+  this about images since long before it was true of PDFs; `test/link.js` now holds it as a rule.
+- **A rendering defect is only visible in a rendered page, and WebKit is the engine that matters.**
+  The lesson photographer shipped with six of them and every one looked correct in the code: an
+  `<img>` does not paint inside an SVG loaded as an image in WebKit (Blink paints it), `outerHTML`
+  is not XML, a comment containing `--` is not a comment, `rem` has no root to resolve against in a
+  `foreignObject`, `body { min-height: 100vh }` lands on whatever stands in for body, and a still
+  renders the first frame of an animation. Any change to `web/shot.js` gets a case in
+  `test/shot.js` AND a page rendered and looked at — the suite cannot rasterise anything, and the
+  device is where this is used.
 - **One process per course repository.** Ports derive from the directory name so two courses can
   hold boards at once, and derive it identically on every machine — the always-on host cannot read
   the compute node's filesystem, so a shared rule is the only way it knows where to knock. A name

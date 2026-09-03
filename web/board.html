@@ -58,8 +58,15 @@
   <button id="btn-scratch" title="photos and PDFs">▤  photos and PDFs</button>
   <button id="btn-history" title="past lessons" hidden>◷  past lessons</button>
   <button id="btn-print" title="print or save as PDF">⎙  print</button>
-  <button id="btn-export" title="this lesson — both halves of it — as a numbered PDF kept in the repository">⇩  export this lesson</button>
-  <button id="btn-export-all" title="every lesson in this course as one document">⇩  export the whole course</button>
+  <!-- Two documents, and they are not the same document. This one is the
+       lesson AS IT WAS READ -- the board's own pixels, photographed by the
+       device that drew them, because that is what was asked for: "I want it as
+       if it were a screenshot of the entire iPad screen scrolled down over the
+       whole tutoring session." The typeset transcript is still what a whole
+       course comes out as; nothing on the device can photograph a sitting that
+       is not on the glass. -->
+  <button id="btn-export" title="this lesson as it looks on the glass — a numbered PDF kept in the repository">⇩  export this lesson</button>
+  <button id="btn-export-all" title="every lesson in this course, typeset as one document">⇩  export the whole course (typeset)</button>
   <!-- The written-up work is a document too, and it had no button: the only way
        to compile the thing an evening was actually spent writing was a terminal,
        which is the one thing this page exists to abolish. -->
@@ -89,9 +96,16 @@
        The repository copy is the archival one and is committed exactly as
        before. This is the other half: a compute node is not a place an iPad can
        reach, and a tailnet path is not something anybody can hand to a
-       professor. `download` plus the server's Content-Disposition puts it in the
-       share sheet, and from there into Files, iCloud, a phone, or an email. -->
-  <a id="pushed-get" class="pushed-get" download hidden>save a copy</a>
+       professor.
+
+       A BUTTON, NOT A LINK, and that is the fix rather than the styling. This
+       was `<a download href="/download/lesson">`, and in a standalone web app
+       iOS ignores `download` and treats the tap as a navigation: the board is
+       replaced by the PDF, with no chrome, no back button and no share sheet.
+       Reported as "it just opens the document up, and I can't put it anywhere.
+       The only thing I can do is exit the app and go back in again." Nothing
+       that hands a document over may navigate this window -- see `takeCopy`. -->
+  <button id="pushed-get" class="pushed-get" type="button" hidden>save a copy</button>
   <button id="pushed-close" type="button" title="dismiss">✕</button>
 </div>
 
@@ -397,6 +411,13 @@
 <script src="/static/macros.js"></script>
 <script src="/static/slate-core.js"></script>
 <script src="/static/annotate.js"></script>
+<!-- The lesson, photographed by the device that drew it. BEFORE board.js and
+     NOT deferred, like every other thing board.js talks to: a deferred script
+     runs after the document is parsed, which is after this classic one at the
+     end of the body -- so loaded that way it did not exist yet when board.js
+     handed it the way to ask how much is written on the live surface, and every
+     photograph ended with a page of blank paper. -->
+<script src="/static/shot.js"></script>
 <script src="/static/board.js"></script>
 </body>
 </html>

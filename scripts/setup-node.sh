@@ -56,7 +56,7 @@ say
 # --- 0. is this the right kind of machine ----------------------------------
 # The `follow` block is what makes a machine the always-on host. Running this
 # there would be setting up the Mac to follow itself.
-shape="$(python3 -c 'import sys; sys.path.insert(0, "'"$HERE"'"); import boardlib; print(boardlib.machine_shape())' 2>/dev/null)"
+shape="$(python3 -c 'import sys; sys.path.insert(0, "'"$HERE"'"); from tutorboard import machine; print(machine.machine_shape())' 2>/dev/null)"
 case "$shape" in
   "always-on host")
     say "This machine has a \`follow\` block, which makes it the always-on host."
@@ -90,15 +90,15 @@ export TB_HERE="$HERE"
 python3 - <<'PY'
 import os, sys
 sys.path.insert(0, os.environ.get("TB_HERE", "."))
-import boardlib
-pinned = boardlib.node_name_pinned()
-if pinned and not boardlib.should_pin_node_name():
+from tutorboard import machine
+pinned = machine.node_name_pinned()
+if pinned and not machine.should_pin_node_name():
     print("  ----  node: '%s' is PINNED on a cluster node, which is wrong here." % pinned)
     print("        the name must change with the allocation, or a record from a node")
     print("        that has gone looks alive for ever.  fix:  board node --unpin")
     sys.exit(3)
 print("  ok    node: %s (from the system, which is right on a cluster)"
-      % boardlib.node_name())
+      % machine.node_name())
 PY
 [ $? -eq 3 ] && problems=$((problems + 1))
 
@@ -177,7 +177,7 @@ PY
 # Reported, not changed: this is the one address the iPad app is installed
 # against, and a script that moves it silently is the exact failure this
 # repository has spent the most time on.
-ts_now="$(python3 -c 'import sys; sys.path.insert(0, "'"$HERE"'"); import boardlib; print(boardlib.tailnet_hostname())' 2>/dev/null)"
+ts_now="$(python3 -c 'import sys; sys.path.insert(0, "'"$HERE"'"); from tutorboard.net import tailscale; print(tailscale.tailnet_hostname())' 2>/dev/null)"
 if [ "$ts_now" = "board" ]; then
   warn "tailnet name is 'board' — that belongs to the Mac mini permanently."
   say  "        this node must keep its own, or it claws the iPad's address back:"

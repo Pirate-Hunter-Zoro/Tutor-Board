@@ -65,11 +65,7 @@ def hw_needs_building(repo):
     tex_path = os.path.join(repo.root, st["rel"])
     if not os.path.exists(tex_path):
         return None
-    pdf = os.path.splitext(tex_path)[0] + ".pdf"
-    if not os.path.exists(pdf):
-        import glob as _glob
-        found = _glob.glob(os.path.join(os.path.dirname(tex_path), "build", "*.pdf"))
-        pdf = found[0] if found else None
+    pdf = homework.compiled_pdf(repo.root, tex_path)
     if pdf and os.path.getmtime(pdf) >= os.path.getmtime(tex_path):
         return None
     return st["name"]

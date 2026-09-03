@@ -6,7 +6,7 @@ import json
 import os
 
 from . import NOT_MINE
-from ...course import document
+from ...course import document, screenshot
 from ...lesson import git
 
 
@@ -45,6 +45,47 @@ def post(h, repo, path):
         except Exception as e:                       # noqa: BLE001
             rec = {"ok": False, "detail": "build failed: %s" % e}
         git._DIRTY["value"] = None      # a new PDF is uncommitted; say so
+        h.server.hub.worker.dirty.set()
+        return h.send_json(rec)
+
+    if path == "/export/shot":
+        # THE LESSON AS IT WAS ACTUALLY READ.
+        #
+        # Asked for from the iPad, about the export that already existed: "for
+        # the tutor session export, I don't want the latex dump it currently
+        # gives; I want it as if it were a screenshot of the entire iPad screen
+        # scrolled down over the whole tutoring session."
+        #
+        # The pixels come from the device because the device is the only thing
+        # that knows what the lesson looks like -- there is no headless browser
+        # on a compute node and there never will be. What stays here is what a
+        # client must not be trusted with and what must not differ between the
+        # two exports: where it goes, what it is called, which version it is,
+        # and that it is staged for the next commit.
+        #
+        # It writes `export.json` like the typeset export does, and that is not
+        # incidental: `/download/lesson` resolves the document through that
+        # record and nothing else, so a photograph that did not write it would
+        # be a PDF in the repository with no way to get it off the device.
+        try:
+            payload = json.loads(h.read_body().decode("utf-8") or "{}")
+        except Exception:                            # noqa: BLE001
+            payload = {}
+        images, why = screenshot.decode(payload)
+        if why:
+            rec = {"ok": False, "detail": why}
+        else:
+            box = screenshot.page_box(payload)
+            try:
+                rec = screenshot.build(repo.root, images, box[0], box[1])
+            except Exception as e:                   # noqa: BLE001
+                rec = {"ok": False, "detail": "could not write it: %s" % e}
+        rec["at"] = time.time()
+        rec["iso"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        rec.setdefault("scope", "shot")
+        with open(os.path.join(repo.live, "export.json"), "w", encoding="utf-8") as fh:
+            json.dump(rec, fh, indent=2)
+        git._DIRTY["value"] = None      # the new file is uncommitted; say so
         h.server.hub.worker.dirty.set()
         return h.send_json(rec)
 

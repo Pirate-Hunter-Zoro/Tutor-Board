@@ -156,10 +156,11 @@ say "how to reach each of them"
 python3 - "$COURSES" "$HERE" <<'PY'
 import json, os, sys
 sys.path.insert(0, sys.argv[2])
-import boardlib
+from tutorboard import machine, processes
+from tutorboard.net import tailscale
 
 courses, tool = sys.argv[1], sys.argv[2]
-me = boardlib.tailnet_self() or boardlib.node_name()
+me = tailscale.tailnet_self() or machine.node_name()
 for name in sorted(os.listdir(courses)):
     root = os.path.join(courses, name)
     rec = os.path.join(root, "live", ".board.json")
@@ -170,7 +171,7 @@ for name in sorted(os.listdir(courses)):
             info = json.load(fh)
     except (OSError, ValueError):
         continue
-    if not boardlib.board_is_running(info.get("pid"), root):
+    if not processes.board_is_running(info.get("pid"), root):
         continue
     port = info.get("port")
     print("   %-24s http://%s:%s/" % (name, me, port))
@@ -184,7 +185,8 @@ say "what the hub will offer"
 python3 - "$COURSES" "$HERE" <<'PY'
 import json, os, sys
 sys.path.insert(0, sys.argv[2])
-import boardlib
+from tutorboard import processes
+from tutorboard.net import boards
 
 courses, tool = sys.argv[1], sys.argv[2]
 # Any board here will answer for the whole machine and for its neighbours.
@@ -196,13 +198,13 @@ for name in sorted(os.listdir(courses)):
             info = json.load(fh)
     except (OSError, ValueError):
         continue
-    if boardlib.board_is_running(info.get("pid"), os.path.join(courses, name)):
+    if processes.board_is_running(info.get("pid"), os.path.join(courses, name)):
         port = info.get("port")
         break
 if not port:
     print("   no board is running here, so there is nothing to ask")
     raise SystemExit(0)
-doc = boardlib.board_json("127.0.0.1", port, "/hosts.json", timeout=30) or {}
+doc = boards.board_json("127.0.0.1", port, "/hosts.json", timeout=30) or {}
 hosts = doc.get("hosts") or []
 if len(hosts) < 2:
     print("   only this machine is answering; the other one is off, asleep, or")

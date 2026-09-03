@@ -44,7 +44,123 @@ which kind of subject it is and the board adapts.
 >   board that is answering) but it is worth confirming: the port the HTTPS name points at should
 >   be the course they are working in.
 >
-> ### Where this is right now, 2 September 2026
+> ### Where this is right now, 3 September 2026
+>
+> **The lesson exports as the lesson, and the document can leave the app.** Two things asked for
+> from the iPad in one breath: *"fix the 'local iPad export' of the homework and tutor session
+> .pdf — first of all, for the tutor session export, I don't want the latex dump it currently
+> gives; I want it as if it were a screenshot of the entire iPad screen scrolled down over the
+> whole tutoring session. Second of all, when I try to do the local export on the iPad, it just
+> opens the document up, and I can't put it anywhere. The only thing I can do is exit the app and
+> go back in again."*
+>
+> **A photograph, taken by the thing that drew it.** `export this lesson` is now the board's own
+> pixels — dark paper, the card chrome, the reading face, the handwriting sitting where it sits.
+> `web/shot.js` rasterises a block at a time through an SVG `foreignObject`, packs the blocks onto
+> A4 pages, and hands the server finished pages; `tutorboard/course/screenshot.py` wraps each in a
+> PDF page, and nothing else. A JPEG goes into a PDF *verbatim*, as `/DCTDecode`, so there is no
+> encoder and therefore no dependency — standard library, like the rest of it.
+>
+> **Which side does what is the whole of the design.** The pixels can only come from the client:
+> there is no headless browser on a compute node and there never will be, so the only thing in the
+> system that knows what the lesson looks like is the page that drew it. Everything a client must
+> not be trusted with stays on the server — where the document goes, what it is called, which
+> version it is, and that it is staged for the next commit — and it defers to `document.py` for all
+> four, so `transcripts/` holds ONE numbered series rather than two. Export a lesson one way and
+> then the other and you get v3 and v4 of the same lesson, which is the only question anybody asks
+> of that folder. Pagination is the client's, because the client is the only side holding the pixels
+> and therefore the only side that can cut a proof taller than a page without a JPEG decoder.
+>
+> **`export the whole course` stays typeset**, and that is not laziness: a filed sitting is not on
+> the glass, so there is nothing on the device to photograph.
+>
+> **Six things were wrong in a way only a rendered page could show, and every one of them looked
+> fine from the code.** Measured in WebKit — which is the engine that matters, and which disagrees
+> with Blink on most of them:
+>
+> - **An `<img>` does not paint inside an SVG loaded as an image.** Not with a data URI, not with a
+>   same-origin URL, not as a `background-image`, not as an SVG `<image>`, not as a cloned canvas.
+>   Blink paints all five, which is exactly how this reaches a device unnoticed: the export works on
+>   the machine it was written on and arrives on the iPad with every picture missing — which on this
+>   page means every piece of handwriting, which is the half of the document that is the student's.
+>   The pictures are composited straight onto the page with `drawImage`, from the elements the board
+>   is already displaying; what goes into the SVG is the element itself, laid out and unpainted.
+> - **`outerHTML` is not XML.** `<img>` is a void element and comes out with no closing tag, and a
+>   parse error in an SVG image paints nothing at all. Two blocks of a test lesson went missing and
+>   they were the two with pictures in them. `XMLSerializer` closes them. The same bug was eating
+>   every radical sign, because KaTeX draws `\sqrt` as an inline `<svg><path/></svg>`.
+> - **A comment with `--` in it is a parse error too**, and `board.html` explains itself at
+>   length — like this — so its comments are full of them. That is why it was the WRITING SURFACE
+>   that vanished and only that: a card is built by JavaScript and carries no comments, so the
+>   export looked entirely correct while the one block holding unsent working was silently absent.
+> - **`rem` is the font size of the document ROOT**, and a `foreignObject` fragment has no `<html>`.
+>   Every `rem` resolved to the initial 16px instead of the board's 18, so `.mine { max-width: 32rem }`
+>   came out an eighth narrow — which moved every right-aligned student turn sixty-three pixels and
+>   left the handwriting drawn into it outside its own box. Viewport units are the same story
+>   against the SVG's viewport. Both are resolved against the window the lesson is being read in,
+>   before the SVG ever sees them, along with every media query — flattened, so there is nothing
+>   left to disagree about.
+> - **`body { min-height: 100vh }` made every card exactly one page tall.** The wrapper stands in
+>   for body's LOOK, so body's rules land on it; that rule exists so there is something to paint the
+>   bottom of a screen with. A seven-page document for four cards, each floating at the top of a
+>   sheet of empty paper.
+> - **And a card that had just arrived exported transparent.** `.card.fresh` animates from
+>   `opacity: 0` with `both`, nothing animates in a still, and `both` means it renders the first
+>   frame. The newest thing the tutor wrote is the likeliest thing anybody exports.
+>
+> **And the obvious fix for sharpness is the one that must not be taken.** Asking the SVG for twice
+> the pixels — a `transform="scale(2)"` on a wrapping group, or a viewBox smaller than the width and
+> height — rasterises at the right size and LOSES KaTeX: every display formula and every radical
+> sign came out blank while the prose around them was perfect, so it reads on the device as "the
+> mathematics is missing" and as nothing else. It is also unnecessary. WebKit re-rasterises an SVG
+> image at the size it is being DRAWN at: measured on real output, the share of the ink that is a
+> mid-tone edge — which is what softness is — falls from 52% at 1× to 27% at 2× to 22% at 3× for
+> prose, and 59% to 41% to 29% for a display formula. Falling is re-rasterisation; a stretched
+> bitmap holds its edge fraction or worsens it.
+>
+> The unit conversion then ate the fonts, which is worth its own line: the bundle carries every
+> face inlined as base64, and base64 is full of things that look exactly like a length — `4rem+`
+> and `9vh/` are each a digit, a unit name, and a word boundary. Rewriting one rewrites the middle
+> of a font file, so the reading face fell back to a system sans and the declaration took the rules
+> after it with it. Everything looked plausible and nothing was right.
+>
+> **And the way out of the document was an anchor, which was the trap itself.** `<a download
+> href="/download/lesson">`: iOS honours `download` in a Safari tab and ignores it in a standalone
+> web app, where the tap is a NAVIGATION — the board is replaced by the PDF, with no chrome, no back
+> button and no share sheet. Both halves of the report are that one mistake, and this page already
+> knew better about it somewhere else: `renderScratch` says in as many words that installed to the
+> home screen there is no browser chrome, so anything opened in place has no way out short of
+> killing the app.
+>
+> So the document is never navigated to. It is fetched and handed to the system as a file:
+> `navigator.share` raises the native sheet OVER the board — Files, iCloud, a phone by AirDrop, an
+> email to a professor — and Cancel returns to the lesson, because the lesson never went anywhere.
+> The copy is fetched when the button APPEARS rather than when it is tapped, because Safari's
+> transient activation does not survive an `await` and a share after a fetch is a share with no
+> gesture behind it. Where sharing a file is unavailable: a blob URL with `download`, which saves
+> without navigating either — and in the installed app, where that is ignored, a NEW context, which
+> hands the PDF to Safari and its back button. A dead end in another app is recoverable; a dead end
+> in this one costs the lesson.
+>
+> **And the write-up's button could never have appeared.** Three places guessed where a course's
+> build puts its PDF and all three guessed the same way wrong — beside the source, then `build/`
+> beside the source. `scripts/build.sh` does neither: it walks up to the nearest `chNN` / `hwNN`
+> unit and compiles there, so `chapters/ch03-rings/homework/ch03-homework.tex` comes out in
+> `chapters/ch03-rings/build/`, one level ABOVE the directory being searched. `hw.json` recorded
+> `"pdf": null` on a build that had just succeeded, and the board offers the download only when
+> there IS a PDF. The document was on disk the whole time and the button for it could not exist.
+> `homework.compiled_pdf` is the one place that knows now, and it matches the source's own basename
+> rather than taking any PDF in the directory — a chapter's `build/` holds `ch03-notes.pdf` beside
+> `ch03-homework.pdf`, and a glob returning whichever came first hands somebody the reading for an
+> evening they spent writing up exercises.
+>
+> `test/shot.py` follows every cross-reference offset in the written PDF to the byte, refuses bytes
+> off the network that are not JPEGs, and proves both exports share one version series.
+> `test/shot.js` holds each of the six rendering rules, and each fails on its own. `test/link.js`
+> exercises all three routes out of the document and asserts the board is still what is on the
+> screen after every one of them. Shell version `board-shell-v81`.
+>
+> ### Before this, 2 September 2026
 >
 > **A document you can take with you.** Asked for from the iPad: *"when we save the .pdf, we should
 > also have the option to download it locally on the iPad so I can save it to files in my iCloud,
@@ -1391,6 +1507,18 @@ these tests fail, the test is right.
 
 | What went wrong | Guarded by |
 |---|---|
+| The only way out of an exported PDF was an anchor, so on the installed app the tap was a navigation: the board was replaced by the document, with no chrome, no back button and no share sheet, and no way out short of killing the app | `test/link.js` |
+| An `<img>` does not paint inside an SVG loaded as an image in WebKit — in any form — so every piece of handwriting was missing from the photographed lesson, on the device and nowhere else | `test/shot.js` |
+| `outerHTML` leaves void elements unclosed, which is not XML, so any block with a picture in it rasterised to nothing — and so did every radical sign, which KaTeX draws as an inline SVG | `test/shot.js` |
+| A comment containing `--` is a malformed XML comment, so the writing surface — the one block whose markup comes from `board.html` rather than from `render` — was silently absent from every export | `test/shot.js` |
+| `rem` resolves against the document root and a `foreignObject` has none, so everything sized in rem came out an eighth small and the handwriting landed outside its own box | `test/shot.js` |
+| `body { min-height: 100vh }` landed on the wrapper standing in for body, and every single card became exactly one page tall | `test/shot.js` |
+| A card that had just arrived exported transparent: `.card.fresh` animates from `opacity: 0` with `both`, and a still renders the first frame | `test/shot.js` |
+| Inlining the fonts as base64 and then converting `rem` to pixels rewrote the middle of a font file, because base64 contains things that look exactly like a length | `test/shot.js` |
+| `shot.js` was deferred while `board.js` is not, so it did not exist when `board.js` reached for it and every photograph ended with a page of blank paper | `test/shot.js` |
+| Three places guessed where a course's build puts its homework PDF and all three were wrong, so `hw.json` recorded `"pdf": null` on a successful build and the download button for the write-up could never appear | `test/shot.py` |
+| A hand-written PDF whose cross-reference offsets are one byte out is a file no reader will open | `test/shot.py` |
+| Asking the SVG for twice the pixels — to keep the type sharp on a retina screen — rasterises at the right size and loses every display formula and every radical sign, while the prose around them stays perfect | `test/shot.js` |
 | The drop overlay was painted over the lesson permanently — `[hidden]` loses to any author rule that sets a `display` | `test/hidden.js` |
 | A pen stroke silently did nothing, because no page existed until `/slate/state` answered | `test/interactive.js` |
 | The writing surface was collapsed, so its canvas was 0×0 and touches fell through to the lesson | `test/interactive.js` |
@@ -2761,20 +2889,48 @@ it works with or without this tool:
 ## Exporting the whole conversation
 
 A lesson on the board is a scroll on a piece of glass. Somebody eventually has to *show* it —
-to a professor, to themselves in a fortnight — and neither a screenshot nor a print of the page
-is a document.
+to a professor, to themselves in a fortnight.
+
+**There are two documents, and they are not the same document.**
 
 ```
-board export                     # this lesson
+board export                     # this lesson, typeset
 board export --all               # every lesson in the course, as one
 ```
 
-and, on the iPad, **⋯ → export this lesson** or **export the whole course**. It writes both
-halves of the sitting in the order they happened — the tutor's cards typeset from their own
-markdown and mathematics, and *every page you handed in*, as the picture that was actually sent,
-labelled `You wrote — attempt 2 of 5` with the time. An exercise worked over ten attempts is ten
-pages of your own handwriting with the tutor's replies between them, which is the record of the
-work rather than a summary of it.
+and, on the iPad, **⋯ → export this lesson** and **⋯ → export the whole course (typeset)**.
+
+**`export this lesson`, from the device, is a photograph of the lesson.** Asked for in those
+words — *"I want it as if it were a screenshot of the entire iPad screen scrolled down over the
+whole tutoring session"* — and it is what it says: the board's own pixels, dark paper, the card
+chrome, the reading face, your handwriting sitting where it sits, packed onto A4 pages and cut
+where a card allowed it to be cut. It is taken by the iPad, because the iPad is the only thing in
+the system that knows what the lesson looks like: there is no headless browser on a compute node
+and there never will be. Everything else about it is the server's, and is the same as for the
+typeset export — where it goes, what it is called, which version it is, and that it is staged for
+the next commit. So `transcripts/` holds one numbered series, not two.
+
+Two things are deliberately not photographed. **The furniture** — Send, the write/type toggle,
+`skip this one` — because a live control in a document somebody is emailing is a picture of a
+button that does nothing. And **a blank writing surface**, because a foot of empty paper as the
+last page reads as a document that went wrong; working you have drawn and not yet sent is yours
+and is in there.
+
+**`board export`, and `export the whole course`, is the typeset transcript.** Both halves of the
+sitting in the order they happened — the tutor's cards typeset from their own markdown and
+mathematics, and *every page you handed in*, as the picture that was actually sent, labelled
+`You wrote — attempt 2 of 5` with the time. An exercise worked over ten attempts is ten pages of
+your own handwriting with the tutor's replies between them, which is the record of the work rather
+than a summary of it.
+
+The whole course can only be this one. A filed sitting is not on the glass, so there is nothing on
+the device to photograph.
+
+**And either one can leave the device.** The banner that reports an export carries **save a copy**
+beside it, and it never navigates the app anywhere: the document is fetched and handed to the
+system as a file, so iOS raises the share sheet OVER the board — Files, iCloud, a phone by AirDrop,
+an email to a professor — and Cancel puts you back in the lesson, because the lesson never went
+anywhere. The write-up has the same button, from **⋯ → export the written-up homework**.
 
 It lands in `transcripts/` — outside `live/`, which is runtime state a course repository ignores
 — as `<lesson>-v1.pdf`, then `-v2.pdf`, then `-v3.pdf`. **Numbered, never stamped with the time.**
@@ -2794,7 +2950,9 @@ contents that cannot tell them apart is not one.
 
 What it costs: a LaTeX run of a minute or so for a long course, and the board says so while it
 waits. A failure never loses the source — the `.tex` is written and staged either way, and the
-error appears on the board rather than in a log nobody opens.
+error appears on the board rather than in a log nobody opens. The photograph costs a few seconds
+of the tablet's own time instead, a card at a time, and says which card it is on — a button that
+goes quiet for twenty seconds is a button somebody presses twice.
 
 ## Setting up a course repository
 
@@ -3494,6 +3652,8 @@ node test/interactive.js drives the real board in a real DOM and writes on it
 node test/sizing.js      that every screen size opens at natural writing size
 node test/link.js        that an unreachable board says so instead of looking empty
 node test/theme.js       that the dark theme reaches the whole window, not just the content
+node test/shot.js        that the photographed lesson is the lesson, and nothing else is
+python3 test/shot.py     that the photograph becomes a PDF that actually opens
 python3 test/annotate.py that marks on a card are anchored to it and can be sent
 python3 test/begin.py    that the first turn of a session can come from the device
 python3 test/homework.py that a sitting finds its problem set, in either layout

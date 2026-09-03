@@ -76,7 +76,18 @@ for (const f of ['typeface.js', 'macros.js', 'slate-core.js', 'annotate.js']) {
   catch (e) { fail(f + ': ' + e.message); }
 }
 try {
-  window.eval(fs.readFileSync(path.join(WEB, 'board.js'), 'utf8'));
+  // The handover is deliberately not reachable through the DOM any more -- that
+  // was the defect -- so which document it is aimed at and how it names the file
+  // have to be asked of the code rather than read off an attribute.
+  let src = fs.readFileSync(path.join(WEB, 'board.js'), 'utf8');
+  src = src.replace('})();',
+    'window.__handOver = function () { return handOver; };\n'
+    + 'window.__nameFrom = nameFrom;\n'
+    + 'window.__takeCopy = takeCopy;\n'
+    + 'window.__shareIt = shareIt;\n'
+    + 'window.__saveBlob = saveBlob;\n'
+    + '})();');
+  window.eval(src);
   ok('loaded board.js');
 } catch (e) { fail('board.js: ' + e.message); }
 
@@ -1082,11 +1093,28 @@ if (es) {
           : fail('there is no download at all, so a PDF stays on the node');
   hwBtn ? ok('and the written-up work has a button of its own')
         : fail('the only way to compile the write-up is still a terminal');
+  // NOTHING THAT HANDS A DOCUMENT OVER MAY NAVIGATE THIS WINDOW.
+  //
+  // This was an anchor, and the anchor was the defect. Reported from the iPad:
+  // "when I try to do the local export on the iPad, it just opens the document
+  // up, and I can't put it anywhere. The only thing I can do is exit the app and
+  // go back in again." iOS honours `download` in a Safari tab and ignores it in
+  // a standalone web app, where the tap is a navigation: the board is replaced
+  // by the PDF, with no chrome, no back button and no share sheet.
+  //
+  // So the test is not "is it marked as a download" -- that was the assertion
+  // that passed for a fortnight while the app was a dead end. It is: can this
+  // control navigate at all. An element with an `href` can; a button cannot.
   if (getLink) {
-    getLink.hasAttribute('download')
-      ? ok('marked as a download, which is what opens the share sheet')
-      : fail('the link renders the PDF in the tab instead of offering to save '
-             + 'it, which on an iPad is a preview with no way into Files');
+    getLink.tagName === 'BUTTON'
+      ? ok('the way out is a button, which cannot navigate the app away')
+      : fail('handing the document over is a ' + getLink.tagName
+             + ' — in a standalone app a tap on one of those replaces the board '
+             + 'with the PDF, and there is no way back short of killing the app');
+    !getLink.hasAttribute('href')
+      ? ok('and it carries no address for the web view to go to')
+      : fail('the control still has an href (' + getLink.getAttribute('href')
+             + '), so a tap is a navigation and the reader is trapped in it');
     getLink.hidden
       ? ok('and it is not offered before there is anything to offer')
       : fail('a download is offered for a document that does not exist yet');
@@ -1112,16 +1140,124 @@ if (es) {
                        pdf: 'transcripts/galois-theory-v3.pdf',
                        tex: 'transcripts/galois-theory-v3.tex', detail: '' } };
   es.onmessage({ data: JSON.stringify(b6) });
-  if (getLink && !getLink.hidden && /download\/lesson$/.test(getLink.getAttribute('href') || ''))
+  if (getLink && !getLink.hidden)
     ok('and an export that compiled offers the lesson to be saved');
-  else fail('a compiled export offers no download (href '
-            + (getLink && getLink.getAttribute('href')) + ')');
+  else fail('a compiled export offers nothing to save');
+
+  // WHICH document it will fetch is still the thing being tested -- it just
+  // lives in a variable now rather than in an attribute the browser can follow.
+  // The client names a KIND and the server resolves it; a query parameter
+  // carrying a path would be a directory traversal waiting to be written.
+  var handing = window.__handOver && window.__handOver().url;
+  handing === '/download/lesson'
+    ? ok('and it is aimed at the lesson, by kind and not by path')
+    : fail('the control is aimed at ' + handing + ' rather than the lesson');
+
   // The filename is the SERVER's business -- it knows the course and the set --
-  // so the attribute stays empty and the response names the file. Setting it
-  // here would get the name wrong in exactly the place it matters.
-  if (getLink && !getLink.getAttribute('download'))
-    ok('and lets the response name the file, which is where the course is known');
-  else fail('the board names the download itself: ' + getLink.getAttribute('download'));
+  // so nothing here names the file. Setting it on this side would get the name
+  // wrong in exactly the place it matters, which is a Files app full of
+  // somebody's own documents.
+  var named = window.__nameFrom && window.__nameFrom(
+    { headers: { get: function () {
+        return 'attachment; filename="Galois-Theory-ch07-homework.pdf"'; } } },
+    'lesson.pdf');
+  named === 'Galois-Theory-ch07-homework.pdf'
+    ? ok('and takes the name off the response, which is where the course is known')
+    : fail('the board named the file itself: ' + named);
+
+  // AND THE DOCUMENT IS IN HAND BEFORE THE TAP.
+  //
+  // Safari's transient activation does not survive an `await`: a
+  // `navigator.share` called after a fetch has resolved is a share called
+  // without a user gesture, and it is refused. So the fetch starts when the
+  // banner appears -- which is also when the button first becomes visible, so
+  // the wait is spent where nobody is looking at it.
+  var warm = window.__handOver && window.__handOver();
+  warm && warm.warming
+    ? ok('the copy is fetched when it is offered, not when it is tapped')
+    : fail('nothing is fetched until the tap, so by the time there is a file to '
+           + 'share the user gesture has expired and iOS refuses the share sheet');
+
+  // AND NOTHING IN THE HANDOVER MAY NAVIGATE THIS WINDOW, at any point in it.
+  //
+  // This is the defect itself, stated as a rule. Reported from the iPad: "when
+  // I try to do the local export on the iPad, it just opens the document up,
+  // and I can't put it anywhere. The only thing I can do is exit the app and go
+  // back in again."
+  //
+  // Every route out is exercised -- the share sheet, the share sheet refusing,
+  // and the installed app with no chrome around it -- and after each one the
+  // board still has to be the thing on the screen.
+  if (window.__shareIt && window.__saveBlob) {
+    var was = window.location.href;
+    var opened = [];
+    var clicked = [];
+    window.open = function (u, target) { opened.push({ url: u, target: target }); return null; };
+    var realCreate = doc.createElement.bind(doc);
+    doc.createElement = function (tag) {
+      var el = realCreate(tag);
+      if (String(tag).toLowerCase() === 'a') {
+        el.click = function () { clicked.push({ href: el.getAttribute('href'),
+                                                download: el.getAttribute('download'),
+                                                target: el.getAttribute('target') }); };
+      }
+      return el;
+    };
+    var got = { blob: { size: 12 }, name: 'Galois-Theory-v3.pdf', file: null };
+    /* Stubbed for all three cases, not just the one that needs it: jsdom has no
+       blob URLs, and a route that reaches for one when it should not must report
+       a failure rather than take the suite down with it. */
+    window.URL.createObjectURL = function () { return 'blob:x'; };
+    window.URL.revokeObjectURL = function () {};
+    var tried = function (fn) {
+      try { fn(); return null; } catch (e) { return e; }
+    };
+
+    // 1. The share sheet is there and takes files: the sheet opens, nothing else.
+    var shared = null;
+    window.navigator.canShare = function () { return true; };
+    window.navigator.share = function (o) { shared = o; return Promise.resolve(); };
+    got.file = { name: got.name, type: 'application/pdf' };
+    window.__shareIt(got, '/download/lesson');
+    shared && shared.files && shared.files[0] === got.file
+      ? ok('the document is handed to the share sheet as a file')
+      : fail('the share sheet was not offered the file: ' + JSON.stringify(shared));
+    opened.length === 0 && clicked.length === 0
+      ? ok('and nothing else was opened or clicked to do it')
+      : fail('sharing also went somewhere: '
+             + JSON.stringify({ opened: opened, clicked: clicked }));
+
+    // 2. The installed app, with no chrome: the last resort is a NEW context and
+    //    never this window, because in there a PDF has no back button.
+    window.navigator.canShare = function () { return false; };
+    window.navigator.standalone = true;
+    opened = []; clicked = [];
+    var blew = tried(function () {
+      window.__saveBlob(got, '/download/lesson', function () {});
+    });
+    if (blew) fail('handing the document over threw: ' + blew.message);
+    opened.length === 1 && opened[0].target === '_blank'
+      && opened[0].url === '/download/lesson'
+      ? ok('with no share sheet, the installed app hands it to a new context')
+      : fail('the fallback did ' + JSON.stringify({ opened: opened, clicked: clicked })
+             + ' — in a standalone app anything in place is a dead end');
+    clicked.length === 0
+      ? ok('and never through a link this window would follow')
+      : fail('an anchor was clicked in the installed app: ' + JSON.stringify(clicked));
+
+    // 3. An ordinary tab: `download` works there and saves without navigating.
+    window.navigator.standalone = false;
+    opened = []; clicked = [];
+    window.__saveBlob(got, '/download/lesson', function () {});
+    clicked.length === 1 && clicked[0].download === got.name && opened.length === 0
+      ? ok('in a tab it saves through a download, without navigating either')
+      : fail('the tab route did ' + JSON.stringify({ opened: opened, clicked: clicked }));
+
+    window.location.href === was
+      ? ok('and after every one of them the board is still what is on the screen')
+      : fail('the window navigated to ' + window.location.href);
+    doc.createElement = realCreate;
+  }
 }
 
 // --- saving must not depend on the tutor -------------------------------------

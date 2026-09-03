@@ -1288,9 +1288,15 @@ function paintSession(state, push, agent, exported) {
                                   : (last.kind === "hw" && last.ok && last.pdf
                                      ? "/download/homework" : null));
   if (last === exported) {
+    /* A photograph says how many pages it came to, because that is the one
+       thing about it a person cannot see from here and the one thing that says
+       whether the whole evening is in there. */
+    var howMany = last.pages
+      ? " — " + last.pages + (last.pages === 1 ? " page" : " pages")
+        + ", saved in the repository and staged for the next save"
+      : " — saved in the repository, and staged for the next save";
     els.pushedText.textContent = last.ok
-      ? (last.pdf || last.tex) + " — saved in the repository, and staged for "
-        + "the next save"
+      ? (last.pdf || last.tex) + howMany
       : "Export failed — "
         + ((last.detail || "no detail").split("\n")[0] || "no detail");
   } else if (last.kind === "hw") {
@@ -1307,18 +1313,191 @@ function paintSession(state, push, agent, exported) {
   }
 }
 
-/* The link that hands a document over, or nothing at all.
+/* Handing a document over, without leaving the app to do it.
 
-   `download` on the anchor plus the server's `Content-Disposition` is what makes
-   an iPad offer the share sheet rather than previewing the PDF in the tab. The
-   filename is the server's business -- it knows the course and the set -- so
-   this does not set one: an empty `download` attribute means "use what the
-   response says", which is the only version that gets the name right. */
+   THIS WAS AN ANCHOR AND THE ANCHOR WAS A TRAP. Reported from the iPad: "when I
+   try to do the local export on the iPad, it just opens the document up, and I
+   can't put it anywhere. The only thing I can do is exit the app and go back in
+   again."
+
+   Both halves of that are the same mistake, and this page already knew better
+   about it somewhere else -- `renderScratch` says it in as many words:
+   installed to the home screen there is no browser chrome, so anything opened
+   in place has no back button and no way out of it short of killing the app. A
+   plain `<a download href="/download/lesson">` is exactly that. iOS honours
+   `download` in a Safari tab and ignores it in a standalone web app, where the
+   tap is a NAVIGATION: the web view leaves the board, renders the PDF with no
+   chrome around it, and there is nothing on the screen that goes back. The
+   share sheet the `Content-Disposition` was supposed to raise never appears,
+   which is the "I can't put it anywhere" half.
+
+   So the document is never navigated to. It is FETCHED, and handed to the
+   system as a file:
+
+     - `navigator.share` with a `File` raises the native share sheet OVER the
+       board. Files, iCloud Drive, a phone by AirDrop, an email to a professor
+       -- and Cancel returns to the lesson, because the lesson never went
+       anywhere. That is both halves answered by one mechanism, which is why it
+       is the first choice rather than a nicety.
+     - Where sharing a file is not available, a blob URL with `download` on it,
+       which is the desktop answer and saves without navigating either.
+     - And only if neither will do, a NEW context -- never this one. In a
+       standalone app that hands the PDF to Safari, which has chrome, a share
+       button and a way back to the board. A dead end in another app is
+       recoverable; a dead end in this one costs the lesson.
+
+   `AbortError` is somebody tapping Cancel and is not a failure. Anything else
+   says what went wrong, in the banner, where the export already reports. */
+var handOver = { url: null, busy: false, file: null, warming: null };
+
 function offerDownload(url) {
   if (!els.pushedGet) return;
-  if (!url) { els.pushedGet.hidden = true; els.pushedGet.removeAttribute("href"); return; }
-  els.pushedGet.href = url;
-  els.pushedGet.hidden = false;
+  if (url !== handOver.url) {
+    handOver.url = url || null;
+    handOver.file = null;
+    handOver.warming = null;
+    /* WARMED THE MOMENT IT IS OFFERED, and this is the difference between the
+       share sheet appearing and an error.
+
+       Safari's transient activation does not survive an `await`: a
+       `navigator.share` called after a fetch has resolved is a share called
+       without a user gesture, and it is refused. The document has to be in hand
+       BEFORE the tap, so it is fetched when the banner appears -- which is also
+       when the person can first see the button, so the wait is spent where
+       nobody is looking at it rather than after they have pressed. */
+    if (url) warmCopy(url);
+  }
+  els.pushedGet.hidden = !url;
+  els.pushedGet.disabled = false;
+  els.pushedGet.textContent = "save a copy";
+}
+
+function nameFrom(res, fallback) {
+  /* The server names the file -- it is the only side that knows the course and
+     the set, and `ch07-homework.pdf` in a Files app says neither whose it is
+     nor what it is from. */
+  var cd = res.headers ? (res.headers.get("Content-Disposition") || "") : "";
+  var m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd);
+  return (m && decodeURIComponent(m[1])) || fallback;
+}
+
+function warmCopy(url) {
+  var job = fetch(url, { credentials: "same-origin" }).then(function (res) {
+    if (!res.ok) throw new Error("the board would not give it up (" + res.status + ")");
+    return res.blob().then(function (blob) {
+      var name = nameFrom(res, "lesson.pdf");
+      var file = null;
+      try {
+        file = new File([blob], name, { type: "application/pdf" });
+      } catch (e) { file = null; }
+      return { blob: blob, name: name, file: file };
+    });
+  });
+  handOver.warming = job;
+  job.then(function (got) {
+    if (handOver.warming === job) handOver.file = got;
+  }, function () { /* the tap will try again and say so */ });
+  return job;
+}
+
+/* Is this the installed app, with no browser chrome around it?
+   It decides the LAST RESORT and nothing else: in a tab, a PDF opened in place
+   has a back button and a share button; in a standalone app it has neither, and
+   that is the whole of the defect being fixed. */
+function standalone() {
+  if (navigator.standalone === true) return true;
+  try { return global_matches("(display-mode: standalone)"); } catch (e) { return false; }
+}
+
+function global_matches(query) {
+  return !!(window.matchMedia && window.matchMedia(query).matches);
+}
+
+function takeCopy() {
+  if (!handOver.url || handOver.busy) return;
+  var url = handOver.url;
+
+  /* In hand already: share on the frame of the tap, inside the gesture, which
+     is the only moment Safari will allow it. */
+  if (handOver.file) return shareIt(handOver.file, url);
+
+  handOver.busy = true;
+  els.pushedGet.disabled = true;
+  els.pushedGet.textContent = "getting it…";
+  (handOver.warming || warmCopy(url)).then(function (got) {
+    handOver.busy = false;
+    els.pushedGet.disabled = false;
+    els.pushedGet.textContent = "save a copy";
+    handOver.file = got;
+    /* The gesture is gone by now, so sharing may be refused -- `shareIt` falls
+       through to saving, and saving does not need one. */
+    shareIt(got, url);
+  }, function (err) {
+    handOver.busy = false;
+    els.pushedGet.disabled = false;
+    els.pushedGet.textContent = "save a copy";
+    els.pushed.className = "pushed bad";
+    els.pushedIcon.textContent = "✕";
+    els.pushedText.textContent = "Could not hand it over — "
+      + ((err && err.message) || "the board did not answer");
+  });
+}
+
+/* THE SHARE SHEET FIRST, AND NOTHING THAT NAVIGATES EVER.
+
+   `navigator.share` with a `File` raises the native sheet OVER the board:
+   Files, iCloud Drive, a phone by AirDrop, an email to a professor -- and
+   Cancel returns to the lesson, because the lesson never went anywhere. That
+   is both halves of what was reported answered by one mechanism, which is why
+   it is the first choice and not a nicety. */
+function shareIt(got, url) {
+  var done = function (label) {
+    if (els.pushedGet) els.pushedGet.textContent = label || "save a copy";
+  };
+  if (got.file && navigator.share && navigator.canShare
+      && navigator.canShare({ files: [got.file] })) {
+    try {
+      var p = navigator.share({ files: [got.file], title: got.name });
+      if (p && p.then) {
+        p.then(function () { done("saved"); }, function (err) {
+          /* Cancel is a decision, not a fault. */
+          if (err && err.name === "AbortError") { done(); return; }
+          saveBlob(got, url, done);
+        });
+        return p;
+      }
+    } catch (e) { /* refused outright; save instead */ }
+  }
+  return saveBlob(got, url, done);
+}
+
+/* No share sheet here, and still nothing that navigates THIS window.
+
+   A blob URL with `download` on it saves without leaving the page, which is the
+   whole point -- but iOS ignores `download` in a standalone app and treats the
+   tap as a navigation, which is exactly the trap being fixed. So in the
+   installed app the last resort is a NEW context: that hands the PDF to Safari,
+   which has chrome, a share button and a way back. A dead end in another app is
+   recoverable; a dead end in this one costs the lesson. */
+function saveBlob(got, url, done) {
+  var a = document.createElement("a");
+  if (standalone() || !("download" in a)) {
+    window.open(url, "_blank", "noopener");
+    done();
+    return;
+  }
+  var href = URL.createObjectURL(got.blob);
+  a.href = href;
+  a.download = got.name;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  /* Long enough for the save to have started, and then reclaimed: a blob of a
+     lesson-sized PDF held for the rest of the sitting is memory an iPad wants
+     for the board. */
+  setTimeout(function () { URL.revokeObjectURL(href); }, 60000);
+  done("saved");
 }
 
 /* The whole conversation as one document.
@@ -1361,14 +1540,50 @@ function doExportHomework() {
     });
 }
 
+/* THIS LESSON, AS IT WAS READ. AND THE WHOLE COURSE, TYPESET.
+
+   Two documents, and the difference is not a preference. Asked for from the
+   iPad: "for the tutor session export, I don't want the latex dump it currently
+   gives; I want it as if it were a screenshot of the entire iPad screen scrolled
+   down over the whole tutoring session."
+
+   So `lesson` is now the board's own pixels, photographed here, by the thing
+   that drew them -- `shot.js` explains why it cannot be anywhere else. `all`
+   stays the typeset transcript, and that is not laziness either: a past sitting
+   is not on the glass, so there is nothing on this device to photograph. The
+   server owns the name, the version, the repository copy and the git staging in
+   both cases, which is what keeps one numbered series in `transcripts/` rather
+   than two.
+
+   Photographing an evening's lesson is real work on a tablet -- a card at a
+   time, each one laid out, rasterised and drawn -- so it says which card it is
+   on. A progress count is not decoration here: this is the one button on the
+   page that can take twenty seconds, and a button that goes quiet for twenty
+   seconds is a button somebody presses again. */
 function doExport(scope) {
   els.pushed.hidden = false;
   els.pushed.className = "pushed";
   els.pushedIcon.textContent = "…";
+  offerDownload(null);           /* not the last document's link, while this builds */
+
+  if (scope !== "all" && global_TutorShot()) {
+    els.pushedText.textContent = "photographing the lesson…";
+    return global_TutorShot().send(function (done, total) {
+      els.pushedText.textContent = "photographing the lesson — card "
+        + done + " of " + total + "…";
+    }).then(function (rec) {
+      paintSession({}, null, null, rec || { ok: false, detail: "no answer" });
+    }).catch(function (err) {
+      els.pushed.className = "pushed bad";
+      els.pushedIcon.textContent = "✕";
+      els.pushedText.textContent = "Could not photograph the lesson — "
+        + ((err && err.message) || "the browser refused");
+    });
+  }
+
   els.pushedText.textContent = scope === "all"
     ? "building the whole course — LaTeX takes a moment…"
     : "building this lesson as a PDF…";
-  offerDownload(null);           /* not the last document's link, while this builds */
   return fetch("/export", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1380,6 +1595,13 @@ function doExport(scope) {
       els.pushedIcon.textContent = "✕";
       els.pushedText.textContent = "Export failed — could not reach the board";
     });
+}
+
+/* Asked for rather than captured at load: `shot.js` is a separate file and a
+   deferred script, so a board that got here from a cache without it must fall
+   back to the typeset export rather than throw. */
+function global_TutorShot() {
+  return (typeof window !== "undefined" && window.TutorShot) || null;
 }
 
 /* Is the standing prompt one the student raised, rather than the end of a
@@ -3946,6 +4168,31 @@ document.getElementById("btn-theme").onclick = function () {
   applyTheme(next);
 };
 document.getElementById("btn-print").onclick = function () { window.print(); };
+/* HOW MUCH IS ON THE LIVE SURFACE, for the photograph.
+
+   `shot.js` skips the live board when nothing has been written on it -- a foot
+   of blank dark paper as the last page of a document somebody is emailing to
+   their professor reads as a document that went wrong -- but working drawn and
+   not yet sent is the student's and belongs in it. `strokes()` is the same
+   question Send already asks before it hands the tutor an empty sheet.
+
+   Set HERE, at the top level, and not where the slate is mounted: `#writer` is
+   static markup in the page and the slate is mounted into it lazily, so the
+   surface is on the glass and in the export long before there is anything to
+   ask. Set from inside the mount, this never ran at all and every photograph
+   ended with a blank page.
+
+   No writer mounted is nothing written. A writer that cannot answer is kept --
+   "I could not tell" must never be the reason an evening's unsent working is
+   left out of the record. */
+if (window.TutorShot) {
+  window.TutorShot.liveInk = function () {
+    if (!writer || !writer.strokes) return 0;
+    try { return writer.strokes(); } catch (e) { return 1; }
+  };
+}
+
+els.pushedGet.onclick = takeCopy;
 document.getElementById("btn-export").onclick = function () { doExport("lesson"); };
 document.getElementById("btn-export-all").onclick = function () { doExport("all"); };
 document.getElementById("btn-export-hw").onclick = doExportHomework;
