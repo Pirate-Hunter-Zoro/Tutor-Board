@@ -1024,6 +1024,9 @@ function render(data) {
        the page a screenful while nobody was doing anything at all. */
   } else {
     cardsArrived++;
+    /* Something is on the board. Whatever the send was waiting for has landed,
+       whether or not the tutor's own state ever said so. */
+    sendingAt = 0;
     /* A CARD ARRIVING NEVER MOVES THE READER. IT GROWS INTO VIEW.
 
        Asked for twice, the second time as a specification: "when I submit the
@@ -1861,6 +1864,10 @@ if (els.notesAgain) {
 
 els.notesend.onclick = function () {
   els.notesend.disabled = true;
+  /* Same rule as the board's Send: say something on the frame the button was
+     pressed. This one encodes a picture of the marks and then waits on a request
+     per marked card. */
+  saySending();
   saveNotes(true).then(function () {
     els.notesend.disabled = false;
     paintNotesSend();
@@ -3128,6 +3135,27 @@ var busySince = 0;
 var busyTurn = -1;
 var busyFrom = 0;
 var busyTimer = null;
+/* WHEN SEND WAS TAPPED, AND WHETHER ANYTHING HAS ANSWERED YET.
+
+   Between the tap and the board saying "the tutor is writing" there is a PNG
+   encode, a round trip, the server waking the tutor, and the next payload. On a
+   worked page and a busy node that is comfortably a second, and it can be much
+   longer. Nothing on the board changed in that gap. Reported: "make the time
+   between me hitting 'send' and something else happening more snappy so I don't
+   get tempted to double send. If it takes a minute for it to say 'tutor is
+   responding', say 'sending to tutor' until that happens. I want immediate
+   feedback."
+
+   So the strip that says what the tutor is doing says this too, from the tap
+   until the tutor picks it up. It expires: an inbox nobody is reading must not
+   leave "sending" on the screen for the rest of the evening. */
+var sendingAt = 0;
+var SENDING_FOR = 100000;
+
+function saySending() {
+  sendingAt = Date.now();
+  if (lastLive) paintBusy(lastLive);
+}
 
 /* The newest card's mtime -- a correction to an existing card counts as much as
    a new one, since either way something appeared for them to read. */
@@ -3143,7 +3171,21 @@ function paintBusy(data) {
   if (!els.busy) return;
   var st = data.agent || null;
   var working = !!st && st.state === "working" && !data.archived;
+  /* The tutor has picked it up, or given up waiting for it to be picked up. */
+  if (working || Date.now() - sendingAt > SENDING_FOR) sendingAt = 0;
   if (!working) {
+    if (sendingAt && !data.archived) {
+      /* Not "the tutor is writing" -- it has not been handed anything yet, and
+         saying so would be the board guessing. This is the half-second of the
+         send that belongs to the wire. */
+      els.busy.hidden = false;
+      els.busyText.textContent = "sending to the tutor";
+      els.busySince.textContent = "";
+      busySince = 0;
+      busyTurn = -1;
+      if (busyTimer) { clearInterval(busyTimer); busyTimer = null; }
+      return;
+    }
     els.busy.hidden = true;
     busySince = 0;
     busyTurn = -1;
@@ -3272,6 +3314,10 @@ function makeWriter(then) {
           toastSent();
           revealSentSettling();
         },
+        /* The tap itself, before the picture is encoded and before the wire is
+           touched. The only job here is to put something on the glass on the
+           frame the button was pressed. */
+        onSending: saySending,
         /* Marks on the lesson are a second thing that can be sent. Ask which,
            but only when both actually exist. */
         beforeSend: askWhatToSend,
@@ -3553,6 +3599,7 @@ function autosize() {
 function say(signal) {
   var text = els.saybox.value.trim();
   if (!text && !signal) return;
+  saySending();
   els.saybox.value = "";
   if (answering.question) { textDrafts[answering.question] = ""; }
   autosize();

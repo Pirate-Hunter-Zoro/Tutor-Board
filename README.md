@@ -46,6 +46,50 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 2 September 2026
 >
+> **The tap is answered on the frame it happened.** Asked for as: *"make the time between me
+> hitting 'send' and something else happening more snappy so I don't get tempted to double send. If
+> it takes a minute for it to say 'tutor is responding', say 'sending to tutor' until that happens.
+> I want immediate feedback."*
+>
+> There was real work in front of a send and none of it was visible. `save` encodes the page to a
+> PNG first, synchronously, because that picture is what is frozen as the answer — a few hundred
+> milliseconds of main thread on a worked page, before the request is even made. Then the round
+> trip, then the server waking the tutor, then the next payload before anything on the board
+> changed. A button that swallows a tap for a second is a button that gets pressed twice, and
+> pressing this one twice sends twice.
+>
+> So the label goes up on the frame of the tap and the work waits two frames — two, because a
+> `requestAnimationFrame` callback runs BEFORE the paint it belongs to, so doing the encode in the
+> first one blocks the very frame that was supposed to show the label. The strip that says what the
+> tutor is doing says **sending to the tutor** from the tap until the tutor picks it up, which is a
+> statement about the wire and not a guess about the tutor; it clears when the tutor reports working,
+> when a card lands, or after a hundred seconds, because an inbox nobody is reading must not leave
+> "sending" on the screen all evening. Send refuses a second tap until the first has gone, released
+> on a timer as well so a hung request cannot take the button with it. The typed answer and a
+> marks-only send do the same.
+>
+> **And a pen at work now refuses the scroll outright.** Reported as: *"I did just have a blip where
+> I wrote down the first letter and it stopped writing. I paused for a couple of seconds, tried
+> again, and writing continued fine."* That is a gesture being re-read as a pan. `touch-action` is
+> evaluated when a gesture STARTS, and a `touchstart` can only be cancelled while it is cancelable —
+> which it is not during a fling. So a stroke following hard on another, or one begun while the page
+> was still moving, got a `pointercancel` instead of ink, and until everything settled nothing the
+> pen did marked anything.
+>
+> A latch closes it: while the nib is being heard from, the layer carries `touch-action: none`, so
+> the next stroke cannot be reinterpreted however quickly it follows and a finger landing in that
+> window is a palm rather than a scroll. It opens again a second and a half after the pen goes quiet.
+> Note what it does not do — it decides nothing by where the hand landed; it only stops one hand's
+> gesture from being re-read as the other's.
+>
+> Two more ways a stroke could go missing went with it, both of which would read exactly the same
+> from behind a pen. A lift the layer never saw — the nib leaving past its edge, the browser taking
+> the gesture, the app backgrounded — left a stroke open for ever, and the window hears those now,
+> as the slate always has. And a new stroke beginning while one was still open used to REPLACE it,
+> which repaints the card without the samples already on the glass: a letter written and then taken
+> away. It commits the one it interrupts. `test/link.js` holds all three.
+> Shell version `board-shell-v78`.
+>
 > **A card arriving never moves the reader.** Specified from the device, after two narrower fixes
 > had shipped and it was still happening: *"when I submit the response, I'm scrolled to the bottom
 > of the written/typed response I just submitted, where I can clearly see the 'the tutor is

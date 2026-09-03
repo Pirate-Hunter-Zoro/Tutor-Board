@@ -667,6 +667,22 @@ function dropSelection() {
 document.addEventListener("selectstart", noSelect, true);
 document.addEventListener("dragstart", noSelect, true);
 
+/* The last word on whether a stroke is over belongs to the WINDOW, not to the
+   canvas. A nib lifted past the edge of the layer, a gesture the browser took
+   for itself, an app sent to the background mid-word: none of those deliver a
+   `pointerup` to the element that captured the pointer, and a stroke that never
+   ends is a stroke whose samples are still being fed to a canvas nobody is
+   looking at. The slate has had this from the beginning; the annotation layer
+   never did. */
+["pointerup", "pointercancel"].forEach(function (t) {
+  window.addEventListener(t, function (ev) {
+    if (!drawing) return;
+    if (ev.pointerId !== undefined && ev.pointerId !== drawing.pid) return;
+    end(ev);
+  }, true);
+});
+window.addEventListener("blur", function () { if (drawing) end(null); });
+
 /* WHETHER THIS IS A SCROLL IS A QUESTION ABOUT THE HAND, NOT ABOUT THE PLACE.
 
    It used to be about the place. `touch-action: none` sat on the cards, so a
@@ -689,6 +705,48 @@ document.addEventListener("dragstart", noSelect, true);
 function stylus(ev) {
   var t = ev.changedTouches && ev.changedTouches[0];
   return !!t && t.touchType === "stylus";
+}
+
+/* AND ONCE A PEN IS AT WORK, THE LAYER REFUSES THE SCROLL OUTRIGHT.
+
+   `touch-action` is read when a gesture STARTS, and a `preventDefault` on
+   `touchstart` is only honoured while the event is cancelable -- which it is not
+   during a fling. So a pen put down while the page is still moving, or a pen
+   whose own gesture the browser has decided to treat as a pan, gets a
+   `pointercancel` instead of ink: the stroke ends where it was, the page pans,
+   and until everything settles nothing the pen does marks anything. Reported as:
+   "I wrote down the first letter and it stopped writing. I paused for a couple of
+   seconds, tried again, and writing continued fine."
+
+   A latch closes that. While the pen is at work the layer carries
+   `touch-action: none`, so the NEXT stroke cannot be reinterpreted however
+   quickly it follows, and a finger landing in that window is a palm rather than a
+   scroll -- which is what a finger arriving beside a working nib is. It opens
+   again a second and a half after the nib was last heard from, and a finger
+   scrolls as freely as ever. Same shape as the slate's own palm window, and the
+   same reason.
+
+   Note what this does NOT do: it does not decide anything by where the hand
+   landed. The hand still decides. It only stops one hand's own gesture from
+   being re-read as the other's. */
+var penAt = 0;
+var PEN_MODE = 1500;
+var penTimer = null;
+
+function penMode(on) {
+  document.body.classList.toggle("pen-writing", !!on);
+}
+
+function penSeen() {
+  penAt = Date.now();
+  penMode(true);
+  if (penTimer) return;
+  penTimer = setInterval(function () {
+    if (drawing || Date.now() - penAt < PEN_MODE) return;
+    clearInterval(penTimer);
+    penTimer = null;
+    penMode(false);
+  }, 500);
 }
 
 function onTouchStart(ev) {
@@ -715,6 +773,13 @@ function begin(ev, card) {
      component that owns it. */
   if (ev.pointerType === "touch"
       && !(window.Slate && window.Slate.fingerWrites && window.Slate.fingerWrites())) return;
+  if (ev.pointerType !== "touch") penSeen();
+  /* A stroke already in progress belongs to a contact whose lift was never
+     delivered -- the browser took the gesture, the app was backgrounded, the nib
+     left past the edge of the glass. Finish it rather than replacing it: the
+     samples are already on the canvas, and dropping them repaints the card
+     without them, which is a letter written and then taken away. */
+  if (drawing) end(null);
   var canvas = layerOf(card);
   var d = {
     id: id, card: card, canvas: canvas,
@@ -778,6 +843,7 @@ function mine(ev, d) {
 
 function move(ev) {
   var d = drawing;
+  if (ev && ev.pointerType !== "touch" && on) penSeen();
   if (!on || !d) return;
   if (!mine(ev, d)) return;
   if (d.erasing) {

@@ -710,6 +710,84 @@ if (es && window.Annotate) {
       window.Annotate.clear('0003');
     }
 
+    // A PEN AT WORK REFUSES THE SCROLL OUTRIGHT, AND NO STROKE IS EVER DROPPED.
+    //
+    // Reported after the layer had been made responsive: "I did just have a blip
+    // where I wrote down the first letter and it stopped writing. I paused for a
+    // couple of seconds, tried again, and writing continued fine."
+    //
+    // That is a gesture being re-read as a pan. `touch-action` is evaluated when
+    // a gesture STARTS, and a `touchstart` can only be cancelled while it is
+    // cancelable -- which it is not during a fling. So a stroke following hard on
+    // another, or one begun while the page was still moving, got a
+    // `pointercancel` instead of ink, and until everything settled nothing the
+    // pen did marked anything.
+    {
+      window.Annotate.setTool('pen');
+      window.Annotate.clear('0003');
+      // Cleared by hand: earlier cases in this file have already driven a pen at
+      // the layer and the latch holds for a second and a half after the last
+      // sample, which is the point of it. What is being asserted is the
+      // transition, not the history.
+      doc.body.classList.remove('pen-writing');
+      var fing = new window.Event('pointerdown', { bubbles: true, cancelable: true });
+      Object.assign(fing, { pointerId: 31, pointerType: 'touch', pressure: 0.5,
+                            clientX: 120, clientY: 60, isPrimary: true });
+      layer.dispatchEvent(fing);
+      !doc.body.classList.contains('pen-writing')
+        ? ok('a finger does not close the scroll off — it is how you scroll')
+        : fail('a finger landing on the layer refuses the scroll, which is the '
+               + 'location rule coming back in another coat');
+      layer.dispatchEvent(new window.Event('pointerup', { bubbles: true }));
+
+      ink('pointerdown', 120, 60, 0.5);
+      ink('pointermove', 150, 60, 0.5);
+      doc.body.classList.contains('pen-writing')
+        ? ok('and refuses it outright the moment a nib is heard from')
+        : fail('a pen at work does not close the scroll off, so the next stroke '
+               + 'can still be taken for a pan');
+      var latch = /body\.pen-writing\s+canvas\.ann-layer\s*\{[^}]*touch-action:\s*none/;
+      latch.test(css3)
+        ? ok('which is what the latch actually does in the stylesheet')
+        : fail('nothing in the CSS answers the pen latch, so it refuses nothing');
+      ink('pointerup', 180, 60, 0.5);
+
+      // And a lift the layer never sees -- the nib leaving past its edge, the
+      // browser taking the gesture, the app going to the background -- must not
+      // leave a stroke half-open, because the next pen-down would then replace it
+      // and the letter already on the glass would be repainted away.
+      var kept = window.Annotate.payload('0003').strokes.length;
+      ink('pointerdown', 120, 120, 0.5);
+      ink('pointermove', 150, 120, 0.5);
+      ink('pointermove', 180, 120, 0.5);
+      // No pointerup at all: the window hears it instead.
+      var away = new window.Event('pointercancel', { bubbles: true, cancelable: true });
+      Object.assign(away, { pointerId: 7, pointerType: 'pen', clientX: 180,
+                            clientY: 120, isPrimary: true });
+      window.dispatchEvent(away);
+      window.Annotate.busy()
+        ? fail('a stroke the layer never saw the end of is still open, and the '
+               + 'next pen-down will replace it')
+        : ok('a lift the layer never saw still ends the stroke');
+      window.Annotate.payload('0003').strokes.length === kept + 1
+        ? ok('and keeps what had been written, rather than dropping it')
+        : fail('the stroke was lost when its lift went missing');
+
+      // Belt: even if nothing ends it, starting a new one commits the old one
+      // instead of throwing it away.
+      var before = window.Annotate.payload('0003').strokes.length;
+      ink('pointerdown', 120, 180, 0.5);
+      ink('pointermove', 150, 180, 0.5);
+      ink('pointermove', 180, 180, 0.5);
+      ink('pointerdown', 300, 180, 0.5);      /* a second nib, no lift between */
+      window.Annotate.payload('0003').strokes.length === before + 1
+        ? ok('and a new stroke starting mid-stroke commits the one it interrupts')
+        : fail('the interrupted stroke was dropped: a letter written and then '
+               + 'taken away');
+      ink('pointerup', 320, 180, 0.5);
+      window.Annotate.clear('0003');
+    }
+
     // A stroke belongs to ONE pointer.
     //
     // The other contacts that arrive on the layer while a stroke is being drawn

@@ -209,7 +209,50 @@ setTimeout(() => setTimeout(() => {
     if (window.Annotate) {
       window.Annotate.load({ '0001': [{ c: '#e0b45c', w: 2, p: [0.1, 0.1, 0.5, 0.5] }] });
     }
+    // THE TAP IS ANSWERED ON THE FRAME IT HAPPENED.
+    //
+    // Reported from the device: "make the time between me hitting 'send' and
+    // something else happening more snappy so I don't get tempted to double send.
+    // If it takes a minute for it to say 'tutor is responding', say 'sending to
+    // tutor' until that happens. I want immediate feedback." There is real work
+    // in front of a send -- `save` encodes the page to a PNG first, because that
+    // picture is what is frozen as the answer -- and then a round trip, and then
+    // the server waking the tutor, and then the next payload before anything on
+    // the board changes at all. A button that swallows a tap for a second is a
+    // button that gets pressed twice, and pressing this one twice sends twice.
+    //
+    // So: nothing on the wire yet, and the board already says so.
+    // With the tutor plainly NOT working: "sending" is a statement about the
+    // wire, and saying it while the tutor is already writing would be the board
+    // guessing.
+    window.__render({
+      state: { course: 'X', mode: 'math' },
+      cards: [{ id: '0001', kind: 'question', title: 'Q', body: 'hi', mtime: now }],
+      messages: [], uploads: [], slate: [], turns: [],
+      agent: { agent: 'claude', state: 'listening', last_seen: now },
+    });
+    const busyEl = doc.getElementById('busy');
+    const busyTxt = doc.getElementById('busy-text');
+    const realRaf = window.requestAnimationFrame;
+    window.requestAnimationFrame = () => 0;      /* the frames do not come */
     if (sendBtn && sendBtn.onclick) sendBtn.onclick();
+    !seen.length
+      ? ok('a send does no work on the frame the button was pressed')
+      : fail('the encode and the request happened inline, on the frame of the '
+             + 'tap, which is the pause that invites a second one');
+    busyEl && !busyEl.hidden && /sending/i.test(busyTxt.textContent)
+      ? ok('and the board says "' + busyTxt.textContent + '" straight away')
+      : fail('nothing on the board answered the tap (strip '
+             + (busyEl && busyEl.hidden ? 'hidden' : 'shown') + ', text "'
+             + (busyTxt && busyTxt.textContent) + '")');
+    sendBtn.disabled
+      ? ok('and Send will not take a second tap until the first has gone')
+      : fail('Send is still armed, so an impatient second tap sends twice');
+
+    // Then the frames come and the work goes out.
+    window.requestAnimationFrame = (fn) => fn();
+    if (sendBtn && sendBtn.onclick) sendBtn.onclick();
+    window.requestAnimationFrame = realRaf;
 
     const sent = seen.filter((r) => r.url.indexOf('/slate/save') !== -1 && r.body && r.body.send);
     sent.length

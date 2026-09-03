@@ -1914,7 +1914,45 @@ function create(opts) {
      is the student's decision, not a guess. Without a hook this sends, exactly
      as it always did. */
   bSend.onclick = function () {
-    var go = function () { save(true); };
+    var go = function () {
+      /* SAY SOMETHING ON THIS FRAME.
+
+         A send is the one action on this surface with real work in front of it:
+         `save` encodes the page to a PNG first, synchronously, because that
+         picture is what is frozen as the answer -- and on a worked page that is
+         a few hundred milliseconds of main thread before the request is even
+         made. Then the round trip, then the server waking the tutor, then the
+         next payload before anything on the board changes. Reported as: "make
+         the time between me hitting 'send' and something else happening more
+         snappy so I don't get tempted to double send... I want immediate
+         feedback." A button that swallows a tap for a second is a button that
+         gets pressed twice, and pressing this one twice sends twice.
+
+         So the label goes up now, the host is told now, and the work waits for
+         the next frame -- a frame the browser will actually use to paint,
+         because nothing is holding it. */
+      savedTag.textContent = "sending…";
+      savedTag.classList.add("busy");
+      bSend.disabled = true;
+      if (opts.onSending) opts.onSending();
+      /* And it stays refused until the send has actually gone. Two taps is two
+         answers, and the reason for the second tap was always that the first
+         appeared to do nothing. Released on a timer as well, because a request
+         that hangs must not take the button with it. */
+      var free = function () { bSend.disabled = false; };
+      var run = function () {
+        setTimeout(free, 8000);
+        var going = save(true);
+        if (going && going.then) going.then(free, free); else free();
+      };
+      /* Two frames, not one. A `requestAnimationFrame` callback runs BEFORE the
+         paint it belongs to, so doing the encode in the first one blocks the
+         very frame that was supposed to show the label. The second callback runs
+         before the frame after that, by which time the label is on the glass. */
+      var raf = window.requestAnimationFrame
+             || function (fn) { return setTimeout(fn, 16); };
+      raf(function () { raf(run); });
+    };
     if (opts.beforeSend) opts.beforeSend(go); else go();
   };
 

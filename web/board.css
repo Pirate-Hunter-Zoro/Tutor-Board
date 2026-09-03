@@ -227,6 +227,16 @@ canvas.ann-layer {
   z-index: 2;
 }
 body.annotating canvas.ann-layer { pointer-events: auto; }
+/* While the pen is at work, the layer refuses the scroll outright. `touch-action`
+   is read when a gesture STARTS and a `touchstart` can only be cancelled while it
+   is cancelable -- which it is not during a fling -- so without this a stroke
+   following hard on the heels of another could be re-read as a pan, and then
+   nothing the pen did marked anything until the page settled. Reported as: "I
+   wrote down the first letter and it stopped writing. I paused for a couple of
+   seconds, tried again, and writing continued fine." `annotate.js` sets the class
+   when the nib is heard from and drops it a second and a half after it goes
+   quiet, so a finger scrolls exactly as freely as before. */
+body.pen-writing canvas.ann-layer { touch-action: none; }
 
 /* While annotating, the lesson is a surface to write on and not text to select.
    Without this the pen drags a native selection instead: the card turns blue,
