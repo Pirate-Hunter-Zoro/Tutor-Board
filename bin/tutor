@@ -868,7 +868,13 @@ def keep_transcript_files(root, git, note):
     disk in one move.
     """
     paths = list(TRANSCRIPT_DIRS) + list(TRANSCRIPT_FILES)
-    p = git("diff", "--cached", "--name-only", "--diff-filter=D", "--", *paths)
+    # `--no-renames`, and it is load-bearing: two slate pages are routinely
+    # byte-identical -- a page cut as a copy of another, an attempt handed in
+    # twice -- so a deletion paired with an addition of the same bytes is
+    # reported as a RENAME, and a rename is not a deletion. The very files this
+    # is here to protect are the ones most likely to hide behind it.
+    p = git("diff", "--cached", "--no-renames", "--name-only",
+            "--diff-filter=D", "--", *paths)
     if p.returncode != 0:
         return []
     gone = [l.strip() for l in p.stdout.decode("utf-8", "replace").splitlines()
@@ -884,6 +890,49 @@ def keep_transcript_files(root, git, note):
     for i in range(0, len(put_back), 200):
         git("checkout", "HEAD", "--", *put_back[i:i + 200])
     note("transcript: put back %d file(s) another machine's snapshot dropped: %s"
+         % (len(put_back),
+            ", ".join(os.path.basename(x) for x in put_back[:6])
+            + (" …" if len(put_back) > 6 else "")))
+    return put_back
+
+
+def keep_pulled_files(root, git, note, before):
+    """Undo a pull that took somebody's working off the disk.
+
+    THE PULL IS THE DESTRUCTIVE HALF. Two clones commit snapshots of `live/`,
+    so each one's commit deletes the other's newest pages -- and a fast-forward
+    then CHECKS THAT OUT, physically removing files this machine has and the
+    other never saw. `keep_transcript_files` cannot help afterwards: HEAD has
+    moved, and a file HEAD does not hold is a file HEAD cannot put back.
+
+    Same rule as the commit side, and it has to be the same rule: a deletion
+    whose basename is now in `live/archive/` is `board archive` doing its job,
+    and anything else is a snapshot talking about a machine it is not on. Those
+    come back out of the commit we were on before the pull, and the beat that
+    follows commits them as the additions they are.
+    """
+    if not before:
+        return []
+    after = git("rev-parse", "HEAD").stdout.decode().strip()
+    if not after or after == before:
+        return []
+    paths = list(TRANSCRIPT_DIRS) + list(TRANSCRIPT_FILES)
+    p = git("diff", "--no-renames", "--name-only", "--diff-filter=D",
+            before, after, "--", *paths)      # see above on --no-renames
+    if p.returncode != 0:
+        return []
+    gone = [l.strip() for l in p.stdout.decode("utf-8", "replace").splitlines()
+            if l.strip()]
+    if not gone:
+        return []
+    filed = archived_names(root)
+    put_back = [g for g in gone if os.path.basename(g) not in filed]
+    if not put_back:
+        return []
+    for i in range(0, len(put_back), 200):
+        git("checkout", before, "--", *put_back[i:i + 200])
+    note("transcript: a pull would have removed %d file(s) of this machine's "
+         "working; put back: %s"
          % (len(put_back),
             ", ".join(os.path.basename(x) for x in put_back[:6])
             + (" …" if len(put_back) > 6 else "")))
@@ -920,10 +969,18 @@ def sync_transcript(root, log=None):
     try:
         if git("remote", "get-url", "origin").returncode != 0:
             return
+        # Where we were, so a pull that DELETES somebody's working can be told
+        # from one that merely brings work in. The pull is the destructive half
+        # of this loop and the guard below the commit cannot see it: after a
+        # fast-forward, HEAD no longer holds the file, so there is nothing left
+        # to restore it from. This is the only moment that knows.
+        before = git("rev-parse", "HEAD").stdout.decode().strip()
         p = git("pull", "--ff-only")
         if p.returncode != 0:
             out = p.stdout.decode("utf-8", "replace").strip().splitlines()
             note("transcript: not pulled (%s)" % (out[-1] if out else "pull failed"))
+        else:
+            keep_pulled_files(root, git, note, before)
         git("add", "-A", "live")
         # A TRANSCRIPT IS APPEND-ONLY, SO A COMMIT MUST NEVER SAY A PAGE IS GONE.
         #

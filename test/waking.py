@@ -309,6 +309,45 @@ else:
     check("with nothing missing, it does nothing at all",
           ns["keep_transcript_files"](work, gg, said.append) == [])
 
+    # AND THE PULL, WHICH IS THE HALF THAT ACTUALLY DELETES. A fast-forward
+    # checks the other machine's snapshot out and removes files from disk, and
+    # by then HEAD no longer holds them -- so the commit-side guard has nothing
+    # to restore from. This is the only moment that knows.
+    gg("commit", "-q", "-m", "put back")
+    ours = gg("rev-parse", "HEAD").stdout.decode().strip()
+
+    # The other machine's snapshot: it never saw page 3, and it filed a card.
+    gg("checkout", "-q", "-b", "theirs")
+    os.remove(os.path.join(work, "live/slate/page-03.json"))
+    os.remove(os.path.join(work, "live/answers/t0001-r1.json"))
+    os.makedirs(os.path.join(work, "live/archive/2026-09-04"), exist_ok=True)
+    open(os.path.join(work, "live/archive/2026-09-04/0002-second.md"), "w").write("x")
+    open(os.path.join(work, "live/slate/page-04.json"), "w").write("{}")
+    gg("add", "-A")
+    gg("commit", "-q", "-m", "their snapshot")
+    theirs = gg("rev-parse", "HEAD").stdout.decode().strip()
+    # What a fast-forward onto it looks like from here.
+    gg("checkout", "-q", theirs)
+
+    # And a deletion paired with an addition of the SAME BYTES must still read
+    # as a deletion. Slate pages are routinely byte-identical -- a page cut as a
+    # copy of another, an attempt handed in twice -- and git reports that pair as
+    # a rename, which is not a deletion, so the files this exists to protect are
+    # exactly the ones that would hide behind rename detection.
+    said2 = []
+    put2 = ns["keep_pulled_files"](work, gg, said2.append, ours)
+
+    check("a pull that removed a slate page puts it back on disk",
+          os.path.isfile(os.path.join(work, "live/slate/page-03.json")))
+    check("and the frozen answer it removed with it",
+          os.path.isfile(os.path.join(work, "live/answers/t0001-r1.json")))
+    check("while what the pull BROUGHT is kept, because that is the point of it",
+          os.path.isfile(os.path.join(work, "live/slate/page-04.json")))
+    check("and the beat says what it saved",
+          any("would have removed" in s for s in said2))
+    check("a pull that took nothing away does nothing",
+          ns["keep_pulled_files"](work, gg, said2.append, theirs) == [])
+
 print()
 print(("%d FAILURES" % len(fails)) if fails
       else "a tutor says when it is waking, and silence is never the answer")

@@ -153,10 +153,21 @@ which kind of subject it is and the board adapts.
 > preserved written work"* — except that this time the work really had gone from the sheet.
 >
 > Nothing in this tool ever deletes a slate page, an answer or a card except `board archive`, which
-> RENAMES it under `live/archive/`. So a staged deletion whose basename is somewhere in the archive
-> is accounted for, and anything else is a snapshot talking about a machine it is not on: those are
-> checked back out of `HEAD`, on disk as well as in the index, which also repairs a clone that has
-> already been clobbered. The four pages were recovered from the divergent line and put back.
+> RENAMES it under `live/archive/`. So a deletion whose basename is somewhere in the archive is
+> accounted for, and anything else is a snapshot talking about a machine it is not on. Those are put
+> back — on disk as well as in the index, which also repairs a clone already clobbered.
+>
+> **Both halves, because the pull is the destructive one.** Guarding the commit alone does nothing
+> about it: a fast-forward checks the other machine's snapshot out and removes the files, and by
+> then `HEAD` no longer holds them, so there is nothing left to restore from. The pre-pull commit is
+> recorded and the same rule applied against it, which is the only moment that knows.
+>
+> And `--no-renames` on both diffs, which is load-bearing rather than tidy: slate pages are
+> routinely byte-identical — a page cut as a copy of another, an attempt handed in twice, and this
+> repository has four such pairs on disk — so a deletion paired with an addition of the same bytes
+> is reported as a RENAME, and a rename is not a deletion. The files this exists to protect are
+> precisely the ones that would hide behind it. The four pages were recovered from the divergent
+> line and put back.
 >
 > `test/waking.py` holds the server side — a start with no pid yet, its expiry, a record from
 > another node, a stamped failure and its staleness, `notes.waiting` off disk, and the launcher's
