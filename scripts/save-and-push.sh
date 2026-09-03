@@ -30,6 +30,26 @@ git rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
   exit 1
 }
 
+# Never commit into an operation somebody started in a terminal. This script is
+# run unattended -- from the board's save button, from `board finish`, from
+# ship.sh -- and a repository part-way through a rebase or a merge has its own
+# plan for its next commit. Say what is in the way and change nothing; the same
+# rule lives in `tutorboard/worktree.py` for everything on the Python side.
+GITDIR="$(git rev-parse --git-dir)"
+for marker in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD \
+              REVERT_HEAD BISECT_LOG; do
+  if [ -e "$GITDIR/$marker" ]; then
+    echo "$marker is outstanding in this repository, so nothing was committed."
+    echo "Finish or abort it, then save again. Nothing has been lost."
+    exit 1
+  fi
+done
+if [ "$(git rev-parse --abbrev-ref HEAD)" = "HEAD" ]; then
+  echo "HEAD is detached here, so a commit would be reachable from nothing."
+  echo "Check out a branch, then save again. Nothing has been lost."
+  exit 1
+fi
+
 # A clone has to opt into tracked hooks once. Do it here rather than making
 # anyone remember, so the attribution stripper is on from the first commit.
 if [ -d "$ROOT/.githooks" ] && [ -z "$(git config core.hooksPath || true)" ]; then

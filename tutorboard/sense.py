@@ -3,6 +3,14 @@
 In a headless session these strings are the whole prompt. The shape of a
 lesson is carried here rather than left to be inferred, because a model handed
 a chapter and told to teach writes a lecture every time.
+
+There is ONE shape, for every repository. There used to be two: a `mode` in
+`tutorboard.json` said `math` or `code`, and a code repository was handed a
+different method, a different first card and three tap-signals instead of an
+answer. It is gone. A repository whose subject is code is still taught by being
+asked to do things; what differs between courses is where the exercises come
+from -- a book has them at the end of a section, and a repository without one
+has them wherever it says its work is planned.
 """
 
 import os
@@ -51,50 +59,64 @@ METHOD_SENSE = (
 )
 
 
-def code_sense(label, stance="teach"):
-    """Where a code project says what comes next: its README, and what it points at.
+# The one thing a repository may still say about how it is taught, and it is a
+# STANCE rather than a subject: teach the work, or do it. It is a paragraph
+# appended to the method rather than a method of its own -- everything about the
+# shape of a turn is unchanged, which is why it is one line of configuration.
+DO_SENSE = (
+    "THIS REPOSITORY'S STANCE IS DO, NOT TEACH. It said so in writing, in "
+    "tutorboard.json, so: you write the code yourself, run what needs running, "
+    "and commit when it is right. Do not withhold an implementation and do not "
+    "ask them to type it. The card is a report rather than an exercise -- what "
+    "you changed, what it does now, what you ran and what came back, and the one "
+    "decision or check you need from them. Everything else above holds "
+    "unchanged: still one card, still short, still written before the rest of "
+    "the work, still one thing per turn, and it still stops and waits. Say what "
+    "you did NOT verify -- a card claiming a job ran when it was only submitted "
+    "is worse than no card. "
+)
 
-    This is the whole prompt in a headless session, so it carries the shape as
-    well as the place -- and the shape is the part that was wrong. A project has
-    no chapters, no sections and no exercises, and manufacturing them out of the
-    README's structure is the specific failure this exists to prevent: those
-    headings describe how the system is built, not an order to learn it in.
+
+def stance_sense(stance):
+    """The doing override, or nothing at all.
+
+    Never guessed, and nothing infers it from what is in the repository -- a
+    directory full of Python is not a request to have the Python written. Only a
+    repository that asked in writing gets this paragraph.
     """
-    where = ("They are working on %r; start there. " % label) if label else ""
+    return DO_SENSE if stance == "do" else ""
+
+
+def where_sense(book):
+    """Where the exercises come from, which is the only thing a subject decides.
+
+    A course that follows a book has them at the end of a section. A repository
+    that does not is not thereby a different kind of sitting -- it is the same
+    lesson whose exercises come from wherever the repository says its work is
+    planned. This used to be a whole second method, `code_sense`, and it carried
+    a whole second interface with it.
+    """
+    if book:
+        return ("Read the section's exercises before you teach anything and "
+                "choose a manageable few -- three to five -- saying which and "
+                "why in your first card. ")
     return (
-        "Follow live/TEACHING.md, the code-project half of it. This repository is "
-        "a PROJECT, not a course: there are no chapters, no sections and no "
-        "exercises, and you must not invent any out of the README's headings.\n\n"
-        "Read README.md at the root first. It is the entry point, and it says "
-        "where the work is planned -- a task list, a planning document, a "
-        "companion repository. Follow that pointer and read what it names: that "
-        "is what says what comes next, and it outranks anything you would have "
-        "chosen yourself. Read HANDOFF.md too if there is one. If the README "
-        "names nothing, or what it names is missing, ask them in your first card "
-        "rather than picking an agenda of your own.\n\n"
-        + where +
-        (
-            # The repository has said, in writing, that it wants the work done
-            # rather than taught. Nothing else about a turn changes: one card,
-            # short, card first, and it still stops and waits.
-            "This repository's stance is DO, not teach: you write the code "
-            "yourself, run what needs running, and commit when it is right. Do "
-            "not withhold an implementation and do not ask them to type it. The "
-            "card is a report, not an exercise: what you changed, what it does "
-            "now, what you ran and what came back, and the one decision or "
-            "check you need from them. Still one card, still short, still "
-            "written before the rest of the work."
-            if stance == "do" else
-            "Then write ONE card saying what to change next: the file, what it "
-            "has to do, and how they will know it works. They write the code in "
-            "their own editor -- you never write it and never put a solution on "
-            "the board. One change per turn, then stop and wait for 'ready to "
-            "check'."
-        )
+        "This repository does not follow a book: no chapters, no sections, and "
+        "no exercises at the end of anything. That changes where the exercises "
+        "come from and NOTHING else -- the lesson is still exercises and they "
+        "are still answered on the board. Read README.md at the root first, and "
+        "follow what it points at -- a task list, a planning document, a "
+        "companion repository -- because that is what says what comes next and "
+        "it outranks anything you would have chosen. Read HANDOFF.md too if "
+        "there is one. Do NOT manufacture a curriculum out of the README's "
+        "headings: they describe how the thing is built, not an order to learn "
+        "it in. Then set the exercises the work actually needs, three to five of "
+        "them, saying which and why in your first card. If nothing names what "
+        "comes next, ask in that card rather than picking an agenda of your own. "
     )
 
 
-def review_sense(repo, st, mode):
+def review_sense(repo, st):
     """A test review, in a sentence the assistant can act on.
 
     A review is not a third way of teaching -- it is the homework loop pointed at
@@ -110,7 +132,11 @@ def review_sense(repo, st, mode):
     """
     chosen = review.scope(repo.root, st)
     of = review.kind(repo.root) or "chapters"
-    project = mode == "code"
+    # What this repository HAS, not what it was once declared to be. `review`
+    # already answers that -- chapters where there is a book, the repository's
+    # own top-level parts where there is not -- and asking it is how this stopped
+    # needing a mode to tell it.
+    project = of == "parts"
     what = "parts of this project" if project else "chapters"
     counted = (review.noun("parts", len(chosen)) + " of this project") \
         if project else review.noun("chapters", len(chosen))
@@ -215,34 +241,34 @@ def session_sense(repo):
     start. If nobody set one, say that too, and say where to look instead: a
     course orders itself somewhere, and guessing is how a course gets opened in
     the middle.
+
+    One method, whatever is in the repository. What the repository decides is
+    where the exercises come from -- `where_sense` -- and whether it asked for
+    the work to be done rather than set -- `stance_sense`. Neither of those is a
+    different sitting, and there is no longer any way to declare one.
     """
     st = repo.state()
     kind = st.get("session") or "lecture"
     chapter = (st.get("chapter") or "").strip()
 
-    # A code repository is a PROJECT, and everything below this is written for a
-    # course that follows a book. Without this branch it fell through to the last
-    # case, which tells the assistant to "begin at the beginning of the course as
-    # the repository itself orders it, and say in your first card which chapter
-    # you are opening" -- so it dutifully invented chapters out of the README's
-    # section headings and opened "Chapter 1". There are no chapters in a
-    # project. There is a README, and the README says where the work is planned.
     cfg_here = config.read_config(repo.root)
-    # A test review is the one sitting that reads the same in both kinds of
-    # repository, so it is settled before the project branch rather than inside
-    # it: a project being revised is being asked questions, not set work, and
-    # falling through to code_sense would have told it to go and find the next
-    # change instead.
+    doing = stance_sense(cfg_here.get("stance"))
+    # A test review is settled first because it is the one sitting whose scope
+    # comes from the student rather than from the repository, and it says its own
+    # thing about where the questions come from.
     if kind == "review":
-        return review_sense(repo, st, cfg_here.get("mode"))
-    if cfg_here.get("mode") == "code":
-        return code_sense(chapter, cfg_here.get("stance"))
+        return review_sense(repo, st) + doing
+
+    # Whether this repository follows a book, which is the ONLY question about a
+    # subject anything here still asks. A course with a syllabus has its
+    # exercises written for it; one without has to be told where to look, and
+    # being told is what stops it inventing chapters out of a README.
+    book = syllabus.opening(repo.root)
+
     # In a headless session this line is the whole prompt, so it has to carry the
     # pointer to the method as well as the pointer to the place.
-    how = (METHOD_SENSE if kind == "homework" else
-           METHOD_SENSE + "Read the section's exercises before you teach anything "
-           "and choose a manageable few -- three to five -- saying which and why "
-           "in your first card. ")
+    how = METHOD_SENSE if kind == "homework" else METHOD_SENSE + where_sense(book)
+    how += doing
     if kind == "homework":
         st_hw = homework.status(repo.root, st)
         if st_hw and st_hw.get("name"):
@@ -261,8 +287,7 @@ def session_sense(repo):
     # A course that follows a book says so on disk. Naming its actual first
     # chapter beats telling an assistant to work it out, which is what produced
     # a Galois course opened at field extensions -- chapter four.
-    first = syllabus.opening(repo.root)
-    if first:
+    if book:
         every = syllabus.chapters(repo.root)
         return (how + "This sitting is a %s and carries no chapter label. This course "
                 "follows a book and orders itself in %d chapters; the first is "
@@ -270,8 +295,9 @@ def session_sense(repo):
                 "chapter you are opening in your first card. Do not start from "
                 "whatever you consider the foundation of the subject -- start "
                 "where the book starts."
-                % (kind, len(every), syllabus.label(first)))
-    return (how + "This sitting is a %s and carries no chapter label, so nothing here "
-            "says where to start. Do not guess from the subject: begin at the "
-            "beginning of the course as the repository itself orders it, and say "
-            "in your first card which chapter you are opening." % kind)
+                % (kind, len(every), syllabus.label(book)))
+    return (how + "This sitting is a %s and carries no label of its own, so the only "
+            "thing that says where to start is what the repository points at -- "
+            "read that before your first card, and say in that card what you are "
+            "opening and why. Do not guess from the subject and do not survey the "
+            "repository for an agenda of your own." % kind)

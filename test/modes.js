@@ -1,10 +1,15 @@
-// A repository declares whether it is a mathematics course or a code course,
-// and the board has to obey it. The answer panel is the same either way -- a
-// writing surface and a typed half, one panel -- but the three code signals
-// (ready to check, help, confused) belong to a code course and never to maths.
+// ONE BOARD, IN EVERY REPOSITORY.
 //
-// The markup ships the controls hidden and the script decides, so nothing about
-// this is visible in the HTML. It has to be exercised.
+// A repository used to declare a `mode` -- `math` or `code` -- and the board
+// obeyed it: a code course got three tap-signals docked over the lesson (ready
+// to check, I need help, I'm confused) and a mathematics course did not. The
+// mode is gone. What is left is the answer panel, which every course always had:
+// a writing surface and a typed half, one panel, and the student decides which.
+//
+// So this suite has two jobs. The first is the panel's own behaviour -- when it
+// is offered, what closes it, what a skip does -- which is what it always
+// tested. The second is that a `mode` in a payload changes NOTHING, because the
+// board is served to devices holding lessons and states written when it did.
 
 const fs = require('fs');
 const path = require('path');
@@ -97,15 +102,13 @@ function check(name, cond) {
 function paint(mode, cards, turns) {
   render({ state: { course: 'X', mode }, cards: cards || [], turns: turns || [],
            messages: [], uploads: [], slate: [] });
-  return { composer: registry.composer.hidden, answer: registry.writer.hidden,
-           empty: registry.empty.hidden };
+  return { answer: registry.writer.hidden, empty: registry.empty.hidden };
 }
 
 const question = [{ id: '0001', kind: 'question', title: 'Which subfield?', body: 'q', mtime: now }];
 
 let r = paint('math', question, []);
-check('math: no signals, ever', r.composer === true);
-check('math: the answer panel is offered while an answer is owed', r.answer === false);
+check('the answer panel is offered while an answer is owed', r.answer === false);
 
 // Sending is a checkpoint, not an exit. The tutor's next move is usually to
 // point at a mistake in what was just sent, so the panel and the ink have to
@@ -113,7 +116,7 @@ check('math: the answer panel is offered while an answer is owed', r.answer === 
 // impossible without leaving the lesson.
 r = paint('math', question, [{ id: 't0001', rev: 1, kind: 'ink', answers: '0001',
                                t: now + 10, t0: now + 10 }]);
-check('math: the answer block survives a send, so it can be corrected', r.answer === false);
+check('the answer block survives a send, so it can be corrected', r.answer === false);
 
 // A new question is a new thing to answer, so the surface stays open -- moved on
 // to the new question rather than closed. The old assertion here used "hidden" as
@@ -122,14 +125,14 @@ check('math: the answer block survives a send, so it can be corrected', r.answer
 const question2 = [{ id: '0002', kind: 'question', title: 'And now?', body: 'q', mtime: now + 20 }];
 r = paint('math', question2, [{ id: 't0001', rev: 1, kind: 'ink', answers: '0001',
                                 t: now + 30, t0: now + 30 }]);
-check('math: an unanswered question keeps a surface open', r.answer === false);
+check('an unanswered question keeps a surface open', r.answer === false);
 
 // What actually closes it is the tutor settling the question.
 r = paint('math', question.concat([{ id: '0002', kind: 'correct', title: 'Yes',
                                      body: 'that is it', mtime: now + 40 }]),
           [{ id: 't0001', rev: 1, kind: 'ink', answers: '0001',
              t: now + 30, t0: now + 30 }]);
-check('math: a "correct" card settles the question and closes the block',
+check('a "correct" card settles the question and closes the block',
       r.answer === true);
 
 // Feedback that is not a settlement leaves it open, below the feedback, because
@@ -142,21 +145,36 @@ r = paint('math', question.concat([{ id: '0002', kind: 'wrong', title: 'Not quit
                                      body: 'try this', mtime: now + 50 }]),
           [{ id: 't0001', rev: 1, kind: 'ink', answers: '0001',
              t: now + 30, t0: now + 30 }]);
-check('math: after feedback the surface is still there to correct the work on',
+check('after feedback the surface is still there to correct the work on',
       r.answer === false);
 
 r = paint('math', [{ id: '0001', kind: 'lesson', body: 'x', mtime: now }], []);
-check('math: no offer when nothing was asked', r.answer === true);
+check('no offer when nothing was asked', r.answer === true);
+
+// --- a mode in the payload is dead data ----------------------------------
+// A state.json written before this change still says `mode: code`, and so does
+// a course's own tutorboard.json until somebody edits it. Neither may bring
+// anything back. There is no #composer in the markup at all now, which is the
+// strongest form of this: nothing to reveal.
+check('the signals are gone from the page entirely', !ids.has('composer'));
+check('and no signal button survives in the markup',
+      !/data-signal=/.test(html) && !/class="sig/.test(html));
 
 r = paint('code', question, []);
-check('code: the signals are present', r.composer === false);
-check('code: the answer panel is there too, to write or type', r.answer === false);
-
+check('a payload still saying mode:code gets the ordinary answer panel',
+      r.answer === false);
 r = paint('code', [], []);
-check('code: the signals are there before anything is asked', r.composer === false);
+check('and an empty one still gets the empty state and the begin button',
+      r.empty === false);
+r = paint('math', question, []);
+check('which is exactly what a payload saying mode:math gets', r.answer === false);
 
-r = paint(undefined, question, []);
-check('missing mode falls back to maths, the stricter one', r.composer === true);
+// Nothing on the page may branch on a mode again. `render` used to stamp
+// `data-mode2` on the body and the stylesheet painted from it.
+paint('code', question, []);
+check('nothing is stamped on the body from a mode',
+      !('mode2' in sandbox.document.body.dataset));
+check('and board.js does not read one', !/state\.mode/.test(src));
 
 // A prompt that cannot be declined is a prompt that gets answered badly to make
 // it go away. Skipping is a turn like any other -- it is in the transcript and it
@@ -164,40 +182,38 @@ check('missing mode falls back to maths, the stricter one', r.composer === true)
 // whole point of skipping is that the prompt goes.
 r = paint('math', question, [{ id: 't0009', rev: 1, kind: 'text', signal: 'skip',
                                answers: '0001', t: now + 10, t0: now + 10 }]);
-check('math: skipping closes the answer block', r.answer === true);
-check('math: and does not conjure the signals', r.composer === true);
+check('skipping closes the answer block', r.answer === true);
 
 // A skip belongs to the question it declined. The next question is a fresh ask.
 r = paint('math', question.concat([{ id: '0002', kind: 'question', title: 'Next',
                                      body: 'q', mtime: now + 20 }]),
           [{ id: 't0009', rev: 1, kind: 'text', signal: 'skip', answers: '0001',
              t: now + 10, t0: now + 10 }]);
-check('math: a later question is still asked after a skip', r.answer === false);
+check('a later question is still asked after a skip', r.answer === false);
 
-// The cold start. A maths board with no cards offers no question, so no answer is
+// The cold start. A board with no cards offers no question, so no answer is
 // owed, so the slate never opens -- and there is no text box either. Without a
 // way to say the first thing, the first turn of every session has to come from a
 // terminal, and the board's whole promise is that it does not.
 r = paint('math', [], []);
-check('math: an empty board still says it is empty', r.empty === false);
-check('math: and still has no signals', r.composer === true);
-check('math: the cold start is a button, not a composer',
+check('an empty board still says it is empty', r.empty === false);
+check('the cold start is a button, not a composer',
       ids.has('begin') && /id="begin"[\s\S]*?<\/button>/.test(html));
-check('math: the begin button lives in the empty state, so a card retires it',
+check('the begin button lives in the empty state, so a card retires it',
       /<div id="empty"[\s\S]*?id="begin"[\s\S]*?<\/div>/.test(html));
 
 // One card is enough to retire it: the empty state goes, and the button with it.
 r = paint('math', [{ id: '0001', kind: 'lesson', body: 'x', mtime: now }], []);
-check('math: a card retires the empty state', r.empty === true);
+check('a card retires the empty state', r.empty === true);
 
 // But asking does NOT retire it. The way out stays open until the tutor has
 // actually written something: keying this on the transcript rather than on the
 // cards removed the only control on the page the moment it was used, and if
-// nothing was listening there was then no way to ask again and no text box in
-// maths to ask with.
+// nothing was listening there was then no way to ask again and no text box
+// to ask with.
 r = paint('math', [], [{ id: 't0001', rev: 1, kind: 'text', signal: 'begin',
                          t: now, t0: now }]);
-check('math: having asked with no answer, the way out is still there', r.empty === false);
+check('having asked with no answer, the way out is still there', r.empty === false);
 
 console.log(fails ? '\n' + fails + ' FAILURES' : '\nall mode checks passed');
 process.exit(fails ? 1 : 0);

@@ -121,9 +121,37 @@ if [ "$REPORT" -eq 0 ]; then
       continue
     fi
     name="$(basename "$root")"
+
+    # NEVER INTO A REPOSITORY SOMEBODY IS PART-WAY THROUGH SOMETHING IN. A
+    # rebase, a merge, a cherry-pick or a bisect means a terminal here has its
+    # own plan for the next commit, and stashing or resetting underneath that is
+    # how an afternoon disappears -- `git stash` may even succeed and leave the
+    # operation half-applied. The same rule lives in `tutorboard/worktree.py`
+    # for everything on the Python side, and there is one reason for it: a course
+    # is somewhere its owner WORKS, not only somewhere they are taught.
+    gitdir="$(git -C "$root" rev-parse --git-dir 2>/dev/null)"
+    case "$gitdir" in /*) ;; *) gitdir="$root/$gitdir" ;; esac
+    busy=""
+    for marker in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD \
+                  REVERT_HEAD BISECT_LOG; do
+      [ -e "$gitdir/$marker" ] && busy="$marker"
+    done
+    if [ -n "$busy" ]; then
+      line "$name: $busy is outstanding — left exactly as it is"
+      continue
+    fi
+
     git -C "$root" fetch --quiet origin 2>/dev/null
     branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)"
     [ -z "$branch" ] && { line "$name: no branch checked out, skipped"; continue; }
+    # A detached HEAD is somebody looking at an old commit, and `origin/HEAD`
+    # exists in most clones -- so without this the branch below happily read
+    # "HEAD" as a branch name and reset a repository somebody was reading around
+    # in onto the remote's default branch.
+    if [ "$branch" = "HEAD" ]; then
+      line "$name: HEAD is detached — left exactly as it is"
+      continue
+    fi
     if ! git -C "$root" rev-parse --verify --quiet "origin/$branch" >/dev/null; then
       line "$name: no origin/$branch, left alone"
       continue

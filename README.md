@@ -1,6 +1,6 @@
 # Tutor-Board
 
-A live board for tutoring sessions — mathematics or code.
+A live board for tutoring sessions.
 
 The assistant writes a lesson card into a file. A local server sees the file appear and pushes it
 to every browser that has the board open — laptop, iPad, phone — where it renders as typeset
@@ -10,8 +10,9 @@ assistant reads.
 
 It exists because reading mathematics as `\QQ(\sqrt[3]{2})` in a terminal is miserable, and
 because a PDF that has to be rebuilt and re-scrolled after every sentence is not a conversation.
-The same turned out to be true of being walked through code on a tablet, so a repository declares
-which kind of subject it is and the board adapts.
+The same turned out to be true of being walked through code on a tablet — and, after a while, that
+the two wanted the *same* board rather than two. A repository declares nothing about its subject
+now: one interface, one method, whether the exercises are proofs or functions.
 
 **Contents** — [What it is not](#what-it-is-not) · [The three surfaces](#the-three-surfaces) ·
 [Commands](#commands) · [Writing a card](#writing-a-card) · [The slate](#the-slate--writing-by-hand)
@@ -44,7 +45,75 @@ which kind of subject it is and the board adapts.
 >   board that is answering) but it is worth confirming: the port the HTTPS name points at should
 >   be the course they are working in.
 >
-> ### Where this is right now, 3 September 2026 (evening)
+> ### Where this is right now, 3 September 2026 (night)
+>
+> **There is one board now, and one method, in every repository.** Reported from Algo-Solutions:
+> *"I don't like the tutoring interfase. This whole ready to check button, etc. is messing with my
+> mojo from when I was doing Galois Theory. Just make how we do the tutor in Galois Theory the norm.
+> Don't have a 'code' mode any more. Any tutor should be able to understand when I tell them via
+> typing or writing that I just implemented a change."*
+>
+> **A `mode` was one word in `tutorboard.json` and it forked almost everything.** `math` or `code`,
+> declared or GUESSED by walking the tree for a `.tex`, and from that one word came: which teaching
+> method was delivered into `live/TEACHING.md`, what the cold-start prompt told a headless tutor,
+> whether `board push` archived the lesson or left it open, what the contents drawer said when a
+> repository had no chapters, and whether the bottom of the screen carried an answer panel or three
+> tap-buttons — *ready to check*, *I need help*, *I'm confused*. Two boards, and switching course on
+> the same iPad switched interface. It is gone: `config.py` no longer has the key, `guess_mode` and
+> `for_mode` and `code_sense` are deleted, and `read_config` POPS a `mode` still sitting in a
+> course's own file, because those files are in the course repositories and a stale key must never
+> be why two boards differ.
+>
+> **What actually differed between two kinds of repository was one thing, and it was never the
+> mode's to say.** Where the exercises come from: the end of a section, in a book, or whatever the
+> README points at. That is now read off what the repository HAS — a syllabus, or not — which is a
+> fact rather than a declaration, and facts do not go stale. `review.units` was already doing
+> exactly this to decide whether a test review covers chapters or the repository's own parts, and
+> `session_sense` now asks the same question. A repository with no book gets `where_sense`: read the
+> README, follow what it points at, do not manufacture a curriculum out of its headings, ask rather
+> than choosing an agenda. Which is every useful sentence the old `code_sense` had, minus the second
+> interface it dragged along.
+>
+> **The signals are gone and nothing replaced them, which is the point.** *Ready to check* was a tap
+> that meant "go and look at something", without saying what or why. A written or typed turn says
+> the same thing and carries the sentence that makes it useful, and every course has had both since
+> the answer panel was unified. The server still ACCEPTS `done`, `help` and `confused`: the iPad
+> serves a cached shell, a device that has not picked up `board-shell-v83` yet still has the buttons
+> on it, and a 400 in reply to a tap is a lesson that stops.
+>
+> **`stance` stays, and it is the only thing a repository still declares about how it is taught.**
+> `teach` or `do` — TRD-EHR asked in writing for the work to be done rather than set, and it still
+> gets that. It is a paragraph appended to the one method rather than a method of its own, which is
+> what it always claimed to be and now demonstrably is.
+>
+> **And the other half of the ask: a course is somewhere its owner WORKS.** *"If I decide to vibe
+> code in one of the repositories straight in the terminal without using the tutor, I can do that
+> without it messing anything up or GETTING messed up by anything related to the tutoring."* Two
+> real defects, both in machinery that runs unattended with nobody watching what it does to git.
+>
+> The first: **`git commit` commits the INDEX**. The transcript beat ran `git add -A live` and then
+> committed — and so also committed whatever had been staged in a terminal a moment earlier, under
+> the message *lesson transcript*. Nothing in the beat wanted those files and nothing in it knew
+> they were there. The commit names its pathspec now (`--only -- live`), which takes the transcript
+> from the working tree and leaves the rest of the index exactly where it was.
+>
+> The second: **nothing automatic may write into an operation somebody started.** A rebase, a merge,
+> a cherry-pick, a revert, a bisect, or a detached HEAD all mean a terminal here has its own plan for
+> the next commit. `tutorboard/worktree.py` is that question, asked off the files git itself keeps —
+> no `git` call, so it cannot hang on a lock — and every writer asks it: the beat does nothing that
+> tick and says why in its log, `sync` and `tool_pull` do not fast-forward, `board push` and the
+> board's save button say what is in the way rather than committing, and `catch-up.sh` leaves the
+> repository exactly as it is instead of stashing and resetting around it. `catch-up.sh` had a
+> sharper version of the same hole: on a detached HEAD, `rev-parse --abbrev-ref HEAD` returns the
+> string `HEAD`, `origin/HEAD` exists in most clones, and the two together were enough to reset
+> somebody reading around an old commit onto the remote's default branch.
+>
+> `test/beside.py` is the new suite and it runs the shipping code against real repositories: a
+> genuine conflicted rebase left on disk, a staged refactor that survives the beat untouched, a save
+> that refuses and says so on the board. `test/modes.js` now asserts the absence of what it used to
+> assert the presence of. Shell version `board-shell-v83`.
+>
+> ### Earlier on 3 September 2026 (evening)
 >
 > **A new session had three kinks in it, and all three were the board being silent about
 > something it knew.** Reported on relaunching Galois Theory on the iPad against a tutor hosted
@@ -1618,7 +1687,7 @@ From inside a course directory the long way still works — `board vpn up` then 
 ### Where this stands
 
 Working and exercised: the card stream and its live push; KaTeX with a shared macro vocabulary;
-TikZ compiled to cached SVG; the hub, with course discovery and switching; math and code modes;
+TikZ compiled to cached SVG; the hub, with course discovery and switching;
 the writing surface, docked in the lesson with its tools in the page chrome; slate pages saved as
 strokes and as a PNG the assistant reads; the inbox and `board wait`; end-of-session commit and
 push with no assistant attribution; Tailscale in userspace mode with HTTPS; the installed iPad app.
@@ -1689,6 +1758,9 @@ these tests fail, the test is right.
 | `board net` re-pointed the HTTPS name at a dead port, trusting a stale record from another node | `alive()` in `cmd_net` |
 | An empty maths board could not be answered, asked, or prodded from the iPad at all: the first turn needed a terminal | `test/begin.py` |
 | A writing prompt could not be declined, so an unwanted exercise had to be answered badly to clear it | `test/modes.js` |
+| One word in `tutorboard.json` — `mode` — forked the teaching method, the cold-start prompt, the session boundary, the contents drawer and the whole bottom of the screen, so switching course on the same iPad switched interface | there is no mode; `test/modes.js` asserts the absence of what it used to assert the presence of |
+| The transcript beat committed the INDEX, so a file staged in a terminal ninety seconds earlier went into history under the message *lesson transcript* | the commit names its pathspec (`--only -- live`); `test/beside.py` |
+| Nothing stopped an unattended commit, fast-forward, stash or `reset --hard` landing in the middle of somebody's rebase — and on a detached HEAD `catch-up.sh` read `rev-parse --abbrev-ref HEAD` as a branch called `HEAD` and reset onto `origin/HEAD` | `tutorboard/worktree.py`, asked by every writer; `test/beside.py`, `test/catchup.py` |
 | The writing surface vanished after closing and reopening the app: it survived a send only through an in-memory pin, and a pin is a variable | `test/link.js`, `test/modes.js` |
 | The contents drawer laid out in the flow of the page under the lesson rather than over it: it carried a comment saying it borrowed the scratch drawer and an empty rule that borrowed nothing, because an ID selector is not inheritance | `test/review.js` |
 | A sitting badge reading `TEST REVIEW` pushed the chapter label to `Tes…` and the tutor chip to `no` — the title bar is the one row on this page that cannot grow | `test/review.js` |
@@ -1789,7 +1861,6 @@ order and the earlier ones did not know the later ones were coming.
 | **The board** (`/board`) | the assistant | the lesson: prose, typeset mathematics, tables, compiled diagrams |
 | **The answer panel** (`/board`) | the student | one block under the question — write on the slate, or type, with a toggle |
 | **The drop zone** | the student | a file that was not written on the slate |
-| **The signals** | the student | *code courses only* — ready to check, help, confused, in one tap |
 
 Answering happens in one panel under the question: the slate and a typed half, and a toggle
 between them. Whichever the student used last is the one that opens next. Nothing has to be
@@ -1802,9 +1873,9 @@ answer is owed, so nothing opens the slate — and in mathematics there is no bo
 The board was a dead end until somebody went to a terminal and prompted the assistant, which is
 exactly the ceremony `tutor` exists to abolish.
 
-So an empty board carries one button, **ask the tutor to begin**. It sends a `begin` signal — the
-same mechanism as code mode's *ready to check*, not a composer — which lands in the inbox as an
-ordinary unread message and so wakes `board wait` like anything else. Sending it makes the board
+So an empty board carries one button, **ask the tutor to begin**. It sends a `begin` signal — a
+tap that carries its own meaning, not a composer — which lands in the inbox as an ordinary unread
+message and so wakes `board wait` like anything else. Sending it makes the board
 non-empty, which retires the button; a tutor woken four times writes four opening cards.
 
 Because a signal has no sentence in it, the inbox line carries its own meaning rather than a bare
@@ -1858,9 +1929,12 @@ Sections are archived, so nothing has to be crammed — **◷** reopens any of t
 with the student's own working still in it, and an exercise left undone is a note
 for the next sitting rather than a loss.
 
-In a code course the unit is a change made in the student's own editor, and the
-three signals — *ready to check*, *I need help*, *I'm confused* — do what skip
-does in mathematics. The rest of the discipline is identical.
+In a repository whose work is code the unit is a change made in the student's own
+editor, and it is posed, laddered and re-posed exactly as an exercise out of a
+book is. When a turn says it has been implemented — typed, or written on the
+slate — the tutor goes and reads what actually changed, and locates the break
+rather than repairing it. The rest of the discipline is identical, because it is
+the same discipline.
 
 ### Sending, and what happens next
 
@@ -2261,7 +2335,7 @@ refuses and says which one, instead of leaving a daemon that reads as *listening
 turn into a log. `tutor --agents` marks what this machine cannot actually run.
 
 The brief itself is written to `live/BRIEF.md` every time, so an assistant that takes no argument
-can still be told to read it. It names the course, the mode, the session kind, and the board's
+can still be told to read it. It names the course, its stance, the session kind, and the board's
 addresses, and says plainly that the board is already running.
 
 ### Which one, for this course, on this machine
@@ -2675,27 +2749,42 @@ listening. The record is now checked against the nodes Slurm says are still your
 `tutor resume` sweeps the dead ones as you log in. Where there is no Slurm to ask, the answer is
 *unknown*, and unknown is left alone rather than deleted.
 
-## Courses, and the two modes
+## Courses, and the one board
 
 Nothing is registered and nothing is configured centrally. **Any directory beside this one is a
 course** if it holds a `tutorboard.json`, an `AI_INSTRUCTIONS.md`, or a `live/` folder. The hub
 lists what it finds each time you open it; adding a course means making a directory.
 
-A course says what it is in `tutorboard.json` at its root:
+A course says what it is in `tutorboard.json` at its root, and there is very little to say:
 
 ```json
 {
-  "name": "Galois Theory",
-  "mode": "math"
+  "name": "Galois Theory"
 }
 ```
 
-A code project can also say **what the tutor is for**:
+`board init "Galois Theory"` writes it. Without one, the name comes from the directory and
+everything works anyway.
+
+**There used to be a `mode`, and it is gone.** A repository declared itself `math` or `code`, and
+that one word decided the teaching method, the shape of the first card, where the session boundary
+was, half the contents drawer, and whether the board offered an answer panel or three tap-buttons —
+*ready to check*, *I need help*, *I'm confused* — docked over the lesson. Two boards, in other
+words, and switching courses on the same iPad switched interfaces. What is left is one board and
+one method: the lesson is exercises, they are answered on the board by writing or by typing, and
+one question ends the turn. A repository whose subject is code is no exception — when something has
+been implemented, the turn that says so is a written or typed one, and the tutor goes and looks at
+what actually changed.
+
+A `mode` still sitting in an old `tutorboard.json` is read and dropped, because those files live in
+the course repositories rather than here and nobody is going to edit nine of them. It cannot come
+back through the door it left by.
+
+What a repository *can* still say is **what the tutor is for**:
 
 ```json
 {
   "name": "TRD-EHR",
-  "mode": "code",
   "stance": "do"
 }
 ```
@@ -2705,12 +2794,15 @@ student writes the code, and withholding it is the teaching. `"stance": "do"` is
 for a project where that is not what is wanted: the tutor writes the code, runs
 it, submits the job, and the card becomes a *report* — what changed, what it does
 now, what ran and what came back — rather than an exercise. Everything else about
-a turn is unchanged, which is why it is one line of configuration and not a third
-mode: still one card, still short, still written before the rest of the work,
-still stopping to ask for the one decision it needs.
+a turn is unchanged, which is why it is one line of configuration and not a
+second mode: still one card, still short, still written before the rest of the work,
+still stopping to ask for the one decision it needs. A `--review` sitting is the
+single exception, because a review asks rather than sets work.
 
 It is declared and never guessed. Writing the code for somebody who wanted to
-learn it is the one mistake here that the next card cannot undo.
+learn it is the one mistake here that the next card cannot undo, and nothing
+about a repository's contents is evidence either way: a directory full of Python
+is not a request to have the Python written.
 
 **A tutor with a `do` stance needs the access to match.** Editing files is
 granted by the course's own `.claude/settings.local.json`; anything else it has
@@ -2720,33 +2812,49 @@ has to be named in `additionalDirectories` or the file tools will refuse to open
 it. A tutor that may write the code but not submit it can only ever report that
 nothing has run.
 
-| | `"mode": "math"` | `"mode": "code"` |
-|---|---|---|
-| Answering | the answer panel — write on the slate, or type | the answer panel, plus the three signals |
-| The panel | write half and type half, one toggle | the same panel, whichever they used last |
-| Suits | proofs, derivations, anything worked by hand | being walked through code, reviewing what you wrote, "do it yourself" |
+### What differs between courses, now that nothing declares it
 
-The answer panel is the same in both modes: a writing surface and a typed half, one toggle,
+Two things, and both are read off what the repository actually *has* rather than off what it once
+said about itself — which is the point, because a fact cannot go stale and a declaration can.
+
+| | a repository with a syllabus | a repository without one |
+|---|---|---|
+| Where the exercises come from | the end of each section, in the book | whatever the README points at: a task list, a plan, a companion repo |
+| The contents drawer (☰) | its chapters and problem sets | sittings made as you go, filed under ◷ |
+| A `--review` sitting covers | chapters | the repository's own top-level parts |
+| Answering | the answer panel | the answer panel |
+
+`chapters.tsv` or `chapters/chNN-*/` is what makes the first column true; there is no flag for it.
+A repository with neither is told so and pointed at its README, and is explicitly told **not** to
+manufacture chapters out of the README's own headings — which is a thing that happened, once, on a
+repository that has none.
+
+The answer panel is the same everywhere: a writing surface and a typed half, one toggle,
 and whichever the student used last is the one that opens next time. An old question remembers
 its own answer, though: a board you wrote on reopens with the ink still on it, and a typed
 answer reopens with the text in the box, both editable and re-sendable as a revision of that
-same response rather than a new one. What still differs is the signals — in a code course the
-work happens in the editor on the real machine, so the board carries *ready to check*, *I need
-help* and *I'm confused* as one-tap pace control, and none of those belongs in a mathematics
-course. The write/type choice is the student's, not the course's; a mode no longer decides how
-anyone is allowed to answer.
+same response rather than a new one.
 
-`board init` writes the file:
+### Working in a course from a terminal, while it is a course
 
-```
-board init                      # guess from what is in the repository
-board init "TRD-EHR" --code     # or just say
-board init "Galois Theory" --math
-```
+A course repository is somewhere its owner writes code, not only somewhere they are taught — and
+the tutoring machinery runs unattended: the transcript beat commits and pushes every ninety
+seconds, a session start fast-forwards the repository, and **⤓ save** on the iPad commits the whole
+tree from a tap. Two rules keep those out of somebody's way, and they are in
+`tutorboard/worktree.py` so that there is one of each:
 
-Without a config the mode is guessed — LaTeX anywhere in the repository means mathematics,
-otherwise code — and the name comes from the directory. The guess is only ever about *how* the
-board behaves, never about whether it works, and one command overrides it.
+- **A commit names its pathspec.** The beat commits `live/` with `--only`, so a file staged in a
+  terminal a moment earlier stays staged. `git commit` commits the whole index, which is how a
+  half-finished refactor once went into history under the message *lesson transcript*.
+- **Nothing automatic touches a repository mid-operation.** A rebase, a merge, a cherry-pick, a
+  revert or a bisect outstanding — or a detached HEAD — and the beat does nothing that tick and
+  says why in its log; a tap on save says what is in the way, on the board, and commits nothing;
+  `catch-up.sh` leaves the repository exactly as it is rather than stashing and resetting around
+  it. Nothing is lost by waiting: the transcript is append-only and the next tick is ninety
+  seconds away.
+
+So `git rebase -i`, a bisect, or an afternoon of half-staged work in a course with a live board on
+it is ordinary and safe in both directions. `test/beside.py` holds it, against real repositories.
 
 ## Running it on another machine
 
@@ -2775,9 +2883,10 @@ can drive it — OpenCode, Codex, Cursor, a local model behind a terminal wrappe
 [Any agent, not just one](#any-agent-not-just-one).
 
 The one thing to check before committing to a setup is **whether the assistant can look at an
-image**. In a `code` course it does not matter: the instruction goes on the board, the answers come
-back through the text box, and nothing needs to be seen. In a `math` course the whole return path
-is the slate, and something that cannot read a page of handwriting is no use.
+image**. This used to be a question about the course — a `code` one took its answers through a text
+box and needed nothing seen — and it is now a question about the board. Every course's return path
+runs through the slate, so something that cannot read a page of handwriting is no use in any of
+them.
 
 That question has two halves, and both have to be yes:
 
@@ -2797,7 +2906,9 @@ renders an image holding a random token, a random word, and a small definite int
 the path. Ask your assistant to open it and report all three. Then `board eyes --answer` shows
 what was actually in it, so an invented answer is obvious.
 
-If it cannot read them, that repository belongs in `code` mode, where nothing needs to be seen.
+If it cannot read them, it cannot tutor from this board — there is no longer a mode that turns the
+handwriting off. Point a different assistant at that course; `tutor --agents` lists what the
+machine can drive, and the choice is per course.
 
 ## The reading face
 
@@ -2925,8 +3036,8 @@ Chapters are matched on their label, their short form or their bare number, so `
 and `7` all find the same one. A name the repository does not have is refused and named, never
 silently dropped.
 
-**In a code project there are no chapters, and it is not told it is broken.** It is offered its
-own top-level parts instead — `loader/`, `pipeline/`, `web/` — discovered the same way
+**In a repository that follows no book there are no chapters, and it is not told it is broken.**
+It is offered its own top-level parts instead — `loader/`, `pipeline/`, `web/` — discovered the same way
 everything else here is discovered, and a flat repository falls back to its own source files.
 The sitting then asks about code that already exists: what a function does, why it is written
 that way, what would break if it changed. It never sets work, and a repository whose stance is
@@ -3024,9 +3135,10 @@ in amber rather than a quiet `⤓ save`. `git status` is asked at most once ever
 and cached, so the poll loop stays cheap. And if you come back to a session you left with work
 outstanding, the offer is put in front of you once rather than waiting to be noticed.
 
-It behaves identically in a code repository, with one deliberate difference from the
-terminal: `board push` there *ends* the session, because a commit is what "we got this
-working" means — the board's save does not. It commits and the lesson carries on.
+It behaves identically in every repository, and it always commits and carries on: a save is a
+save. `board push` used to *end* the session in a `code` repository and not in a maths one, so the
+same button filed the lesson away in one course and left it open in another, for no reason visible
+from the iPad. `board open` and `board archive` are what file a lesson, everywhere.
 
 The script is deliberately ordinary — `git add -A`, commit, push — and lives in each repository so
 it works with or without this tool:
@@ -3112,8 +3224,10 @@ goes quiet for twenty seconds is a button somebody presses twice.
 The minimum is nothing at all: make a directory next to this one and run `board start` inside it.
 Everything below is optional, and each item buys something specific.
 
-1. **`tutorboard.json`** — declare the name and the mode rather than being guessed at.
-   One command: `board init "Real Analysis" --math`.
+1. **`tutorboard.json`** — declare the name rather than having the directory's used.
+   One command: `board init "Real Analysis"`. There is nothing else to declare unless the
+   repository wants the work *done* rather than set, which is `"stance": "do"` and is written by
+   hand.
 
 2. **`latex/coursemacros.sty`** *(maths)* — your own macros. They are loaded ahead of the board's
    own vocabulary in every compiled diagram and in every exported lesson, so notation you already
@@ -3203,7 +3317,7 @@ The assistant runs these. The student never does.
 ```
 board start                      # bring the board up
 board net                        # every address it answers on, tailnet included
-board init "Course" --math       # declare what this repository is
+board init "Course"              # name this repository, so the directory is not used
 board finish                     # offer the push, on the iPad
 board push "message"             # or just do it
 board eyes                       # can the assistant driving this see images?
@@ -3422,18 +3536,22 @@ Ending one archives the whole of it — cards, turns and the frozen answers — 
 opens past lessons and renders one read-only, with everything the student wrote still in it. The
 button is hidden until there is something to read.
 
-## What the board is for in a code course
+## What the board is for when the work is code
 
-In a code course the work happens in the editor, on the student's own machine. The board is not
-where code gets written and never should be. What it carries is the three things worth saying
-about work that is happening somewhere else:
+The work happens in the editor, on the student's own machine. The board is not where code gets
+written and never should be — unless the repository declared `"stance": "do"`, which is a decision
+made once, in writing.
 
-- **Ready to check** — one tap, no typing.
-- **I need help** and **I'm confused** — these open a text box, and that is the moment a keyboard
-  should appear, because neither is useful without a sentence after it.
+The board carried three buttons for this once — **Ready to check**, **I need help**, **I'm
+confused** — shown only in a `code` course. They are gone with the mode. What says the same things
+is the answer panel every course has: a sentence typed, or a page written on the slate, both of
+which arrive as ordinary turns and both of which carry the half a tap could not. *Ready to check*
+never said what to check or why; *"the recursion is right now but the memo table is still empty on
+the second call"* does, and it is the difference between a tutor reading a diff and a tutor
+guessing at one.
 
-All three are recorded as turns like any other, so the transcript of a code session is a record of
-where the student got stuck and what unstuck them.
+Turns are recorded like any other, so the transcript of a session is still a record of where the
+student got stuck and what unstuck them — and now of what they actually said about it.
 
 ## Getting work back
 

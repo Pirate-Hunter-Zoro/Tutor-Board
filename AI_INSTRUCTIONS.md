@@ -230,13 +230,25 @@ tutorboard/
   The record is one entry per board — `"<question>#<attempt>": { p, a }` in `board.pages`, per
   course — and every board keeps the card it sits under, because a reload has no other way to know
   where it goes. `test/chain.js`.
-- **Two courses, two session boundaries.** Maths ends a session when the chapter does, which is
-  what `board open` marks. Code ends it at the commit: `board push` archives and starts the next
-  one, because a commit is what "we got this working" means. Do not invent a third.
-- **Code mode is not a chat box.** The work happens in the editor on the student's own machine.
-  The board carries the three things worth saying about it — ready to check, need help, confused —
-  and only opens a keyboard for the two that need a sentence. A free-text box that invites
-  conversation is the thing this must never drift into.
+- **One session boundary, everywhere.** A sitting is filed by `board open` and by `board archive`,
+  and by nothing else. `board push` used to archive as well, but only in a `code` repository — so
+  the same **⤓ save** filed the lesson away in one course and carried on in another, for no reason
+  visible from the iPad. A commit is a save. Do not give any repository a boundary of its own.
+- **There is no mode, and there must never be one again.** A `mode` of `math` or `code` in
+  `tutorboard.json` decided the method, the first card, the session boundary, half the contents
+  drawer and whether the board had an answer panel or three tap-signals. Every one of those splits
+  is gone: one method, one board, one set of controls, in every repository. A `mode` key still
+  sitting in a course's own file is read and DROPPED — `read_config` pops it — because those files
+  live in the course repositories and a stale key must never be why two boards differ. `stance`
+  (`teach` or `do`) is the one thing a repository may still declare, and it changes nothing but
+  who writes the code.
+- **The signals are gone; a sentence replaced them.** *Ready to check*, *I need help* and *I'm
+  confused* were three buttons docked over the lesson in a code course. What they said is said
+  better in a written or typed turn, which every course has: a tap meaning "look at what I
+  changed" leaves the tutor to guess at what and why. The server still ACCEPTS those three
+  signals, and that is deliberate — an installed app serves a cached shell, and a 400 in reply to
+  a tap on a device that has not picked up the new one yet is a lesson that stops. `begin` and
+  `skip` are still sent by the board.
 - **Never write to a board somebody is using.** Reading a live board is fine — `/health`,
   `/live`, `board_json`. WRITING to one is not: a probe POSTed to `/slate/save` on the running
   Galois board on 2 September 2026 replaced page 7 — the sheet an answer had been handed in off,
@@ -491,13 +503,20 @@ tutorboard/
   that sequence is their place; sorting by modification time meant correcting a typo in card
   three moved it after everything the student had since answered.
 - **The student can save without the tutor, and saving is not ending.** `⤓ save`
-  in the title bar raises the push offer at any moment, in either mode. The board's
-  push commits and records the outcome; it does **not** archive, so a code session
-  is not ended by it — only `board push` from a terminal does that, where a commit
-  is the session boundary. Sessions end by being abandoned far more often than they
+  in the title bar raises the push offer at any moment, in every course. It commits
+  and records the outcome; it does **not** archive, and neither does `board push`
+  from a terminal any more. Sessions end by being abandoned far more often than they
   end tidily, and until this existed the only route to a commit was a prompt that
   only `board finish` could raise. `test/link.js` and `test/annotate.py` hold both
   halves.
+- **Nothing automatic writes git history into a repository somebody is working in.**
+  A course is where its owner works, not only where they are taught, and the beat
+  runs unattended every ninety seconds. Two rules, both in `tutorboard/worktree.py`
+  and applied by the beat, `sync`, `tool_pull`, `board push`, the board's save and
+  `catch-up.sh`: a commit names its pathspec (`--only -- live`), because `git commit`
+  commits the whole INDEX and swept up whatever was staged in a terminal under the
+  message "lesson transcript"; and nothing at all happens while a rebase, merge,
+  cherry-pick, revert or bisect is outstanding, or on a detached HEAD. `test/beside.py`.
 - **The way out of a lesson asks.** The back arrow offers save-and-push, leave-without-saving,
   or stay — every time, not only when the board happens to know something is outstanding. The
   session survives either way (it is files), but what is on disk is not what is pushed, and
@@ -530,7 +549,10 @@ tutorboard/
 - **A course is navigable from the board.** Chapters and problem sets are discovered, listed
   under ☰, and opening one goes through `board open` so the lesson being left is archived whole
   rather than written over. Do not add a registry of chapters; `chapters.tsv` and the chapter
-  directories are the source of truth, and a code repository correctly has neither.
+  directories are the source of truth, and a repository that follows no book correctly has
+  neither — which is also how the board and `sense.py` tell the two apart now that no mode says
+  so. Whether a repository has a syllabus is a fact about it; a mode was a declaration about it,
+  and declarations go stale.
 - **A writing prompt must be declinable.** Teaching is explain, then ask for an example — and a
   prompt that cannot be refused is a prompt that gets answered badly to make it go away. The answer
   block carries *skip this one* in its own header, so it dies with the block. A skip is a turn: in
@@ -575,12 +597,11 @@ tutorboard/
   nodes on a shared home, so every command that re-points `tailscale serve` checks `alive()` first.
   `board net` did not, and a stale record from an ended allocation was enough for a command that
   reads like a diagnostic to park the iPad's one baked-in address on a dead port.
-- **One answer panel, not two.** Every course has a writing surface and a typed half, one
-  toggle, and whichever the student used last opens next. The mode no longer decides how a
-  question is answered — the student does. What stays split is the code signals (*ready to
-  check*, *help*, *confused*), which belong to a code course and never to mathematics. Do not
-  reintroduce a mode that hides the typed half or the slate. `test/modes.js` and `test/answer.js`
-  hold it.
+- **One answer panel, and nothing beside it.** Every course has a writing surface and a typed
+  half, one toggle, and whichever the student used last opens next. Nothing decides how a question
+  is answered except the student. Do not reintroduce a mode that hides the typed half or the
+  slate, and do not add a control that stands in for a sentence. `test/modes.js` and
+  `test/answer.js` hold it.
 - **`tutor` is the entry point; `board` is the assistant's tool.** A person runs `tutor` and gets
   a session. Never add a step that asks them to start the board themselves, or to tell an
   assistant to — that ceremony is the thing the launcher exists to remove.

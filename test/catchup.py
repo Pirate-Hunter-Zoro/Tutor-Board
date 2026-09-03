@@ -113,6 +113,8 @@ check("a course is put right by stashing, then tagging, then resetting",
       "stash push -u" in src and "tag -f" in src)
 check("and the board's own scratch does not count as somebody's work",
       "grep -v '^.. live/'" in src)
+check("nothing is done to a repository part-way through an operation",
+      "rebase-merge" in src and "HEAD is detached" in src)
 check("what ran it is recorded, because working that out took longer than "
       "fixing what it did",
       "CATCHUP_LOG" in src and "ps -o args=" in src)
@@ -141,6 +143,39 @@ try:
     git(ahead, "add", "-A")
     git(ahead, "commit", "-qm", "only here")
     ahead_head = git(ahead, "rev-parse", "HEAD")
+
+    # MID-OPERATION -- behind, so it would otherwise move, and part-way through
+    # a rebase. Stashing under a rebase is not a rescue: it can succeed and leave
+    # the operation half-applied, and the reset below it would then take the
+    # branch the person was rebasing ONTO.
+    rebasing, rebasing_seed = make_course(courses, "Rebasing")
+    open(os.path.join(rebasing_seed, "landed.md"), "w").write("from elsewhere\n")
+    git(rebasing_seed, "add", "-A")
+    git(rebasing_seed, "commit", "-qm", "landed elsewhere")
+    git(rebasing_seed, "push", "-q", "origin", "main")
+    git(rebasing, "checkout", "-q", "-b", "side")
+    open(os.path.join(rebasing, "README.md"), "w").write("mine\n")
+    git(rebasing, "add", "-A")
+    git(rebasing, "commit", "-qm", "mine")
+    git(rebasing, "checkout", "-q", "main")
+    open(os.path.join(rebasing, "README.md"), "w").write("theirs\n")
+    git(rebasing, "add", "-A")
+    git(rebasing, "commit", "-qm", "theirs")
+    git(rebasing, "checkout", "-q", "side")
+    git(rebasing, "rebase", "main")          # conflicts, and stops
+    rebasing_head = git(rebasing, "rev-parse", "HEAD")
+
+    # DETACHED -- somebody reading around an old commit. `origin/HEAD` exists in
+    # most clones, so without a guard `rev-parse --abbrev-ref HEAD` returning
+    # "HEAD" was read as a branch name and the repository was reset onto the
+    # remote's default branch under them.
+    detached, _ = make_course(courses, "Detached")
+    open(os.path.join(detached, "second.md"), "w").write("x\n")
+    git(detached, "add", "-A")
+    git(detached, "commit", "-qm", "second")
+    git(detached, "push", "-q", "origin", "main")
+    detached_head = git(detached, "rev-parse", "HEAD~1")
+    git(detached, "checkout", "-q", "HEAD~1")
 
     # A board's scratch churning is not somebody's work and must not move a thing.
     scratch, _ = make_course(courses, "Scratch")
@@ -177,6 +212,18 @@ try:
     check("a churning live/ directory is not mistaken for somebody's work",
           git(scratch, "rev-parse", "HEAD") == scratch_head
           and os.path.isfile(os.path.join(scratch, "live", "board.json")))
+
+    check("a repository part-way through a rebase is left exactly as it is",
+          git(rebasing, "rev-parse", "HEAD") == rebasing_head
+          and git(rebasing, "stash", "list") == "")
+    check("and it says which operation is outstanding",
+          "Rebasing: rebase-merge is outstanding" in out)
+    check("the rebase itself is still there to finish",
+          os.path.isdir(os.path.join(rebasing, ".git", "rebase-merge")))
+
+    check("a detached HEAD is left where it is, not reset onto origin",
+          git(detached, "rev-parse", "HEAD") == detached_head)
+    check("and it says so", "Detached: HEAD is detached" in out)
 
     log = os.path.join(courses, "catch-up.log")
     check("and the run recorded what invoked it",

@@ -1,14 +1,18 @@
-// A question has to be answerable, in either kind of course.
+// A question has to be answerable, in every repository.
 //
 // In a maths course the answer block is a writing surface, and that has been
 // true from the start. In a code project there was nothing at all: the composer
-// carries the three signals -- ready to check, I need help, I'm confused -- and
-// none of them is "here is my answer", while the text row stays shut until one
-// of the two that need a sentence is picked. So a card that asked the student to
+// carried three signals -- ready to check, I need help, I'm confused -- and none
+// of them is "here is my answer", while the text row stayed shut until one of
+// the two that need a sentence was picked. So a card that asked the student to
 // decide something left them with no way to say what they had decided, and the
 // only route back was a terminal, which is the ceremony this tool exists to
 // remove. Found by a person holding an iPad, reading a question, with nowhere to
 // put the answer.
+//
+// The mode that produced that split is gone and so are the signals; the panel is
+// the answer everywhere. A `mode` still in a payload is dead data, and both
+// values are painted here to prove it.
 //
 // A real DOM, because this is placement and visibility, which is exactly what a
 // stub reports as fine.
@@ -81,9 +85,8 @@ function paint(mode, turns) {
 
 const block = () => doc.getElementById('writer');
 const typebox = () => doc.getElementById('typebox');
-const signals = () => doc.getElementById('composer');
 
-// --- a code project -------------------------------------------------------
+// --- a repository whose work is code --------------------------------------
 paint('code');
 const b = block();
 b && !b.hidden
@@ -108,10 +111,10 @@ type.onclick();
   ? ok('typing opens the typed half')
   : fail('the typed half stays shut, which is the whole defect');
 
-// The three signals remain, for pace control.
-signals() && !signals().hidden
-  ? ok('the three signals are still there')
-  : fail('the signals vanished when the answer panel appeared');
+// And nothing else. The signals are not hidden here -- they do not exist.
+!doc.getElementById('composer')
+  ? ok('and nothing beside it: there is no signal bar to show')
+  : fail('the composer is back in the markup');
 
 // Skipping is available here too: a prompt that cannot be declined gets
 // answered badly to make it go away.
@@ -125,14 +128,11 @@ block().hidden
   ? ok('and a skipped question retires the panel')
   : fail('the panel survives a skip, so the prompt does not go away');
 
-// --- a maths course gets the same panel ----------------------------------
+// --- and so does a maths course, identically ------------------------------
 paint('math');
 !block().hidden
   ? ok('a maths course gets the same answer panel')
   : fail('the maths answer panel did not appear');
-signals().hidden
-  ? ok('and no signals — the panel is the answer there')
-  : fail('the code signals appeared in a maths course');
 
 // --- a minute of writing must not look like a minute of nothing ----------
 // A card is a file and the lesson shows nothing until it exists, so the tutor
@@ -140,7 +140,7 @@ signals().hidden
 // only signal was a dot in the title bar the size of a full stop.
 function paintWith(agent) {
   window.__render({
-    state: { course: 'P', mode: 'code' },
+    state: { course: 'P' },
     cards: [question], turns: [], messages: [], uploads: [], slate: [],
     agent: agent,
   });
@@ -179,7 +179,7 @@ paintWith({ agent: 'claude', state: 'working', turns: 2, host: 'h', pid: 1 });
 !busy.hidden ? ok('a new turn starts the notice again')
              : fail('the notice does not come back for the next turn');
 window.__render({
-  state: { course: 'P', mode: 'code' },
+  state: { course: 'P' },
   cards: [question, { id: '0002', kind: 'lesson', title: 'Answer', body: 'here',
                       mtime: now + 500 }],
   turns: [], messages: [], uploads: [], slate: [],
@@ -197,5 +197,5 @@ busy.hidden
 
 
 console.log(errors.length ? '\n' + errors.length + ' FAILURES'
-                          : '\na question can be answered in either kind of course');
+                          : '\na question can be answered in every repository');
 process.exit(errors.length ? 1 : 0);

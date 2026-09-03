@@ -87,7 +87,6 @@ var els = {
   busy: document.getElementById("busy"),
   busyText: document.getElementById("busy-text"),
   busySince: document.getElementById("busy-since"),
-  composer: document.getElementById("composer"),
   typebox: document.getElementById("typebox"),
   saybox: document.getElementById("saybox"),
   sendType: document.getElementById("send-type"),
@@ -830,12 +829,6 @@ function render(data) {
   if (data.contents) contents = data.contents;
   pastCount = data.history || 0;
 
-  var codeMode = (state.mode || "math") === "code";
-  document.body.dataset.mode2 = state.mode || "math";
-  /* The signals -- ready to check, help, confused -- are pace control for a code
-     project. They ride above the answer panel, which every course has now. */
-  els.composer.hidden = !codeMode;
-
   var lastQuestion = 0, lastSent = 0, newestQ = null;
   (data.cards || []).forEach(function (c) {
     if (c.kind === "question" && c.mtime > lastQuestion) {
@@ -979,7 +972,6 @@ function render(data) {
                         || !(data.cards || []).length
                         || !els.writer.hidden;
   }
-  paintComposer(codeMode && !data.archived, data);
   paintBusy(data);
   /* KaTeX walks the DOM it is handed. Handing it the whole lesson every frame
      re-renders mathematics that was already rendered; hand it only what was
@@ -2569,7 +2561,6 @@ function group(title) {
 function openContents() {
   var host = els.contentsList;
   host.innerHTML = "";
-  var codeMode = document.body.dataset.mode2 === "code";
   var here = (lastLive && lastLive.state && lastLive.state.chapter) || "";
 
   if (contents.chapters.length) {
@@ -2593,16 +2584,14 @@ function openContents() {
   }
 
   if (!contents.chapters.length && !contents.sets.length) {
-    /* A code repository has neither, and gets its sections as it goes: a
-       section there is a piece of work that got committed, which is what
-       `board push` marks. */
-    host.appendChild(group(codeMode ? "Sections" : "This course"));
+    /* A repository that follows no book has neither, and that is not an error
+       to report -- it says where to look instead. Sittings there are made as
+       they go and stay readable under ◷ like any other. */
+    host.appendChild(group("This course"));
     var p = document.createElement("p");
     p.className = "none";
-    p.textContent = codeMode
-      ? "Sections here are made as you go: each piece of work that gets committed "
-        + "is filed as one, and stays readable under ◷."
-      : "No chapters or problem sets found in this repository.";
+    p.textContent = "No chapters or problem sets in this repository, so sittings "
+      + "here are made as you go. Each one stays readable under ◷.";
     host.appendChild(p);
   }
 
@@ -3512,20 +3501,20 @@ function paintBoards(qids, liveKey, off) {
   });
 }
 
+/* Two of these can still be SENT -- begin and skip -- and the other three only
+   ever appear in a transcript written before the signals went. A lesson filed in
+   May is still read on this board, and a turn whose whole content was a tap has
+   nothing else to render, so the labels stay. */
 var SIGNAL_LABEL = { done: "ready to check", help: "needs help", confused: "confused",
                      begin: "asked the tutor to begin", skip: "skipped this one" };
 
-/* The answer block for a code project.
-
-   The three signals are pace control -- ready to check, I need help, I'm
-   confused -- and not one of them is "here is my answer". The text row is shut
-   until help or confused is picked. So a card that asked the student to decide
-   something gave them nowhere to say what they had decided, and the only route
-   was a terminal, which is the ceremony this whole tool exists to remove.
+/* The answer block, in every course.
 
    Two ways, because the question decides which is easier: write on the card
    itself, which is how you answer *about a place* in it, or type, which is how
-   you answer in sentences. */
+   you answer in sentences. Both come back as an ordinary turn, and a sentence
+   saying what was just implemented is one of them -- there is no separate
+   channel for that and there is no longer a tap that stands in for it. */
 /* A card is a file, and the lesson shows nothing until that file exists. So the
    minute a tutor spends writing one is a minute of a blank screen with no way to
    tell it apart from a tutor that has died -- and the difference used to be a dot
@@ -4005,17 +3994,12 @@ function toastSent() {
 }
 
 /* ------------------------------------------------------------------ input */
-/* What comes back from the board depends on the mode. In a mathematics course
-   there is no text box at all -- answering means writing on the slate. In a code
-   course a sentence is usually the right unit ("look at what I just wrote"), so
-   the box is there and the slate is one tap away for sketching. */
 /* --------------------------------------- one answer panel, two surfaces */
 /* The student writes on the slate or types, whichever they used last. A typed
    draft is kept per question the way the slate keeps a page per question, so
    flipping between the two does not lose either half. */
 
 var ANSWER_KIND = "answer-kind";
-var pendingSignal = null;       /* a code signal waiting on its sentence */
 var textDrafts = {};            /* question id -> typed draft */
 var textDraftsSeeded = false;
 var lastTextQuestion = null;
@@ -4180,11 +4164,8 @@ els.tabWrite.onclick = function () { pickKind("write"); };
 els.tabType.onclick = function () { pickKind("type"); };
 
 function sendTyped() {
-  var sig = pendingSignal;
-  pendingSignal = null;
-  var text = els.saybox.value.trim();
-  if (!text && !sig) return;
-  say(sig).then(function () {
+  if (!els.saybox.value.trim()) return;
+  say(null).then(function () {
     /* A typed answer can still have marks sitting on the lesson, and those are
        worth offering too -- the same follow-up the slate send raises. */
     if (haveNotes() && !notesOff()) els.sendwhat.hidden = false;
@@ -4201,38 +4182,12 @@ els.saybox.addEventListener("keydown", function (e) {
   }
 });
 
-/* In a code course the answer is in the editor on the real machine, so the
-   board carries the three things worth saying about it. "Ready to check" is one
-   tap. The other two open the panel's typing half, because "I need help" is only
-   useful with a sentence after it -- and that is the moment a keyboard should
-   appear, not before. */
-function paintComposer(codeMode, data) {
-  els.composer.hidden = !codeMode;
-  if (!codeMode) return;
-  var last = (data.turns || []).filter(function (t) { return t.signal; }).pop();
-  Array.prototype.forEach.call(document.querySelectorAll(".sig"), function (b) {
-    b.classList.toggle("on", !!last && last.signal === b.dataset.signal);
-  });
-}
-
-function openComposer(signal) {
-  pendingSignal = signal;
-  setAnswerKind("type");
-  paintPanel();
-  els.saybox.placeholder = signal === "confused"
-    ? "what is not making sense?" : "what is going wrong?";
-  els.saybox.focus();          /* the keyboard, at the moment it is wanted */
-}
-
-Array.prototype.forEach.call(document.querySelectorAll(".sig"), function (b) {
-  b.addEventListener("click", function () {
-    var signal = b.dataset.signal;
-    /* "Ready to check" needs no sentence. The other two are useless without
-       one, so they open the typing half rather than sending a bare flag. */
-    if (signal === "done") { say("done"); return; }
-    openComposer(signal);
-  });
-});
+/* There were three signal buttons here -- ready to check, I need help, I'm
+   confused -- shown only in a `code` course, docked over the lesson, one tap
+   each. They are gone with the mode that produced them. Anything they said is
+   said better in a written or typed turn, which every course has and which
+   arrives with the sentence that makes it useful; a tap that means "look at what
+   I changed" is a tap that leaves the tutor to guess at what and why. */
 
 function upload(files) {
   if (!files || !files.length) return;

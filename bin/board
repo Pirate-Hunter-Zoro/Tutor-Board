@@ -33,7 +33,7 @@ The assistant runs these. The student never does.
     board net                          every URL the board answers on
     board vpn up [--hostname N]        the Tailscale link (name defaults to 'board')
     board vpn status|serve|down, for devices off this network
-    board init [name] [--code|--math]  write tutorboard.json for this repository
+    board init [name]                  write tutorboard.json for this repository
     board doctor                       check the machine has what this needs
     board node [name|--unpin]          what this machine calls itself, pinned
     board egress [--repair]            can a turn get out, and through which exit node
@@ -56,7 +56,8 @@ import time
 
 TOOL = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, TOOL)
-from tutorboard import handoff, limits, machine, ports, processes, reasoning, tex
+from tutorboard import (handoff, limits, machine, ports, processes, reasoning,
+                        tex, worktree)
 from tutorboard.net import egress, tailscale
 from tutorboard.course import document, homework, review
 SERVE = os.path.join(TOOL, "serve.py")
@@ -207,47 +208,10 @@ def install_teaching(live):
         return None
     dest = live.path("TEACHING.md")
     try:
-        with open(src, "r", encoding="utf-8") as fh:
-            text = fh.read()
-        with open(dest, "w", encoding="utf-8") as fh:
-            fh.write(for_mode(text, read_config(live.root).get("mode")))
+        shutil.copyfile(src, dest)
     except OSError:
         return None
     return dest
-
-
-def for_mode(text, mode):
-    """The method, minus the half this course will never use.
-
-    A maths course has no use for the project method and a code project has no
-    use for the homework rules, and every session pays to read whichever half
-    does not apply to it. Sections are tagged in the source with
-    `<!-- mode: math -->` or `<!-- mode: code -->`; anything untagged is shared
-    and goes to both.
-
-    This is a filter, never a rewrite: the sections that survive are byte for
-    byte the ones in TEACHING.md, so there is still exactly one copy of every
-    rule and nothing to drift. An unknown mode gets the whole document, because
-    the failure to avoid is a tutor teaching with half a method.
-    """
-    if mode not in ("math", "code"):
-        return text
-    other = "code" if mode == "math" else "math"
-    out, drop = [], False
-    for line in text.splitlines(True):
-        if line.startswith("## "):
-            drop = False
-        if line.strip() == "<!-- mode: %s -->" % other:
-            drop = True
-            while out and out[-1].strip() == "":
-                out.pop()
-            out.pop()                     # the heading this tag belongs to
-            continue
-        if line.strip() == "<!-- mode: %s -->" % mode:
-            continue                      # keep the section, drop the marker
-        if not drop:
-            out.append(line)
-    return "".join(out)
 
 
 # What an unattended tutor has to be allowed to do. Narrow on purpose: write into
@@ -476,7 +440,8 @@ def cmd_status(live, args):
                                  "" if info["node"] == this_node() else "  (not this one)"))
     print("repo:    %s" % live.root)
     cfg = read_config(live.root)
-    print("course:  %s  (%s mode)" % (st.get("course") or cfg["name"], cfg["mode"]))
+    print("course:  %s%s" % (st.get("course") or cfg["name"],
+                              "  (stance: do)" if cfg["stance"] == "do" else ""))
     print("chapter: %s" % st.get("chapter", "-"))
     print("session: %s%s" % (st.get("session", "lecture"),
                              "  (finish offered)" if st.get("finished") else ""))
@@ -1062,18 +1027,34 @@ def cmd_finish(live, args):
 
 
 def cmd_push(live, args):
-    """Commit and push -- and, in a code course, end the session.
+    """Commit and push. It does not end the session, in any repository.
 
-    The two kinds of course have different natural boundaries. A maths lesson
-    ends when the chapter does, which is what `board open` marks. Code work ends
-    when it is committed: that is the unit, that is what "we got this working"
-    means, and it is the point at which the next session should start clean with
-    the transcript filed rather than carried forward.
+    It used to end it in one of them: a push in a `code` course archived the
+    lesson and opened a new one, and in a maths course it did not. So the same
+    tap on the same button filed the sitting away in one repository and carried
+    on in another, for no reason a person holding the iPad could see. A lesson is
+    filed by `board archive` and by `board open`, and by nothing else.
     """
     message = " ".join(a for a in args if not a.startswith("--")) or "lesson complete"
     script = os.path.join(live.root, "scripts", "save-and-push.sh")
     if not os.path.exists(script):
         print("no scripts/save-and-push.sh in this repository", file=sys.stderr)
+        return 1
+
+    # Never into the middle of an operation somebody started in a terminal. This
+    # runs unattended -- `board finish` raises the offer and the tutor may push
+    # on its own -- and a repository part-way through a rebase has its own plan
+    # for the next commit. Say what is in the way and change nothing.
+    busy = worktree.busy_reason(live.root)
+    if busy:
+        detail = ("nothing was committed: %s in this repository, so a commit now "
+                  "would land in the middle of it. Nothing has been lost -- "
+                  "finish or abort that, then save again." % busy)
+        print(detail, file=sys.stderr)
+        with open(live.path("push.json"), "w", encoding="utf-8") as fh:
+            json.dump({"ok": False, "at": time.time(),
+                       "iso": time.strftime("%Y-%m-%d %H:%M:%S"),
+                       "detail": detail}, fh, indent=2)
         return 1
 
     # The write-up is part of the work, so it is part of the commit.
@@ -1118,12 +1099,11 @@ def cmd_push(live, args):
         with open(live.path("state.json"), "w", encoding="utf-8") as fh:
             json.dump(st, fh, indent=2)
 
-    if p.returncode == 0 and read_config(live.root).get("mode") == "code" \
-            and "--keep-open" not in args:
-        print()
-        cmd_archive(live, [])
-        live.set_state(opened=time.strftime("%Y-%m-%d %H:%M"), finished=None)
-        print("session closed; the next one starts here")
+    # A push used to ARCHIVE the lesson in a code repository and not in a
+    # mathematics one, which meant pressing save on the iPad filed the sitting
+    # away in one course and carried on in another. A save is a save everywhere:
+    # `board archive` and `board open` are what file a lesson, and they are the
+    # only things that do.
     return p.returncode
 
 
@@ -1706,7 +1686,15 @@ def cmd_net(live, args):
 
 
 def read_config(root):
-    cfg = {"name": None, "mode": None}
+    """What this repository calls itself, and what the tutor is here for.
+
+    There is no subject here any more. A `mode` of `math` or `code` used to be
+    read -- and GUESSED, by walking the tree looking for a `.tex` -- and it
+    decided the method, the first card and half the board's controls. One
+    interface now, so the only thing left to read is the name and the stance.
+    A `mode` still sitting in a course's own file is ignored.
+    """
+    cfg = {"name": None, "stance": "teach"}
     try:
         with open(os.path.join(root, "tutorboard.json"), "r", encoding="utf-8") as fh:
             cfg.update(json.load(fh) or {})
@@ -1714,39 +1702,22 @@ def read_config(root):
         pass
     if not cfg.get("name"):
         cfg["name"] = os.path.basename(root).replace("-", " ")
-    if cfg.get("mode") not in ("math", "code"):
-        cfg["mode"] = guess_mode(root)
+    cfg.pop("mode", None)
+    cfg["stance"] = "do" if str(cfg.get("stance") or "").lower() == "do" else "teach"
     return cfg
 
 
-def guess_mode(root):
-    if os.path.isdir(os.path.join(root, "latex")):
-        return "math"
-    for base, dirs, names in os.walk(root):
-        dirs[:] = [d for d in dirs
-                   if d not in (".git", "live", "node_modules", "build", "__pycache__")]
-        if any(n.endswith(".tex") for n in names):
-            return "math"
-        if base.count(os.sep) - root.count(os.sep) > 2:
-            dirs[:] = []
-    return "code"
-
-
 def cmd_init(live, args):
-    """Declare what this repository is, so the board stops guessing."""
-    mode = None
-    rest = []
-    for a in args:
-        if a == "--code":
-            mode = "code"
-        elif a == "--math":
-            mode = "math"
-        else:
-            rest.append(a)
-    name = " ".join(rest) or os.path.basename(live.root).replace("-", " ")
-    if mode is None:
-        mode = guess_mode(live.root)
-        print("mode not given; guessed %s from what is in the repository" % mode)
+    """Name this repository, so the board does not have to use its directory.
+
+    There is nothing else to declare. `--math` and `--code` used to live here and
+    chose between two methods and two interfaces; both are gone, and a `mode`
+    left in an existing file is dropped on the way past rather than kept as a
+    key that means nothing. `stance` is the one thing a repository may still say
+    and it is only ever written by hand.
+    """
+    name = " ".join(a for a in args if not a.startswith("--")) \
+        or os.path.basename(live.root).replace("-", " ")
 
     path = os.path.join(live.root, "tutorboard.json")
     cfg = {}
@@ -1756,16 +1727,18 @@ def cmd_init(live, args):
                 cfg = json.load(fh) or {}
         except ValueError:
             pass
+    dropped = cfg.pop("mode", None)
     cfg["name"] = name
-    cfg["mode"] = mode
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(cfg, fh, indent=2)
         fh.write("\n")
-    print("%s\n  name: %s\n  mode: %s" % (path, name, mode))
-    if mode == "math":
-        print("  -> no text box; answers are written on the slate")
-    else:
-        print("  -> a text box on the board; the slate is there for sketching")
+    print("%s\n  name: %s" % (path, name))
+    if dropped:
+        print("  dropped 'mode: %s' -- there is one board and one method now"
+              % dropped)
+    if cfg.get("stance") == "do":
+        print("  stance: do -- the tutor writes the code here rather than setting it")
+    print("  -> answers come back on the board: written on the slate, or typed")
     return 0
 
 
@@ -1844,8 +1817,10 @@ def cmd_eyes(live, args):
     print("the word, and what the integral evaluates to.")
     print("Then run `board eyes --answer` to see whether it read them or invented them.")
     print()
-    print("If it cannot: this repository should be in code mode, where nothing")
-    print("needs to be seen. Handwriting review needs an assistant that can look.")
+    print("If it cannot, it cannot tutor from this board: every answer comes back")
+    print("as handwriting or a photograph, and there is no mode that turns that")
+    print("off any more. Point a different assistant at it -- `tutor --agents`")
+    print("lists what this machine can drive.")
     return 0
 
 
@@ -1999,7 +1974,8 @@ def cmd_doctor(live, args):
         print("tests:    node not installed (the board does not need it)")
     cfg = read_config(live.root)
     print("repo:     %s" % live.root)
-    print("course:   %s  (%s mode)" % (cfg["name"], cfg["mode"]))
+    print("course:   %s%s" % (cfg["name"],
+                               "  (stance: do)" if cfg["stance"] == "do" else ""))
     pinned = machine.node_name_pinned()
     sysname = machine.system_node_name()
     print("node:     %s%s" % (this_node(),

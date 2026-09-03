@@ -48,7 +48,7 @@ def check(name, cond):
 
 tmp = tempfile.mkdtemp(prefix="tutor-begin-")
 with open(os.path.join(tmp, "tutorboard.json"), "w", encoding="utf-8") as fh:
-    json.dump({"name": "Test Course", "mode": "math"}, fh)
+    json.dump({"name": "Test Course"}, fh)
 repo = course_repo.Repo(tmp)
 
 worker = tikz.TikzWorker(repo)
@@ -107,10 +107,15 @@ try:
     check("the line is not just the tag", len(text.strip()) > len("[begin]") + 8)
     # Where to begin, not merely that somebody is waiting. The first real cold
     # start opened a course at chapter four because nothing said otherwise.
-    check("with no chapter set it says so, and says not to guess",
-          "no chapter label" in text and "guess" in text)
+    check("with no label set it says so, and says not to guess",
+          "carries no label of its own" in text and "Do not guess" in text)
     check("a course that is not a book is not given a fictional chapter one",
           "follows a book" not in text)
+    # And it is told where to look instead. This repository has no syllabus, so
+    # the only thing that can say what comes next is what it points at -- which
+    # is the whole of what the old `code` mode was for.
+    check("and is pointed at the README rather than left to survey",
+          "README.md" in text and "manufacture a curriculum" in text)
 
     # An unread message is what wakes `board wait`.
     check("it arrives unread", lines and lines[0].get("read") is False)

@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 
-from .. import paths
+from .. import paths, worktree
 from ..course import homework
 
 
@@ -149,7 +149,29 @@ def run_push(repo, message=None):
     The work is the repository owner's. The script carries no co-author trailer
     and neither does anything here -- history should credit the person who did
     the mathematics and nobody else.
+
+    It commits the whole tree on purpose: **save** means save, and a save that
+    left the afternoon's code behind because it was not the lesson would be the
+    wrong kind of clever. What it will not do is commit into an operation
+    somebody is part-way through. A rebase or a merge outstanding means a
+    terminal in this repository has its own plan for the next commit, and a tap
+    on an iPad is not an instruction to walk over it -- so the tap says what is
+    in the way instead, on the board, where the person who tapped is looking.
     """
+    busy = worktree.busy_reason(repo.root)
+    if busy:
+        record = {
+            "ok": False,
+            "at": time.time(),
+            "iso": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "detail": ("nothing was committed: %s in this repository, so a "
+                       "commit now would land in the middle of it. Nothing has "
+                       "been lost -- finish or abort that in the terminal and "
+                       "press save again." % busy),
+        }
+        with open(os.path.join(repo.live, "push.json"), "w", encoding="utf-8") as fh:
+            json.dump(record, fh, indent=2)
+        return record
     # The write-up is part of the work, so it is part of the commit. Only when it
     # is actually out of date, so an ordinary save in the middle of a lesson
     # costs nothing.

@@ -46,7 +46,6 @@ class Hub:
         board_state = self.repo.state()
         cfg = config.read_config(self.repo.root)
         board_state.setdefault("course", cfg["name"])
-        board_state["mode"] = cfg["mode"]
         data = {
             "state": board_state,
             "cards": on_board,

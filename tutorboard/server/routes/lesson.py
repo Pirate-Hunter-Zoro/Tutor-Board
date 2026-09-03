@@ -190,14 +190,19 @@ def post(h, repo, path):
         except Exception:
             return h.send_json({"ok": False, "error": "bad json"}, status=400)
         text = (payload.get("text") or "").strip()
-        # A signal carries meaning without a sentence: in a code course the
-        # useful things to say are mostly "done", "stuck" and "confused",
-        # and making someone type those on a tablet is a tax.
-        # "begin" is the cold start. On an empty maths board there is no
-        # question, so no answer is owed, so the slate never opens and there
-        # is no text box either -- which left the iPad with no way to say
-        # the first thing of a session. This is that, and it is a signal
-        # rather than a composer on purpose.
+        # A signal carries meaning without a sentence, and two are still sent:
+        # "begin" and "skip". "begin" is the cold start -- an empty board owes
+        # no answer, so the slate never opens and there is nothing to type in,
+        # which left the iPad with no way to say the first thing of a session.
+        # "skip" declines a prompt.
+        #
+        # "done", "help" and "confused" were the three buttons a `code` course
+        # got instead of an answer, and both the buttons and the mode are gone.
+        # They are STILL ACCEPTED, because an installed app serves a cached
+        # shell: a device that has not picked up the new one yet still has the
+        # buttons on it, and a 400 in reply to a tap is a lesson that stops. The
+        # sentences behind them are unchanged, so such a tap still reaches the
+        # tutor and still means what it always meant.
         signal = (payload.get("signal") or "").strip().lower() or None
         if signal not in (None, "done", "help", "confused", "begin", "skip"):
             return h.send_json({"ok": False, "error": "bad signal"}, status=400)

@@ -1291,23 +1291,23 @@ if (es) {
   if (!fin.hidden) ok('and a frame arriving mid-decision does not dismiss it');
   else fail('the prompt vanished under an incoming payload');
 
-  // A code repository is the same promise. The button lives in the title bar,
-  // which both modes share, and a commit there must NOT end the session the way
-  // `board push` from a terminal does -- a mid-session save is a save, not a
-  // declaration that the work is finished.
+  // A repository that follows no book is the same promise -- and the state it
+  // arrives in no longer carries a mode to distinguish it, which is the point.
+  // A mid-session save is a save, not a declaration that the work is finished,
+  // and `board push` from a terminal no longer ends a session either.
   es.onmessage({ data: JSON.stringify(Object.assign({}, b4, {
-    state: { course: 'TRD', session: 'lecture', mode: 'code' } })) });
-  if (!saveBtn.hidden) ok('a code course has the same save');
-  else fail('the save disappears in a code repository');
+    state: { course: 'TRD', session: 'lecture' } })) });
+  if (!saveBtn.hidden) ok('a project repository has the same save');
+  else fail('the save disappears in a repository with no book');
   saveBtn.onclick();
   if (/lesson stays open/.test(doc.getElementById('finish-sub').textContent))
-    ok('and it says the lesson stays open, which in a code course it must');
-  else fail('a code-course save reads as ending the session');
+    ok('and it says the lesson stays open, which it always must');
+  else fail('a save reads as ending the session');
   doc.getElementById('finish-no').onclick();
 
   // Leaving is silent, so the board has to say what leaving would cost. In a
-  // code course above all: the work is in the editor, and the commit is the
-  // whole point of the session.
+  // repository whose work is in the editor above all: the commit is the whole
+  // point of the session.
   doc.getElementById('finish-no').onclick();
   es.onmessage({ data: JSON.stringify(Object.assign({}, b4, { unsaved: 0 })) });
   if (!/dirty/.test(saveBtn.className)) ok('with nothing outstanding the save is quiet');
@@ -1567,16 +1567,18 @@ if (es) {
   if (panel.hidden) ok('the panel closes');
   else fail('the contents panel cannot be closed');
 
-  // A code repository has neither chapters nor sets, and must not be told it is
-  // broken -- its sections are made as it goes.
+  // A repository that follows no book has neither chapters nor sets, and must
+  // not be told it is broken -- its sittings are made as it goes. Nothing in the
+  // payload declares which kind of repository this is any more: having no
+  // chapters and no sets IS the answer.
   es.onmessage({ data: JSON.stringify(Object.assign({}, frame, {
-    state: { course: 'TRD', session: 'lecture', mode: 'code' },
+    state: { course: 'TRD', session: 'lecture' },
     history: 0, contents: { chapters: [], sets: [] } })) });
   opener.onclick();
   var text2 = doc.getElementById('contents-list').textContent;
-  if (/Sections/.test(text2) && /as you go/.test(text2))
-    ok('a code course is told its sections are made as it goes');
-  else fail('a code course gets an empty or wrong contents: ' + text2.slice(0, 90));
+  if (/as you go/.test(text2) && !/No chapters or problem sets found/.test(text2))
+    ok('a repository with no book is told its sittings are made as it goes');
+  else fail('a bookless repository gets an empty or wrong contents: ' + text2.slice(0, 90));
   doc.getElementById('btn-contents-close').onclick();
 }
 

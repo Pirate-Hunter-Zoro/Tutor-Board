@@ -40,7 +40,7 @@ import sys
 
 TOOL = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, TOOL)
-from tutorboard import choice, handoff, limits, machine, paths, processes
+from tutorboard import choice, handoff, limits, machine, paths, processes, worktree
 from tutorboard.net import egress
 
 BOARD = os.path.join(TOOL, "bin", "board")
@@ -170,12 +170,22 @@ def load_config():
 
 # ---------------------------------------------------------------------------
 def read_course(root):
-    cfg = {"name": os.path.basename(root).replace("-", " "), "mode": None}
+    """What a course calls itself, and what its tutor is for.
+
+    `mode` -- `math` or `code` -- used to be read here and carried into the
+    session brief. There is one method and one board now, so it is dropped on
+    the way past: a key left in a course's own file must never be the reason two
+    courses behave differently. `stance` is the one thing still read, and it is
+    only ever what the file says.
+    """
+    cfg = {"name": os.path.basename(root).replace("-", " "), "stance": "teach"}
     try:
         with open(os.path.join(root, "tutorboard.json"), "r", encoding="utf-8") as fh:
             cfg.update(json.load(fh) or {})
     except (OSError, ValueError):
         pass
+    cfg.pop("mode", None)
+    cfg["stance"] = "do" if str(cfg.get("stance") or "").lower() == "do" else "teach"
     return cfg
 
 
@@ -329,7 +339,8 @@ def pick(cands, query):
 def choose(cands):
     print("Courses:\n")
     for i, c in enumerate(cands, 1):
-        print("  %2d  %-26s %s" % (i, c.get("name") or c["dir"], c.get("mode") or ""))
+        print("  %2d  %-26s %s" % (i, c.get("name") or c["dir"],
+                                   "do" if c.get("stance") == "do" else ""))
     print()
     try:
         raw = input("which? ").strip()
@@ -377,7 +388,7 @@ You are tutoring in this repository. Read `AI_INSTRUCTIONS.md` in full before
 anything else; it is the contract and it overrides your own defaults.
 
 - Course: **%(name)s**
-- Mode: **%(mode)s**  (math = the user answers by writing on the slate; code = there is a text box)
+- Stance: **%(stance)s**  (teach = they do the work and you set it; do = you do the work and the card is a report)
 - Session: **%(session)s**
 
 **The board is already running.** Do not start another one. It is at:
@@ -388,6 +399,12 @@ The user is reading that page, probably on an iPad, not this terminal. Write eac
 teaching turn as a card in `live/cards/` and keep the terminal to a line or two.
 Check `board inbox` at the start of every turn. When the session ends, run
 `board finish` so the board can offer to save and push.
+
+**Every course works the same way.** There is no mode: the user answers on the
+board, by writing on the slate or by typing, in this repository and in every
+other one. A repository whose subject is code is no exception — if they have
+implemented something, they will say so in a written or typed turn, and that
+turn is your cue to go and look at what actually changed.
 
 **Reading handwriting.** Handwriting is a PNG, a problem sheet is a PDF. If your
 model can see images, open the file directly; if it cannot, call the
@@ -645,9 +662,20 @@ def sync(root, quiet=False):
     Fast-forward only, and never fatal. A session that will not start because a
     branch diverged is worse than a session that starts a commit behind and says
     so -- the person is holding an iPad and cannot fix a merge from there.
+
+    And it does not touch a repository somebody is part-way through an operation
+    in. A course is somewhere its owner works, not only somewhere they are
+    taught; a fast-forward arriving in the middle of their rebase is the tutor
+    reaching into a terminal it knows nothing about.
     """
-    if not os.path.isdir(os.path.join(root, ".git")):
+    if not worktree.git_dir(root):
         return None
+    busy = worktree.busy_reason(root)
+    if busy:
+        if not quiet:
+            print("  not synced: %s here, so the repository is left exactly as it is"
+                  % busy)
+        return False
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_ASKPASS="/bin/false")
     def git(*args, **kw):
         return subprocess.run(["git"] + list(args), cwd=root, env=env,
@@ -708,10 +736,19 @@ def tool_pull(root=None):
     line and the session starts anyway -- somebody holding an iPad cannot resolve
     a merge, and a launcher that refuses to launch is worse than a launcher one
     commit behind.
+
+    Nothing is pulled over the top of an operation in progress either. This
+    repository is somewhere work happens too, and a fast-forward -- followed by
+    this process re-execing on the code that arrived -- is not a thing to do
+    underneath somebody's half-finished rebase.
     """
     root = root or TOOL
-    if not os.path.isdir(os.path.join(root, ".git")):
+    if not worktree.git_dir(root):
         return False, None
+    busy = worktree.busy_reason(root)
+    if busy:
+        return False, ("  the board was not updated: %s here, so it is left "
+                       "exactly as it is" % busy)
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_ASKPASS="/bin/false")
 
     def git(*args, **kw):
@@ -950,8 +987,26 @@ def sync_transcript(root, log=None):
     dead remote is logged and retried next beat, never resolved by hand, because
     a transcript is append-only on one machine at a time and a merge is the last
     thing it should ever need.
+
+    AND IT IS NOT THE ONLY THING IN THIS REPOSITORY. The person being taught here
+    is the same person who opens a terminal in it and works, and this runs
+    unattended every ninety seconds with nobody watching what it does to git. So
+    it takes two promises, both in `tutorboard.worktree`: it does nothing at all
+    while a rebase, a merge or a bisect is outstanding, and its commit names the
+    transcript explicitly rather than committing whatever happened to be in the
+    index. Committing the index is what it used to do, and a beat landing in the
+    middle of somebody's afternoon would carry their half-staged refactor into
+    history under the message "lesson transcript".
     """
-    if not os.path.isdir(os.path.join(root, ".git")):
+    if not worktree.git_dir(root):
+        return
+    busy = worktree.busy_reason(root)
+    if busy:
+        if log:
+            try:
+                log.write("transcript: left alone this beat -- %s\n" % busy)
+            except (OSError, ValueError):
+                pass
         return
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_ASKPASS="/bin/false")
 
@@ -1001,9 +1056,16 @@ def sync_transcript(root, log=None):
         # are put back, on disk as well as in the index, which also repairs a
         # clone that has already been clobbered by a pull.
         keep_transcript_files(root, git, note)
-        if git("diff", "--cached", "--quiet").returncode == 0:
+        # `-- live`, both times. `git commit` commits the INDEX, so asking
+        # whether there is anything to commit -- and then committing it -- swept
+        # up anything a person had staged in a terminal here. `--only` takes the
+        # named paths from the working tree and leaves the rest of the index
+        # exactly as it was, which is what makes a beat safe to run underneath
+        # somebody who is working.
+        if git("diff", "--cached", "--quiet", "--", "live").returncode == 0:
             return
-        if git("commit", "-m", "lesson transcript").returncode != 0:
+        if git("commit", "-m", "lesson transcript",
+               "--only", "--", "live").returncode != 0:
             return
         # `origin HEAD` rather than a bare push, so it works whether or not the
         # clone has an upstream set for its branch.
@@ -1235,7 +1297,7 @@ def headless(cfg, course, agent_name, session):
     urls = "\n".join("  " + l.strip() for l in net.splitlines() if l.strip().startswith("http"))
     with open(os.path.join(live, "BRIEF.md"), "w", encoding="utf-8") as fh:
         fh.write(BRIEF % {"name": course.get("name") or course["dir"],
-                          "mode": course.get("mode") or "unknown",
+                          "stance": course.get("stance") or "teach",
                           "session": session or "lecture", "urls": urls,
                           "handoff": handoff_clause(root)})
 
@@ -1987,8 +2049,9 @@ def main(argv):
             return 0
         elif a in ("--list", "-l"):
             for c in courses(cfg):
-                print("  %-26s %-6s %s" % (c.get("name") or c["dir"],
-                                           c.get("mode") or "", c["dir"]))
+                print("  %-26s %-6s %s"
+                      % (c.get("name") or c["dir"],
+                         "do" if c.get("stance") == "do" else "", c["dir"]))
             return 0
         elif a == "--agents":
             print("config: %s\n" % CONFIG)
@@ -2092,14 +2155,15 @@ def main(argv):
     urls = "\n".join("  " + l.strip() for l in net.splitlines()
                      if l.strip().startswith("http"))
 
-    print("%s — %s" % (course.get("name") or course["dir"], course.get("mode") or "?"))
+    print("%s%s" % (course.get("name") or course["dir"],
+                     " — stance: do" if course.get("stance") == "do" else ""))
     print(net.rstrip())
 
     live = os.path.join(course["root"], "live")
     os.makedirs(live, exist_ok=True)
     brief = BRIEF % {
         "name": course.get("name") or course["dir"],
-        "mode": course.get("mode") or "unknown",
+        "stance": course.get("stance") or "teach",
         "session": flags["session"] or "lecture",
         "urls": urls or "  (run: board net)",
         "handoff": handoff_clause(course["root"]),

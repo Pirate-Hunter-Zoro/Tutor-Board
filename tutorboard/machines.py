@@ -148,7 +148,6 @@ def sibling_courses(repo):
             # with: the same home is reachable under two paths here.
             "current": paths.same_dir(root, repo.root),
             "course": cfg["name"],
-            "mode": cfg["mode"],
             "chapter": "",
             "cards": 0,
             "running": False,

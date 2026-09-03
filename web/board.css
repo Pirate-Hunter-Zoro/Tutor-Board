@@ -876,58 +876,11 @@ body.tools-out .jump { bottom: calc(6.5rem + env(safe-area-inset-bottom)); }
   background: var(--accent); color: var(--paper);
 }
 
-/* ---------- the composer, in a code course ---------- */
-/* Code mode's answer is a sentence, so this is the counterpart of the pen tools
-   and lives in the same place: docked along the bottom. It had no styling at
-   all -- a bare form in the document flow, scrolled off the end of the lesson
-   like a paragraph -- which is why it has never been usable. */
-#composer {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 41;
-  display: flex; flex-direction: column; gap: .5rem;
-  padding: .55rem max(.75rem, env(safe-area-inset-right))
-           calc(.55rem + env(safe-area-inset-bottom)) max(.75rem, env(safe-area-inset-left));
-  background: color-mix(in srgb, var(--paper) 92%, transparent);
-  backdrop-filter: blur(10px);
-  border-top: 1px solid var(--rule);
-  font-family: var(--ui);
-}
-#signals { display: flex; gap: .5rem; flex-wrap: wrap; }
-.sig {
-  font: 600 .84rem var(--ui); cursor: pointer;
-  padding: .5rem .85rem; border-radius: 1.4rem;
-  border: 1px solid var(--rule); background: var(--paper); color: var(--ink-2);
-}
-.sig:hover { background: var(--paper-2); color: var(--ink); }
-.sig.primary { border-color: var(--good); color: var(--good); }
-.sig.on { background: var(--paper-2); color: var(--ink); border-color: var(--accent); }
-#composer-row { display: flex; align-items: flex-end; gap: .5rem; }
-#composer-slate {
-  flex: none; text-decoration: none; color: var(--ink-2);
-  border: 1px solid var(--rule); border-radius: .45rem;
-  padding: .5rem .6rem; line-height: 1;
-}
-#composer-slate:hover { background: var(--paper-2); color: var(--ink); }
-#say {
-  flex: 1 1 auto; min-width: 0;
-  font: inherit; font-size: .92rem; line-height: 1.4;
-  padding: .55rem .7rem;
-  border: 1px solid var(--rule); border-radius: .45rem;
-  background: var(--paper); color: var(--ink);
-  resize: none; overflow-y: auto;
-}
-#say:focus { outline: none; border-color: var(--accent); }
-#send {
-  flex: none; font: inherit; font-weight: 600;
-  padding: .55rem 1rem; border-radius: .45rem; cursor: pointer;
-  /* The accent is dark in the light theme and light in the dark one, so the
-     label takes the paper colour rather than a fixed white. */
-  border: 1px solid var(--accent); background: var(--accent); color: var(--paper);
-}
-#send:hover { filter: brightness(1.08); }
-#send.sent { background: var(--good); border-color: var(--good); }
-/* Same reservation the pen tools get: a fixed bar covers the end of the lesson
-   unless the page gives up the height. */
-body[data-mode2="code"] { padding-bottom: 5rem; }
+/* The composer lived here: a docked bar of three signal buttons, shown only in
+   a `code` course, plus rules for a #say/#send pair whose markup had already
+   gone. Both the mode and the buttons are gone, and so is the height the page
+   had to give up for them -- `body[data-mode2="code"]` reserved 5rem at the
+   bottom of every code course and nothing else ever set that attribute. */
 
 /* ---------- scratch drawer ---------- */
 /* Three drawers, one shape: the scratch list, the contents, and the review
@@ -1031,7 +984,7 @@ body.viewing { overflow: hidden; }
 
 /* ---------- print ---------- */
 @media print {
-  #bar, #drawbar, #composer, #scratch, #contents, #review, .jump, .drop, .finish, .pushed,
+  #bar, #drawbar, #scratch, #contents, #review, .jump, .drop, .finish, .pushed,
   #panic, #reopen, #viewer { display: none !important; }
   body { background: #fff; color: #000; }
   #board { max-width: none; padding: 0; }

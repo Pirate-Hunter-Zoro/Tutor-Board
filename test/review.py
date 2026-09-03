@@ -232,12 +232,13 @@ finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
 # --- a project is revised too, and it is not set work -------------------------
-# The user will probably never do this, but a project falling through to the code
-# prompt would be told to go and find the next change to make, which is the
-# opposite of a review.
+# A repository that follows no book is revised over its own parts, and the prompt
+# has to say so WITHOUT being told which kind of repository it is: there is no
+# mode any more, so what it reads is what `review.units` found -- chapters where
+# there is a syllabus, top-level parts where there is not.
 tmp2 = tempfile.mkdtemp(prefix="tutor-rev-code-")
 try:
-    json.dump({"name": "TRD-EHR", "mode": "code", "stance": "do"},
+    json.dump({"name": "TRD-EHR", "stance": "do"},
               open(os.path.join(tmp2, "tutorboard.json"), "w"))
     for d in ("loader", "pipeline"):
         os.makedirs(os.path.join(tmp2, d))
@@ -260,8 +261,17 @@ try:
 
     st["session"] = "lecture"
     json.dump(st, open(repo2.state_path, "w"))
-    check("while an ordinary sitting in the same project is still a project",
-          "PROJECT" in sense.session_sense(repo2))
+    line = sense.session_sense(repo2)
+    check("while an ordinary sitting in the same repository is the one method",
+          "THE LESSON IS EXERCISES" in line)
+    check("and is told where to look, since there is no book here",
+          "does not follow a book" in line and "README.md" in line)
+    check("and not to invent chapters out of what it finds",
+          "manufacture a curriculum" in line)
+    # The stance survived the mode's removal: it is the one thing a repository
+    # still declares, and a review is the only sitting it does not apply to.
+    check("and a doing stance still says to write the code",
+          "STANCE IS DO" in line)
 finally:
     shutil.rmtree(tmp2, ignore_errors=True)
     shutil.rmtree(book, ignore_errors=True)

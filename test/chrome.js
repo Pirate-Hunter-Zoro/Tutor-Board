@@ -110,20 +110,19 @@ decl(draw, 'top') === null
   ? ok('the tool bar clears the home indicator')
   : fail('#drawbar ignores the bottom safe-area inset');
 
-// Code mode's composer is the counterpart of the pen tools and belongs in the
-// same place. It shipped with no rule of its own at all -- a bare form in the
-// flow, scrolling off the end of the lesson like a paragraph.
-const comp = block('#composer');
-comp ? ok('#composer has a rule') : fail('#composer has no styling at all');
-/sticky|fixed/.test(decl(comp, 'position') || '') && decl(comp, 'bottom') === '0'
-  ? ok('#composer is docked to the bottom')
-  : fail('#composer is not docked; it scrolls away with the lesson');
-/env\(safe-area-inset-bottom\)/.test(comp || '')
-  ? ok('#composer clears the home indicator')
-  : fail('#composer ignores the bottom safe-area inset');
-/padding-bottom/.test(block('body\\[data-mode2="code"\\]') || '')
-  ? ok('a code course reserves room for the composer')
-  : fail('nothing reserves height for the composer — it will cover the last card');
+// The composer was a docked bar of three signal buttons, shown only in a course
+// whose mode was `code`. Both are gone, and nothing may bring back either the
+// bar or the page padding that reserved 5rem of every code course's screen for
+// it -- a fixed element nobody can see is a fixed element covering the lesson.
+!block('#composer')
+  ? ok('there is no composer bar to dock')
+  : fail('#composer is styled again; the signals were removed with the mode');
+!block('body\\[data-mode2="code"\\]')
+  ? ok('and no course gives up screen height for one')
+  : fail('something still reserves height for a composer that does not exist');
+!/data-mode2\s*=/.test(CSS.replace(/\/\*[\s\S]*?\*\//g, ''))
+  ? ok('nothing paints from a mode attribute any more')
+  : fail('data-mode2 is back in the stylesheet');
 
 // An entry animation on every card, rather than on the ones that just arrived,
 // is invisible for exactly as long as nothing re-inserts a card. The reconcile
