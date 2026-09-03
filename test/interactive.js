@@ -453,6 +453,63 @@ setTimeout(() => setTimeout(() => {
     else fail('the transcript grew above the reader and took the page '
               + moved + 'px with it');
 
+    // ---- AND FROM WHERE A SEND LEAVES YOU, WHICH IS PAST EVERYTHING KEYED --
+    //
+    // Reported after the first two fixes had shipped: "just submitted another
+    // board written response and got scrolled UP again to the middle of the last
+    // tutor response." Nothing aimed the page anywhere -- and nothing held it
+    // either. `revealSent` parks you at the FOOT of the writing surface, and the
+    // surface is the tail of the run and carries no card or turn id of its own,
+    // so every keyed node is above the top of the glass and the anchor walk found
+    // nothing to hold. Then the receipt for the answer was inserted above the
+    // surface -- it sits with the question it answers, and the tutor has since
+    // written under that question -- the surface went down the page with it, and
+    // what filled the glass instead was the bottom of the card above.
+    //
+    // Three cards, so the answered question is not the last one: that is the
+    // whole condition, and it is the ordinary case an hour into an exercise.
+    const qC = { id: '0003', kind: 'question', title: 'Q3', body: 'ask3',
+                 mtime: now + 30 };
+    const noteD = { id: '0004', kind: 'note', title: 'N4', body: 'aside4',
+                    mtime: now + 40 };
+    const noteE = { id: '0005', kind: 'note', title: 'N5', body: 'aside5',
+                    mtime: now + 50 };
+    window.__render({ state: { course: 'X', mode: 'math' },
+                      cards: [qC, noteD, noteE], messages: [], turns: [],
+                      slate: [], uploads: [] });
+    const wr = doc.getElementById('writer');
+    if (!wr || wr.parentNode !== box) {
+      fail('the writing surface is not in the run; this test cannot describe '
+           + 'where a send leaves you');
+    } else {
+      // Where Send leaves you: on the surface, past every card and turn.
+      window.__scroll = idxOf(wr) * ROW;
+      const wasAt = wr.getBoundingClientRect().top;
+      aimed.length = 0;
+      // And the answer to the FIRST of the three comes back, which belongs with
+      // that question -- two cards and the surface below it.
+      window.__render({ state: { course: 'X', mode: 'math' },
+                        cards: [qC, noteD, noteE], messages: [], slate: [],
+                        uploads: [],
+                        turns: [{ id: 't11', rev: 1, kind: 'ink', answers: '0003',
+                                  t: now + 55, t0: now + 55,
+                                  png: '/answers/t11-r1.png', strokes: 4 }] });
+      const wrb = doc.getElementById('writer');
+      const receipt = doc.querySelector('.mine[data-turn="t11"]');
+      receipt && idxOf(receipt) >= 0 && idxOf(receipt) < idxOf(wrb)
+        ? ok('the receipt for a send lands above the surface it was sent from')
+        : fail('the receipt did not land above the surface, so this proves '
+               + 'nothing about being pushed down by one');
+      const shift = wrb.getBoundingClientRect().top - wasAt;
+      Math.abs(shift) <= 2
+        ? ok('and the surface is not moved out from under the reader parked on it')
+        : fail('the surface moved ' + shift + 'px under a reader sitting on it — '
+               + 'which reads as being scrolled up into the card above');
+      !aimed.length
+        ? ok('and nothing aimed the page anywhere either')
+        : fail('the send payload aimed the page at ' + aimed.join(', '));
+    }
+
     done();
     }, 2700);
   }

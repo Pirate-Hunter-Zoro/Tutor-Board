@@ -107,6 +107,11 @@ var firstPaint = true;
    first. A real gesture, not our own `scrollTo` -- which fires a scroll event
    like any other and would otherwise cancel every repeat immediately. */
 var handledAt = 0;
+/* How many payloads have brought a card. Anything that wants to put the page
+   somewhere and then put it there again a moment later has to give that up the
+   moment the tutor writes: the second landing was computed for a lesson that no
+   longer exists. */
+var cardsArrived = 0;
 ["wheel", "touchstart", "pointerdown", "keydown"].forEach(function (ev) {
   window.addEventListener(ev, function () { handledAt = Date.now(); },
                           { passive: true });
@@ -629,7 +634,6 @@ function render(data) {
     items.pop();
   }
 
-  var wasFollowing = following();
   /* Where the reader is, before the lesson is rebuilt around them. Put back at
      the foot of this function unless something down there has a better idea
      about where the page should be. */
@@ -1018,10 +1022,39 @@ function render(data) {
        invisible for as long as the destination was the bottom. The moment the
        destination became the newest card's first line, every heartbeat yanked
        the page a screenful while nobody was doing anything at all. */
-  } else if (wasFollowing && !penBusy()) {
-    revealNewest(true);
   } else {
-    els.jump.hidden = false;
+    cardsArrived++;
+    /* A CARD ARRIVING NEVER MOVES THE READER. IT GROWS INTO VIEW.
+
+       Asked for twice, the second time as a specification: "when I submit the
+       response, I'm scrolled to the bottom of the written/typed response I just
+       submitted, where I can clearly see the 'the tutor is writing...' message,
+       and once the tutor response is available, have it start getting portrayed
+       for the user to see line by line, WITHOUT scrolling the user down -- they'll
+       scroll their own way down to read the response." The first ask named the
+       thing it should feel like, which is any chat page on the web: the reader is
+       stationary and the text grows downward past them.
+
+       The layout grants it for nothing, which is the good part. Measured: before
+       the reply the run is [question][live board], and after it is
+       [question][the same board, frozen][receipt][reply][the next board]. The
+       student's working keeps its PLACE in the run -- a live surface and a dormant
+       board are one box by construction, same head and same height, because a
+       dormant board has to be indistinguishable from a live one -- and everything
+       new lands below it. So nothing above the reader changes height, the reply
+       appears in the space under their working where "the tutor is writing" was,
+       and it grows down through it. All that was ever needed was to stop aiming
+       the page at it.
+
+       `revealNewest` still exists, and is still right, for the two places that
+       are not this: the first paint of a lesson, where there is no reader yet to
+       leave alone, and the jump button, which is somebody asking to be taken
+       there. The button is the whole of what is left of the old behaviour -- a
+       card that begins below the fold has nothing to watch grow, and a page that
+       has silently changed under somebody needs to say so. */
+    var fresh = newestCardNode();
+    var box = fresh && fresh.getBoundingClientRect();
+    els.jump.hidden = !!box && box.top < window.innerHeight;
   }
 }
 
@@ -1051,9 +1084,22 @@ function revealSent() {
    want to be, which outranks anything here. */
 function revealSentSettling() {
   var at = Date.now();
+  var news = cardsArrived;
   revealSent();
+  /* And not once a card has arrived.
+
+     These repeats exist to re-land on the surface's foot after the receipt and
+     the tutor's chip have settled to their real heights. The moment the tutor
+     REPLIES, the surface is not where it was: the reply lands above it and the
+     next board opens underneath, so `els.writer` is now a fresh blank sheet
+     below the card being read, and landing on its foot drags the reader down
+     past the very thing they were waiting for. That is the other half of being
+     "scrolled into the middle of that message" -- two smooth scrolls with
+     different destinations, one aimed above the card and one below it. */
   [300, 900].forEach(function (ms) {
-    setTimeout(function () { if (handledAt <= at) revealSent(); }, ms);
+    setTimeout(function () {
+      if (handledAt <= at && cardsArrived === news) revealSent();
+    }, ms);
   });
 }
 
@@ -1369,11 +1415,16 @@ function anchorId(node) {
   if (!node || !node.dataset) return null;
   if (node.dataset.card) return '[data-card="' + node.dataset.card + '"]';
   if (node.dataset.turn) return '[data-turn="' + node.dataset.turn + '"]';
+  /* A dormant board keeps its identity across renders too. NOT the live surface:
+     its place in the run is deliberately moved -- the next board opens under the
+     tutor's newest word -- so holding it still would follow it down the page. */
+  if (node.dataset.slot) return '[data-slot="' + node.dataset.slot + '"]';
   return null;
 }
 
 function anchorNow() {
   var kids = els.cards.children;
+  var last = null;
   for (var i = 0; i < kids.length; i++) {
     var sel = anchorId(kids[i]);
     if (!sel) continue;
@@ -1381,13 +1432,34 @@ function anchorNow() {
     /* The first thing whose foot is still on the glass: that is what is being
        read, or what is immediately above it. */
     if (r.bottom > 0) return { sel: sel, top: r.top };
+    last = { sel: sel, top: r.top };
   }
-  return null;
+  /* PAST EVERYTHING KEYED IS WHERE A SEND LEAVES YOU. Hold the last thing above
+     the reader rather than giving up.
+
+     `revealSent` parks them at the FOOT of the writing surface, and the surface
+     is the tail of the run and carries no card or turn id of its own -- so every
+     keyed node is above the top of the glass and the walk above found nothing,
+     and gave up. Reported from that exact position: "just submitted another board
+     written response and got scrolled UP again to the middle of the last tutor
+     response." The receipt for the answer is inserted with the QUESTION it
+     answers, which an hour into an exercise is several cards up the page, so the
+     surface went down the page with it and what filled the glass instead was the
+     bottom of the card above.
+
+     Not the surface itself, though it is the thing being looked at: when the
+     tutor replies the surface MOVES, because the next board opens under the
+     newest word, and an anchor by that name would follow it down the page. It
+     does not need to be held. The place it occupied is taken by this question's
+     own board, frozen with the same ink in the same box -- the rule every dormant
+     board is built on -- so holding anything above it leaves the student's working
+     exactly where it was, which is the whole of what a reply needs. */
+  return last;
 }
 
 function holdAnchor(a) {
   if (!a) return;
-  var node;
+  var node = null;
   try { node = els.cards.querySelector(a.sel); } catch (e) { return; }
   if (!node) return;
   var moved = node.getBoundingClientRect().top - a.top;

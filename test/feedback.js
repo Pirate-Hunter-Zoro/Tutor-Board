@@ -232,23 +232,77 @@ const withNew = Object.assign({}, lesson, {
                               card('0007', 'wrong', 'nearly', 7)]),
 });
 {
+  // A card whose first line is ALREADY on the glass is not scrolled to. It grows
+  // into view from where it starts, and the reader is left where they are.
+  //
+  // Asked for from the device, and the comparison is the right one: "I'd rather
+  // just keep my position right below my written board work, where I see the
+  // message that the tutor is working, and stay there when the message arrives
+  // instead of being scrolled into the middle of that message... how it is
+  // online if you just go to -- say -- Gemini online, where you as a viewer in
+  // your position on the page are stationary, but you see the text lines growing
+  // and progressing downward as the response comes in."
+  //
+  // The layout grants it for nothing: the student's working keeps its place in
+  // the run when it freezes -- a live surface and a dormant board are one box by
+  // construction -- and everything new lands below it. So nothing above the
+  // reader changes height and the reply appears in the space under their working
+  // where "the tutor is writing" was.
+  const jumpEl = doc.getElementById('jump');
   scrolls.length = 0;
+  jumpEl.hidden = true;
   es.onmessage({ data: JSON.stringify(withNew) });
-  scrolls.length
-    ? ok('a new reply scrolls the board')
-    : fail('a new reply arrived and the board did not move at all');
+  !scrolls.length
+    ? ok('a reply that has already begun on the glass grows into view rather '
+         + 'than moving the reader')
+    : fail('the board scrolled to a card it could already see, landing '
+           + scrolls[scrolls.length - 1] + ' — which is being put in the middle '
+           + 'of the message you were waiting for');
+  jumpEl.hidden
+    ? ok('and offers no jump, because there is nothing to jump to')
+    : fail('a jump was offered to a card that is on screen');
+}
+
+// 4b. And a card whose first line is BELOW the fold is OFFERED, not taken to.
+//
+//     There is nothing to watch grow down there, and a page that has silently
+//     changed under somebody has to say so — but taking them is still taking
+//     them, and the ask was explicit about that: "WITHOUT scrolling the user down
+//     — they'll scroll their own way down to read the response." So the jump
+//     button is the whole of what is left of the old behaviour, and it is somebody
+//     asking rather than the board deciding.
+const farDown = Object.assign({}, withNew, {
+  cards: withNew.cards.concat([card('0015', 'wrong', 'the very last line', 15)]),
+});
+{
+  const jumpTo = doc.getElementById('jump');
+  scrolls.length = 0;
+  jumpTo.hidden = true;
+  es.onmessage({ data: JSON.stringify(farDown) });
+  !scrolls.length
+    ? ok('a reply that arrives below the fold is not scrolled to either')
+    : fail('the board took the reader to a card they had not asked for, landing '
+           + scrolls[scrolls.length - 1]);
+  !jumpTo.hidden
+    ? ok('and the way to it is offered, to be taken when they want it')
+    : fail('a card arrived below the fold with nothing to say it had');
+
+  // ...and taking the offer goes to that card's first line, clear of the bar.
+  // The destination is still the thing that matters; it is only no longer
+  // automatic.
+  scrolls.length = 0;
+  jumpTo.onclick();
   const asked = scrolls[scrolls.length - 1];
   asked !== doc.body.scrollHeight
     ? ok('and not to the bottom of the document, which is the blank slate')
-    : fail('the board still scrolls past the feedback to the writing surface');
-
-  // The newest card's own top, less the bar it would otherwise hide under.
-  const live = nodeFor('0007').getBoundingClientRect();
+    : fail('the jump still goes past the feedback to the writing surface');
+  const live = nodeFor('0015').getBoundingClientRect();
   const bar = doc.getElementById('bar').getBoundingClientRect();
   asked > live.top - bar.height - 20 && asked <= live.top - bar.height
-    ? ok('it scrolls to the first line of the new reply, clear of the bar')
-    : fail('the scroll landed at ' + asked + ', not at the top of card 0007 ('
+    ? ok('it goes to the first line of that reply, clear of the bar')
+    : fail('the jump landed at ' + asked + ', not at the top of card 0015 ('
            + (live.top - bar.height) + ')');
+  jumpTo.hidden = true;
 }
 
 // 5. A payload is not a card. This is the one that got out: the destination
@@ -259,7 +313,7 @@ const withNew = Object.assign({}, lesson, {
 //    a screenful, over and over, while nobody was touching it.
 {
   scrolls.length = 0;
-  es.onmessage({ data: JSON.stringify(Object.assign({}, withNew, {
+  es.onmessage({ data: JSON.stringify(Object.assign({}, farDown, {
     agent: { agent: 'claude', state: 'working', turns: 3 },
   })) });
   !scrolls.length
@@ -267,7 +321,7 @@ const withNew = Object.assign({}, lesson, {
     : fail('the board scrolled for a payload that carried nothing new — '
            + scrolls.length + ' time(s)');
 
-  es.onmessage({ data: JSON.stringify(Object.assign({}, withNew, { unsaved: 4 })) });
+  es.onmessage({ data: JSON.stringify(Object.assign({}, farDown, { unsaved: 4 })) });
   !scrolls.length
     ? ok('and neither does the uncommitted count changing')
     : fail('an unrelated payload moved the page');
@@ -280,8 +334,8 @@ const withNew = Object.assign({}, lesson, {
   window.__slateBusy = true;
   scrolls.length = 0;
   jump.hidden = true;
-  es.onmessage({ data: JSON.stringify(Object.assign({}, withNew, {
-    cards: withNew.cards.concat([card('0008', 'wrong', 'the last line', 8)]),
+  es.onmessage({ data: JSON.stringify(Object.assign({}, farDown, {
+    cards: farDown.cards.concat([card('0017', 'wrong', 'the last line', 17)]),
   })) });
   !scrolls.length
     ? ok('a card arriving while the pen is down does not move the page')
@@ -318,6 +372,20 @@ const withNew = Object.assign({}, lesson, {
   /r\.bottom/.test(body)
     ? ok('anchored to the foot of the surface, not to a card above it')
     : fail('the after-send scroll is not anchored under the writing');
+
+  // And it lets go the moment the tutor replies. Landing on the surface's foot
+  // is re-tried 300ms and 900ms after a send, to catch the receipt and the
+  // tutor's chip settling to their real heights. But a reply moves the surface:
+  // it lands above it and the next board opens underneath, so `els.writer` is by
+  // then a fresh blank sheet BELOW the card being read, and a repeat aimed at its
+  // foot drags the reader down past the thing they were waiting for. Two smooth
+  // scrolls with destinations either side of the new card is the other half of
+  // "scrolled into the middle of that message".
+  const settle = (js.match(/function revealSentSettling\(\)\s*\{[\s\S]*?\n\}/) || [''])[0];
+  /cardsArrived/.test(settle)
+    ? ok('and the repeats stand down the moment a card arrives')
+    : fail('the after-send repeats still fire once the tutor has replied, when '
+           + 'the surface they aim at has moved below the reply');
 }
 
 // 6c. Finishing an exercise must not leave you with nowhere to write.

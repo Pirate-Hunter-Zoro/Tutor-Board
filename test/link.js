@@ -817,21 +817,42 @@ if (es && window.Annotate) {
     // off a card had no layer under it and no rule against selecting, so the
     // browser took the gesture and smeared blue across whatever text it found.
     // It read as the pen missing every other mark, because it was.
-    if (/body\.annotating\s+#board[^{]*\{[^}]*user-select:\s*none/.test(css3))
-      ok('the whole lesson refuses to be selected while annotating');
-    else fail('a pen drag over the lesson can start a text selection, which '
-              + 'kills the stroke and smears the page blue');
+    // And it is the WHOLE DOCUMENT, always -- not the lesson, and not only while
+    // annotate mode is on. Reported from the device: "I was also just writing on
+    // the board and the text 'skip' in 'skip this one' got highlighted... 
+    // Highlighting of ANY text should be impossible. When I annotate tutor
+    // responses, that's not highlighting either; it's only me marking it up."
+    // `#skip` lives in the writing panel's own header, which is inside `#board`
+    // and so was covered — but only while annotating, and they were writing on
+    // the slate. An eyesore, and worse than one: once a native selection begins
+    // the browser owns the gesture and the pointer stream stops reaching the
+    // canvas, which is the "annotation intermittently stopped writing" defect.
+    var whole = /^body\s*\{([^}]*)\}/gm;
+    var refused = false, hit;
+    while ((hit = whole.exec(css3)) !== null) {
+      if (/user-select:\s*none/.test(hit[1])) refused = true;
+    }
+    if (refused) ok('the whole document refuses to be selected, always');
+    else fail('selection is refused somewhere narrower than the document, so a '
+              + 'drag will smear blue across whatever it reaches');
+    if (/(input|textarea)[^{]*\{[^}]*user-select:\s*text/.test(css3))
+      ok('except in a text box, where selecting is how a sentence is corrected');
+    else fail('text boxes cannot be selected in either, so a typed answer '
+              + 'cannot be edited');
 
-    // But refusing the GESTURE is a different rule, and it belongs to the cards
-    // alone. Applied to the whole lesson it also covers the margins, the gaps
-    // between cards and the student's own turns — which is every part of the
-    // page there was left to scroll with, so turning annotate mode on locked the
-    // lesson where it stood and looked like the touch screen had died.
-    var wide = /body\.annotating\s+#board,\s*body\.annotating\s+#board \*\s*\{([^}]*)\}/
-      .exec(css3);
-    if (wide && !/touch-action/.test(wide[1]))
+    // But refusing the GESTURE is a different rule, and it must not follow the
+    // one above across the document. Applied that widely it covers the margins,
+    // the gaps between cards and the student's own turns — which is every part of
+    // the page there was left to scroll with, so turning annotate mode on locked
+    // the lesson where it stood and looked like the touch screen had died.
+    var everywhere = false;
+    whole = /^body\s*\{([^}]*)\}/gm;
+    while ((hit = whole.exec(css3)) !== null) {
+      if (/touch-action:\s*none/.test(hit[1])) everywhere = true;
+    }
+    if (!everywhere)
       ok('but the lesson can still be scrolled while annotating');
-    else fail('touch-action is refused across the whole lesson, so there is '
+    else fail('touch-action is refused across the whole document, so there is '
               + 'nowhere left to scroll with once annotate mode is on');
     // And WHERE the hand landed no longer decides whether it scrolls.
     //

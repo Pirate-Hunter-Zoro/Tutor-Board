@@ -249,11 +249,32 @@ body.annotating canvas.ann-layer { pointer-events: auto; }
 
    `selectstart` was supposed to catch this and does not -- iOS does not fire it
    for a touch-driven selection, which is the only kind that matters here. */
-body.annotating #board,
-body.annotating #board * {
+/* NOTHING ON THIS PAGE IS TEXT TO SELECT.
+
+   This was `body.annotating #board` -- the lesson, and only while annotate mode
+   was on -- which left every other surface and every other moment able to smear
+   blue across itself. Reported from the device: "I was also just writing on the
+   board and the text 'skip' in 'skip this one' got highlighted, which doesn't
+   hurt functionality but was an eyesore. Highlighting of ANY text should be
+   impossible. When I annotate tutor responses, that's not highlighting either;
+   it's only me marking it up." Both halves of that are right. A native selection
+   is not just an eyesore either: once it begins, the browser owns the gesture and
+   the pointer stream stops reaching the canvas, which is the "annotation
+   intermittently stopped writing" defect from a fortnight ago.
+
+   So it is the whole document, always. The exception is the one place a
+   selection is the point rather than an accident -- a text box, where selecting
+   is how a sentence gets corrected. */
+body {
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
+}
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
 }
 /* `touch-action` IS NOT A RULE ABOUT PLACES ANY MORE.
 

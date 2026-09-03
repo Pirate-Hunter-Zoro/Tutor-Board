@@ -46,6 +46,63 @@ which kind of subject it is and the board adapts.
 >
 > ### Where this is right now, 2 September 2026
 >
+> **A card arriving never moves the reader.** Specified from the device, after two narrower fixes
+> had shipped and it was still happening: *"when I submit the response, I'm scrolled to the bottom
+> of the written/typed response I just submitted, where I can clearly see the 'the tutor is
+> writing...' message, and once the tutor response is available, have it start getting portrayed for
+> the user to see line by line, WITHOUT scrolling the user down — they'll scroll their own way down
+> to read the response."* The first telling named what it should feel like, which is any chat page
+> on the web: the reader is stationary and the text grows downward past them.
+>
+> **The layout grants it for nothing, which is the good part.** Measured, rather than assumed:
+> before a reply the run is `[question][live board]`, and after it is `[question][the same board,
+> frozen][receipt][reply][the next board]`. The student's working keeps its PLACE in the run — a
+> live surface and a dormant board are one box by construction, same head and same height, because a
+> dormant board has to be indistinguishable from a live one — and everything new lands below it. So
+> nothing above the reader changes height, the reply appears in the space under their working where
+> "the tutor is writing" was, and it grows down through it. All that was ever needed was to stop
+> aiming the page at it. `revealNewest` survives for the two places that are not this: the first
+> paint of a lesson, where there is no reader yet to leave alone, and the jump button, which is
+> somebody asking to be taken.
+>
+> **And a third mover, from the position a send actually leaves you in.** Reported once more:
+> *"just submitted another board written response and got scrolled UP again to the middle of the
+> last tutor response."* Nothing aimed the page anywhere that time — and nothing held it either.
+> `revealSent` parks the reader at the FOOT of the writing surface, and the surface is the tail of
+> the run and carries no card or turn id of its own, so every keyed node was above the top of the
+> glass and the anchor walk found nothing and gave up. The receipt for an answer is then inserted
+> beside the QUESTION it answers, which an hour into an exercise is several cards up the page, so the
+> surface went down with it and what filled the glass was the bottom of the card above. The anchor
+> now falls back to the last keyed thing above the reader. Not the surface itself, though it is what
+> is being looked at: a reply MOVES it, because the next board opens under the newest word, and an
+> anchor by that name would follow it down the page.
+>
+> The after-send repeats let go too. `revealSentSettling` re-lands on the surface's foot at 300ms and
+> 900ms, to catch the receipt and the tutor's chip settling — but the moment the tutor replies that
+> surface is a fresh blank sheet BELOW the card being read, and a repeat aimed at its foot drags the
+> reader past the very thing they were waiting for. Two smooth scrolls with destinations either side
+> of the new card is what "the middle of that message" was made of.
+>
+> `test/feedback.js` and `test/interactive.js` hold all of it, and the lesson from the first attempt
+> is worth more than the fix: **a test for a scroll has to watch for a deliberate aim, not only for a
+> shift.** The first version measured the shift and passed while the board overrode the anchor one
+> line later, because `scrollTo` is a no-op in the harness and nothing was looking at it. The second
+> version measured nothing at all, because it staged the receipt below the surface rather than above
+> it — the condition is that the answered question is not the last card, and it has to be built that
+> way. Both were caught by removing the fix and watching the test still pass.
+>
+> **And nothing on the page can be selected any more.** Reported alongside: *"I was also just
+> writing on the board and the text 'skip' in 'skip this one' got highlighted, which doesn't hurt
+> functionality but was an eyesore. Highlighting of ANY text should be impossible. When I annotate
+> tutor responses, that's not highlighting either; it's only me marking it up."* Both halves are
+> right. `#skip` lives in the writing panel's own header, inside `#board`, and the rule refusing
+> selection was `body.annotating #board` — the lesson, only while annotate mode was on, and they
+> were writing on the slate. It is the whole document now, always, with one exception: a text box,
+> where selecting is how a sentence gets corrected. Worth more than the eyesore, too — once a native
+> selection begins the browser owns the gesture and the pointer stream stops reaching the canvas,
+> which is the "annotation intermittently stopped writing" defect from a fortnight ago.
+> Shell version `board-shell-v77`.
+>
 > **A carried-over copy is the student's, and erasing it means what it says.** Reported from the
 > iPad: *"I got a new board to answer the next prompt, and I elected to erase my copied over
 > previous board work, and started writing new work. Then all of a sudden, the old previous board

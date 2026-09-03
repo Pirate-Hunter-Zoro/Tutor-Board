@@ -427,6 +427,17 @@ tutorboard/
   judgement is actually reached, because fetching the frozen strokes and waiting for a hand to come
   off the glass are not decisions. And a sheet that has GAINED ink since the ruling is a sheet
   somebody is using: abandon, do not re-judge. `test/chain.js` holds all three and each fails alone.
+- **A CARD ARRIVING NEVER MOVES THE READER.** It grows into view. The reader is stationary and the
+  text grows downward past them, which is what every chat page on the web does and what was asked
+  for in those words. The layout grants it for nothing: the student's working keeps its place in the
+  run when it freezes — a live surface and a dormant board are one box by construction — so nothing
+  above the reader changes height and the reply appears in the space under their working where "the
+  tutor is writing" was. `revealNewest` is for the first paint and for the jump button, which is
+  somebody ASKING to be taken. Nothing else may aim the page at a card.
+- **Nothing on the page can be selected, except a text box.** `user-select: none` on `body`, always,
+  not on the lesson and not only while annotating. It is not only an eyesore: once a native
+  selection begins the browser owns the gesture and the pointer stream stops reaching the canvas,
+  which is how annotation "intermittently stopped writing".
 - **NEWS IS A CARD. THE STUDENT'S OWN ANSWER IS NOT NEWS.** `anythingNew` in `render` is the whole
   basis of the reveal at the foot of it, and the only reveal it can lead to is `revealNewest` — the
   top of the newest thing the TUTOR wrote, which with a question open sits directly ABOVE the
@@ -434,13 +445,17 @@ tutorboard/
   up to the card above the board just written on, and when `penBusy`'s tail won the race it offered
   a jump button to the same wrong place instead. A turn has its own answer to where the page should
   be and it is `revealSent`. Never count one here.
-- **A test for a scroll must watch for a deliberate aim, not only for a shift.** The first test for
-  the two above measured the shift and passed while the board overrode the anchor one line later,
-  because `scrollTo` is a no-op in the harness and nothing was looking at it. Spy on `scrollTo` as
-  well as `scrollBy` — and hold the render back past `penBusy`'s tail (2.5s from the last pen
-  sample, 1.2s from the last touch anywhere on the page), or it reaches the jump button and never
-  the scroll, which is half the behaviour untested. `test/interactive.js` carries a small layout
-  engine for the transcript and fails on the old rules twice over.
+- **A test for a scroll must watch for a deliberate aim, not only for a shift — and must stage the
+  condition.** Two versions of this test proved nothing. The first measured the shift and passed
+  while the board overrode the anchor one line later, because `scrollTo` is a no-op in the harness
+  and nothing was looking at it. The second staged the receipt BELOW the writing surface rather than
+  above it: the condition for the reported defect is that the answered question is not the last card
+  the tutor has written, and without three cards in the lesson the insertion lands somewhere
+  harmless. Spy on `scrollTo` as well as `scrollBy`; hold the render back past `penBusy`'s tail
+  (2.5s from the last pen sample, 1.2s from the last touch anywhere on the page); and prove the
+  staging by asserting the new node really did land above the reader. Then remove the fix and watch
+  the test fail — both of these passed with the fix taken out. `test/interactive.js` carries a small
+  layout engine for the transcript.
 - **What the tutor gets is the ink and the card, not a picture of the lesson.** It wrote the
   card and can read it back off disk. Flattening rendered HTML and KaTeX into an image needs
   fonts inlined per send and cannot be verified without a browser; do not add it.
