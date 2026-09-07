@@ -689,6 +689,11 @@ tutorboard/
   outside. `board free` walks the chain and ASKS it; `board free --deep` asks it to read a page;
   `board doctor` ends with the same picture off the cache. When something can only be diagnosed by
   reading a provider's catalogue by hand, that is the bug, not the catalogue.
+- **A config override adjusts a recipe; it does not silently delete one.** `agents` merges one
+  level deeper than every other key, because a machine adding a single field -- `{"free":
+  {"cmd_cost": "free"}}` -- would otherwise replace the whole recipe and be left with an agent that
+  cannot run anything, and on a free-only machine with no tutor at all. Nothing in what they wrote
+  says that. Outright replacement is still available and has to be meant: `"replace": true`.
 - **A failed turn is reported by what it SAID, never by what it exited with.** `exit 1` reached the
   iPad for every cause there is: a retired model, a missing key, a monologue refused, a timeout.
   The turn had already written a usable sentence one line above the number. `failure_reason` in

@@ -2510,10 +2510,21 @@ own agent gets a machine that refuses to run it for free, rather than a machine 
 for it. Saying `"cost": "free"` is one word, and it is the person adding it who knows.
 
 `cmd_cost` exists because `free` is two programs. Its headless turns run `bin/free`, which costs
-nothing; its interactive `cmd` is opencode, which does not. So a free-only machine runs every turn
-and **declines to open a terminal session**, saying which half still works — and the half that still
-works is the half the board uses. Swapping one billed terminal for another under a different name
-would be the same session this machine said not to open.
+nothing; its interactive `cmd` is opencode, whose cost depends entirely on what *that* machine's
+opencode is pointed at — which is configuration this repository cannot see. So the shipped recipe
+assumes it is billed, and a free-only machine that has not said otherwise runs every turn and
+**declines to open a terminal session**, saying which half still works. A machine whose opencode is
+demonstrably on free models says so, and gets both halves:
+
+```json
+"agents": { "free": { "cmd_cost": "free" } }
+```
+
+**That override merges into the built-in recipe rather than replacing it**, and the distinction is
+not cosmetic. A plain replace would take the command, the headless turn and the handoff with it —
+leaving an agent called `free` that cannot run anything and, on a free-only machine, no tutor at
+all, from adding one key. Replacing a recipe outright is still possible and is now something you
+have to mean: `"replace": true`.
 
 A refusal is never silent and never leaves the board empty. The swap is reported, and the lesson
 goes to `fallback_agent` — which is itself verified free, because a config naming a paid fallback on

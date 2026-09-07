@@ -180,13 +180,42 @@ DEFAULT_CONFIG = {
 
 
 def load_config():
+    """The defaults above, with this machine's config file laid over them.
+
+    `agents` merges one level DEEPER than everything else, and the reason is a
+    trap somebody has to fall into only once. A machine adjusting a single field
+    of a built-in recipe -- saying that the opencode on THIS machine is pointed
+    at free models, say -- writes the obvious thing:
+
+        "agents": { "free": { "cmd_cost": "free" } }
+
+    With a plain `update` that REPLACES the whole recipe: the command, the
+    headless turn, the handoff, all of it, gone. The machine then has an agent
+    called `free` that cannot run anything, `fallback_agent` names something
+    unusable, and a free-only machine ends up with no tutor at all -- reported by
+    `tutor --agents` as "every lesson goes to 'nothing'". Nothing in the file the
+    person wrote says that; they added one key.
+
+    So a dict per agent merges into the built-in one, and adding an agent that
+    does not exist yet works exactly as before because there is nothing to merge
+    with. Replacing a recipe outright is still possible and is now something you
+    have to mean: give the entry a `"replace": true`.
+    """
     cfg = json.loads(json.dumps(DEFAULT_CONFIG))
     try:
         with open(CONFIG, "r", encoding="utf-8") as fh:
             user = json.load(fh) or {}
         for k, v in user.items():
             if k == "agents" and isinstance(v, dict):
-                cfg["agents"].update(v)
+                for name, spec in v.items():
+                    have = cfg["agents"].get(name)
+                    if isinstance(spec, dict) and isinstance(have, dict) \
+                            and not spec.get("replace"):
+                        merged = dict(have)
+                        merged.update(spec)
+                        cfg["agents"][name] = merged
+                    else:
+                        cfg["agents"][name] = spec
             else:
                 cfg[k] = v
     except (OSError, ValueError):

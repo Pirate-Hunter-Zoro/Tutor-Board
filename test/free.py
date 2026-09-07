@@ -329,6 +329,45 @@ check("and it says out loud that it swapped the agent",
       any("free_only" in m and "claude" in m for m in said))
 
 # ---------------------------------------------------------------------------
+# Adjusting one field of a built-in recipe must not delete the rest of it
+# ---------------------------------------------------------------------------
+# A machine saying that the opencode installed on IT is pointed at free models
+# writes the obvious thing -- `"agents": {"free": {"cmd_cost": "free"}}` -- and
+# with a plain dict update that replaces the whole recipe: the command, the
+# headless turn, the handoff, gone. The machine is then left with an agent called
+# `free` that cannot run anything and, on a free-only machine, no tutor at all.
+# Found by doing exactly this to this machine's own config.
+cfgdir = tempfile.mkdtemp(prefix="tutor-free-cfg-")
+was_config = tutor.CONFIG
+try:
+    tutor.CONFIG = os.path.join(cfgdir, "config.json")
+    with open(tutor.CONFIG, "w", encoding="utf-8") as fh:
+        json.dump({"agents": {"free": {"cmd_cost": "free"},
+                              "mine": {"cmd": ["mine"], "cost": "free",
+                                       "headless": ["mine", "{prompt}"]}}}, fh)
+    loaded = tutor.load_config()
+    check("adjusting one field of a built-in recipe keeps the rest of it",
+          bool(loaded["agents"]["free"].get("headless"))
+          and loaded["agents"]["free"].get("raw_prompt") is True)
+    check("and the field being adjusted actually takes",
+          loaded["agents"]["free"]["cmd_cost"] == "free")
+    check("so a machine can say its own opencode is free without losing the tutor",
+          not tutor.costs_money(loaded, "free", interactive=True))
+    check("an agent the defaults have never heard of still arrives whole",
+          loaded["agents"]["mine"]["cmd"] == ["mine"])
+
+    # Replacing a recipe outright is still possible; it is now something you have
+    # to mean, rather than what happens when you add one key.
+    with open(tutor.CONFIG, "w", encoding="utf-8") as fh:
+        json.dump({"agents": {"free": {"cmd": ["something-else"],
+                                       "replace": True}}}, fh)
+    check("and a recipe can still be replaced outright, on purpose",
+          tutor.load_config()["agents"]["free"].get("headless") is None)
+finally:
+    tutor.CONFIG = was_config
+    shutil.rmtree(cfgdir, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
 # A failed turn says why, in words
 # ---------------------------------------------------------------------------
 # `exit 1` is what the iPad used to be shown, and it is a dead end: true, the
