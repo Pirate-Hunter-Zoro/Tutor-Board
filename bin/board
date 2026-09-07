@@ -1786,14 +1786,19 @@ def cmd_eyes(live, args):
     a, b = random.randint(2, 9), random.randint(2, 5)
     integral = "%s^%s/%s" % (a, b + 1, b + 1)
 
-    tex = os.path.join(stamp, "eyes.tex")
-    with open(tex, "w", encoding="utf-8") as fh:
+    # `tex_path`, not `tex`: the module of that name is imported at the top of
+    # this file and a local of the same name shadows it, so the next line --
+    # `tex.tex_env()` -- died with "'str' object has no attribute 'tex_env'".
+    # This is the one command that answers "can the tutor read my handwriting",
+    # which is the question somebody asks on exactly the evening it is broken.
+    tex_path = os.path.join(stamp, "eyes.tex")
+    with open(tex_path, "w", encoding="utf-8") as fh:
         fh.write(EYES_DOC % {"token": token, "word": word, "a": a, "b": b})
 
     env = tex.tex_env()
     proc = subprocess.run(
         ["pdflatex", "-interaction=nonstopmode", "-halt-on-error",
-         "-output-directory=" + stamp, tex],
+         "-output-directory=" + stamp, tex_path],
         env=env, cwd=stamp, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=90)
     pdf = os.path.join(stamp, "eyes.pdf")
     if proc.returncode != 0 or not os.path.exists(pdf):

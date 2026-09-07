@@ -132,6 +132,16 @@ now: one interface, one method, whether the exercises are proofs or functions.
 > port 22 refused, 9098 and 443 open. Its board is the only door it opens to the tailnet and
 > `/handover` is the only thing behind it that stops a tutor.
 >
+> **And `board eyes` was broken, which is the command for the question the evening was about.**
+> *"The Galois-Theory tutor still isn't able to understand my board work."* The tutor answering
+> that board was the Mac's free model, and it could not read the handwriting: cards 0081, 0082 and
+> 0083 are all called *please transcribe the content of tNNNN-rN.png* — the tutor asking the
+> student to type out their own page. `board eyes` exists to settle exactly that by experiment,
+> and it died on `AttributeError: 'str' object has no attribute 'tex_env'`: a local named `tex`
+> holding the path to the rendered `.tex` shadowed the `tex` MODULE imported at the top of
+> `bin/board`. It is `tex_path` now. Run against the compute node's Claude it reads the token, the
+> word and the integral back correctly, so that board can see.
+>
 > **Still not fixed, and still needs a person: two machines are beating on one course.** The
 > transcript beat logged `Cannot fast-forward to multiple branches` again this evening. Nothing
 > above changes that; it is the same decision as before and this file cannot make it.
