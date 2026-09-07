@@ -294,8 +294,96 @@ def post(h, repo, path):
         given = h.headers.get("X-Handover") or ""
         if not secret or given != secret:
             return h.send_json({"ok": False, "error": "denied"}, status=403)
+        busy = in_use(repo)
+        if busy:
+            # See `in_use`. The caller is expected to ask again.
+            return h.send_json({"ok": False, "error": "busy", "detail": busy},
+                               status=409)
         name = os.path.basename(repo.root)
         code, out = spawn.tutor_cli(["agent", "stop", name])
         return h.send_json({"ok": code == 0,
                                "detail": out.strip()[-200:]})
     return NOT_MINE
+
+
+# HOW LONG A BOARD GOES ON COUNTING AS ONE SOMEBODY IS USING.
+#
+# Long enough to cover thinking. A student staring at a Galois proof does
+# nothing this can see for a quarter of an hour and is still very much in the
+# lesson. The cost of being wrong the generous way is a tutor that stays
+# listening for another ten minutes on a board nobody is reading, which costs
+# nothing -- it is blocked on `board wait`. The cost of being wrong the other
+# way is the lesson ending under somebody mid-proof.
+IN_USE_FOR = 600
+
+
+def in_use(repo):
+    """Why this board must not be stood down right now, or None.
+
+    A handover assumes the machine it is leaving becomes unreachable, and that
+    is only true of readers who arrive through the proxy. This node publishes
+    its OWN tailnet name as well -- `compute-node.<tailnet>.ts.net`, which is
+    what the app on the iPad is installed against -- and a reader on that
+    address does not notice the proxy moving at all. So the always-on host,
+    re-deciding where `board.<tailnet>.ts.net` points, can stop the tutor of a
+    lesson that is running and reachable and that it is not serving.
+
+    That is what happened on 7 September: the student sent their working at
+    18:09:17, the proxy moved eight seconds later, `/handover` arrived, and the
+    daemon answered that one turn and left -- "stopped after 1 turn(s)", in the
+    middle of exercise 3.11.
+
+    Two questions, both answered off this machine:
+
+      - is the tutor mid-turn? Bouncing it loses the card it is writing. This is
+        the guard `tutor restart --tutors` has always applied and `/handover`
+        never did;
+      - has the student done anything here lately? Sending, handing in a page,
+        writing on the slate. All three land on disk, which is what makes this
+        survive a reload, a second device and the daemon being restarted.
+
+    A board nobody is using answers None and hands over at once, which is the
+    orphan case the handover exists for and the only case it now acts on.
+    """
+    st = state.load_agent(repo) or {}
+    if st.get("state") == "working":
+        return "the tutor is mid-turn"
+    last = _last_student_act(repo)
+    if last and time.time() - last < IN_USE_FOR:
+        return ("somebody was working here %d seconds ago"
+                % int(time.time() - last))
+    return None
+
+
+def _last_student_act(repo):
+    """When the student last did something here, as a timestamp, or None.
+
+    Their contributions, their inbox, and the writing surface -- the tutor's own
+    cards are deliberately not among them, because a tutor writing into a board
+    nobody can reach is the very thing being stood down.
+    """
+    newest = None
+    for path in (repo.turns_path, repo.messages_path):
+        try:
+            at = os.path.getmtime(path)
+        except OSError:
+            continue
+        if newest is None or at > newest:
+            newest = at
+    # A directory's own mtime moves when a file APPEARS in it and not when one
+    # is written over, and the slate writes over the page being drawn on for as
+    # long as the drawing goes on -- which is the whole of somebody working
+    # without sending yet. So the files, not the directory.
+    for d in (repo.slate, repo.answers):
+        try:
+            entries = list(os.scandir(d))
+        except OSError:
+            continue
+        for e in entries:
+            try:
+                at = e.stat().st_mtime
+            except OSError:
+                continue
+            if newest is None or at > newest:
+                newest = at
+    return newest

@@ -168,8 +168,33 @@ os.makedirs(os.path.join(env["TUTORBOARD_COURSES"], "Tutor-Board"), exist_ok=Tru
 check("a round can be pointed at courses of its own, so running the tests "
       "cannot move somebody's working tree",
       'TUTORBOARD_COURSES' in open(SCRIPT, encoding="utf-8").read())
+
+# AND FROM A COPY OF THE TOOL, WHICH THE COURSES OVERRIDE ALONE DID NOT COVER.
+#
+# Step 1 of a round is `git pull --ff-only` on the repository the script lives
+# in, and the script lived in this one. On 7 September, while somebody was
+# being taught on this machine, running the suite fast-forwarded the working
+# copy it was being run from -- and then, because a pull that MOVED hands over
+# to the code that landed with `--after-pull`, went on to step 4 and ran
+# `catch-up.sh` for real. The Galois board and its tutor were restarted in the
+# middle of the evening and a second board for the same course was left
+# answering on a port nobody knew about.
+#
+# `unstick_tool` is the sharper end of the same thing: a pull that cannot
+# fast-forward stashes the working tree and hard-resets it, which on a
+# developer's checkout is their afternoon.
+#
+# A local clone, so `behind` is answered against a remote in the temporary
+# directory and no part of this reaches the network or the real repository.
+tool = os.path.join(tempfile.mkdtemp(prefix="tutor-current-tool-"), "Tutor-Board")
+subprocess.run(["git", "clone", "--quiet", "--local", "--no-hardlinks", ROOT, tool],
+               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
+copied = os.path.join(tool, "scripts", "stay-current.sh")
+check("the round under test is a copy, not the repository being worked in",
+      os.path.isfile(copied))
+was_head = head(ROOT)
 try:
-    p = subprocess.run(["bash", SCRIPT, "--run"], env=env, cwd=ROOT,
+    p = subprocess.run(["bash", copied, "--run"], env=env, cwd=tool,
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=300)
     out = p.stdout.decode("utf-8", "replace")
     check("a round runs to completion on a machine with nothing to do",
@@ -186,11 +211,48 @@ try:
           bool(doc.get("head")))
     check("and a round that catches up says which courses it was for",
           "catching up" not in out or ":" in out)
+    check("and the repository the suite is being run from did not move",
+          head(ROOT) == was_head)
 except subprocess.TimeoutExpired:
     check("a round runs to completion on a machine with nothing to do", False)
 finally:
     shutil.rmtree(env["TUTORBOARD_COURSES"], ignore_errors=True)
     shutil.rmtree(env["HOME"], ignore_errors=True)
+    shutil.rmtree(os.path.dirname(tool), ignore_errors=True)
+
+# And the last hole the courses override left. `stay-current.sh` and
+# `catch-up.sh` both honour it and both then hand the machine to `tutor restart
+# --tutors`, which had never heard of it: it asked the configuration, whose
+# default is the tool's parent directory, and found the real home. Moving
+# `HOME` does not help -- it changes which config is read, and a missing config
+# falls back to that same default.
+sys.path.insert(0, ROOT)
+import importlib.machinery                                        # noqa: E402
+import importlib.util                                             # noqa: E402
+
+_tspec = importlib.util.spec_from_loader(
+    "tutorcli_current",
+    importlib.machinery.SourceFileLoader("tutorcli_current",
+                                         os.path.join(ROOT, "bin", "tutor")))
+_tutor = importlib.util.module_from_spec(_tspec)
+_tspec.loader.exec_module(_tutor)
+
+_box = tempfile.mkdtemp(prefix="tutor-current-only-")
+os.makedirs(os.path.join(_box, "Only-This-One", "live"))
+open(os.path.join(_box, "Only-This-One", "tutorboard.json"), "w").write("{}")
+_was = os.environ.get("TUTORBOARD_COURSES")
+os.environ["TUTORBOARD_COURSES"] = _box
+try:
+    found = [c["dir"] for c in _tutor.courses({"courses_dir": os.path.expanduser("~")})]
+    check("`tutor` looks for courses where it is pointed, not where the machine "
+          "keeps them -- so a scoped round restarts nothing of the person's",
+          found == ["Only-This-One"])
+finally:
+    if _was is None:
+        os.environ.pop("TUTORBOARD_COURSES", None)
+    else:
+        os.environ["TUTORBOARD_COURSES"] = _was
+    shutil.rmtree(_box, ignore_errors=True)
 
 # Everything that briefs a person points at it.
 readme = open(os.path.join(ROOT, "README.md"), encoding="utf-8").read()

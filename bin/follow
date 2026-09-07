@@ -635,15 +635,22 @@ def handover(host, port, secret, log):
 
     Best effort, and deliberately so. The address has to move whether or not the
     other machine is still there to be asked.
+
+    Returns True when the machine is done with -- it wrapped up, it is not
+    answering, or there is no secret to ask with -- and False when it declined
+    because somebody is still being taught on it. False means ASK AGAIN: this
+    used to be called once, at the instant the address moved, so a board that
+    said no was a board that was never asked a second time and a tutor that was
+    orphaned for good. See `in_use` on the board's side for why one says no.
     """
     if not secret:
         log("no handover_secret configured; %s keeps its tutor" % host)
-        return
+        return True
     # A machine that is not answering has no tutor to wrap up, and asking it
     # anyway spends the request timeout on every move away from a host that has
     # died -- which is most of them.
     if not probe(host, port, timeout=2.0):
-        return
+        return True
     req = urllib.request.Request("http://%s:%d/handover" % (host, port),
                                  data=b"", method="POST",
                                  headers={"X-Handover": secret})
@@ -651,8 +658,21 @@ def handover(host, port, secret, log):
         with urllib.request.urlopen(req, timeout=15) as resp:
             doc = json.loads(resp.read(4096).decode("utf-8", "replace"))
         log("asked %s to hand over: %s" % (host, doc.get("detail") or doc))
+        return True
+    except urllib.error.HTTPError as exc:
+        if exc.code == 409:
+            try:
+                doc = json.loads(exc.read(4096).decode("utf-8", "replace"))
+            except (OSError, ValueError):
+                doc = {}
+            log("%s keeps its tutor for now -- %s"
+                % (host, doc.get("detail") or "it is in use"))
+            return False
+        log("could not ask %s to hand over: %s" % (host, exc))
+        return True
     except (OSError, urllib.error.URLError, ValueError) as exc:
         log("could not ask %s to hand over: %s" % (host, exc))
+        return True
 
 
 class Target:
@@ -805,6 +825,11 @@ def follower(target, node, cands, log, prefer="local", secret=None):
     was = None
     was_want = None
     pending = None          # a move that has not said the same thing twice yet
+    # A machine the address has left that has not been stood down yet, because
+    # it was mid-turn or somebody was still working on it. Carried until it
+    # agrees or stops answering: the alternative is what used to happen, which
+    # is that the one moment it was ever asked was a moment it had to say no.
+    owed = None
     while True:
         now, where, want = choose_target(node, cands, prefer)
 
@@ -848,10 +873,20 @@ def follower(target, node, cands, log, prefer="local", secret=None):
             # directions carry a live tutor, and `handover` itself is what
             # declines to bother a host that is not answering.
             if was and was[0] != now[0]:
-                handover(was[0], was[1], secret, log)
+                if not handover(was[0], was[1], secret, log):
+                    owed = (was[0], was[1])
+                else:
+                    owed = None
             log("serving %s at %s:%d" % (where, now[0], now[1]))
             target.set(now[0], now[1])
             was = now
+        elif owed and (not now or owed[0] != now[0]):
+            # Still owed a wrap-up from a machine the address has already left.
+            if handover(owed[0], owed[1], secret, log):
+                owed = None
+        elif owed:
+            # The address came back to it. Nothing to stand down.
+            owed = None
         # Wait out the interval -- but not through a person's tap. Thirty seconds
         # is nothing while a lesson is running and a very long time with a finger
         # on the iPad: the hub records the choice immediately and then the

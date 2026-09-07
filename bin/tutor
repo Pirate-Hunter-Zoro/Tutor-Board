@@ -468,8 +468,21 @@ def resolve_agent(cfg, course, override=None, interactive=False, say=None):
 
 
 def courses(cfg):
-    """Whatever is on disk. No registry, so nothing to keep in step."""
-    base = os.path.expanduser(cfg["courses_dir"])
+    """Whatever is on disk. No registry, so nothing to keep in step.
+
+    `TUTORBOARD_COURSES` beats the configuration, and it is not a nicety. It is
+    how a test says "these courses, not this machine's", and until 7 September
+    only the shell scripts had heard of it: `stay-current.sh` and `catch-up.sh`
+    walked the directory they were pointed at, then handed the machine to
+    `tutor restart --tutors`, which asked the configuration and found the real
+    home. Running the test suite therefore bounced the board somebody was being
+    taught on, and -- because a `HOME` the test HAD moved gave a different
+    config and so a different derived port -- left a second board for the same
+    course answering on a port nobody knew about. One variable, one meaning,
+    everywhere.
+    """
+    base = os.path.expanduser(os.environ.get("TUTORBOARD_COURSES")
+                              or cfg["courses_dir"])
     out = []
     try:
         names = sorted(os.listdir(base))

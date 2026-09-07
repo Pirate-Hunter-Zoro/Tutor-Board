@@ -190,6 +190,10 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = urllib.parse.unquote(parsed.path)
         repo = self.server.repo
+        # Before anything writes. The directories were made when this process
+        # started and a pull can have removed one since -- see `Repo.ensure_dirs`.
+        # Ten stat calls against a route that is about to write a PNG.
+        repo.ensure_dirs()
 
         for mod in (routes.saving, routes.lesson, routes.writing,
                     routes.machines):

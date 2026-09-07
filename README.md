@@ -45,7 +45,82 @@ now: one interface, one method, whether the exercises are proofs or functions.
 >   board that is answering) but it is worth confirming: the port the HTTPS name points at should
 >   be the course they are working in.
 >
-> ### Where this is right now, 7 September 2026
+> ### Where this is right now, 7 September 2026 (evening)
+>
+> **A board keeps the lesson it is holding.** Reported in four words — *"Galois-Theory tutor
+> session up and crashed"* — and the log holds the whole of it inside one minute. Two defects
+> there, and a third found while fixing them — each one a lesson ended by something that was not
+> in the room.
+>
+> **18:09:25 — the tutor was stopped by a proxy the student was not using.** `/handover` is how
+> the always-on host asks an outgoing board to wrap up before the address moves: the tutor there
+> is about to be unreachable, so it gets its one turn to write `HANDOFF.md` rather than being
+> orphaned. That reasoning holds for a reader who arrives through the proxy and for nobody else.
+> This node publishes its OWN tailnet name as well — `compute-node.<tailnet>.ts.net` — which is
+> what the app on the iPad is installed against and which does not move when
+> `board.<tailnet>.ts.net` does. So the Mac's follower re-decided where its address pointed, asked
+> compute301 to stand down, and compute301 stood down: a lesson that was running, reachable, and
+> being read on an address the follower does not serve. Eight seconds earlier the student had sent
+> *"All rational numbers…"*. The daemon answered that one turn, wrote its handoff, and left —
+> `stopped after 1 turn(s)`, in the middle of Garling 3.11.
+>
+> **The board now says no, and the follower comes back.** Two questions, both answered off this
+> machine's own disk: is the tutor mid-turn — the guard `tutor restart --tutors` has always
+> applied and this one never did, because bouncing a tutor that is writing loses the card — and
+> has the student done anything here lately. Sending, handing a page in, or drawing on the slate,
+> all read off the files rather than the directories, because the slate writes OVER the page being
+> drawn on and a directory's mtime only moves when a file appears in it. Ten minutes, which is
+> thinking time on a proof rather than a network timeout. A board nobody is using still hands over
+> at once, which is the orphan case the mechanism exists for and now the only case it acts on.
+>
+> The refusal had to be one the caller returns from. `handover` was called once, at the instant
+> the address moved, and never again — so a board that said no was a board that was orphaned for
+> good, which is the exact outcome the handover exists to prevent. It is an obligation the
+> follower carries now: asked again each tick until the machine agrees or stops answering, and
+> dropped if the address comes back to it.
+>
+> **18:09:09 — and every keystroke of the typed answer had already been failing.** A
+> `FileNotFoundError` for `live/text/0070.txt`, twice, with a traceback into `board.log` and a 500
+> on the iPad. `live/text/` was gone: the other machine's transcript beat committed the deletion
+> of the last draft in it at 15:59, git removes a directory when it removes the last tracked file
+> in it, and the pull brought that here. The board had made the directory once, when the process
+> started, and a board is a long-lived process. Nothing told it.
+>
+> It is not `text`'s problem. `answers`, `annotations`, `slate`, `inbox/uploads` and `cards` are
+> all tracked, all routinely go empty, and all are written to by a request that arrives whenever
+> the student happens to act. `Repo.ensure_dirs` is that list, re-asserted at the top of every
+> POST — ten stat calls in front of a route that is about to write a PNG, which is nothing, and it
+> is the only place that sees every writer.
+>
+> `test/keeping.py` holds both, against a real board on a real socket: a directory removed under a
+> running server and a typed answer that still saves, a handover refused mid-turn and refused
+> eight seconds after a send, one allowed on a sitting that ended an hour ago, and the follower's
+> obligation surviving the tick it was refused on.
+>
+> **And a third, found by running the test suite while writing the other two.** `test/current.py`
+> runs the real `stay-current.sh --run`, and a round's first act is `git pull --ff-only` on the
+> repository the script lives in — which was this one, with uncommitted work in it. It moved HEAD,
+> and a pull that moves hands over to the code that landed with `--after-pull`, which reaches step
+> 4 unconditionally and runs `catch-up.sh` for real. The Galois board and its tutor were restarted
+> at 18:24, in the middle of the same evening the report came from, and a second board for the
+> same course was left answering on 9195 with `live/.board.json` naming it — so the record pointed
+> at a loopback-only board while the tailnet was being served by another.
+>
+> The suite already knew about this shape: `TUTORBOARD_COURSES` exists so a round can be pointed
+> at courses that are not the machine's, and the entry for 3 September is the last time this cost
+> somebody their working tree. Two holes were left. The round was run out of the real checkout, so
+> the override said nothing about step 1 — it runs from a local clone now, and the suite asserts
+> the repository it was run from did not move. And `bin/tutor` had never heard of the variable:
+> `catch-up.sh` walks the courses it is pointed at and then hands the machine to `tutor restart
+> --tutors`, which asked the configuration and found the real home. Moving `HOME` does not help,
+> because a missing config falls back to the tool's parent directory, which is the same place.
+> `courses()` reads the variable now — one variable, one meaning, everywhere.
+>
+> **Still not fixed, and still needs a person: two machines are beating on one course.** The
+> transcript beat logged `Cannot fast-forward to multiple branches` again this evening. Nothing
+> above changes that; it is the same decision as before and this file cannot make it.
+>
+> ### Where this was earlier on 7 September 2026
 >
 > **The Mac mini teaches for nothing, and the compute node keeps Claude.** Asked for directly:
 > *"I want you to modify everything to be FREE AI ONLY on the mac mini side. Compute node side
