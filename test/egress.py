@@ -45,6 +45,7 @@ def check(name, cond):
 sandbox = tempfile.mkdtemp(prefix="tutor-egress-")
 os.environ["BOARD_STATE_DIR"] = sandbox
 sys.path.insert(0, ROOT)
+from tutorboard import paths
 from tutorboard.net import egress, tailscale
 
 # --- reading the tailscale picture ------------------------------------------
@@ -110,6 +111,42 @@ check("the endpoints are configuration with a default, never a fact in the code"
 lib = open(os.path.join(ROOT, "tutorboard", "net", "egress.py"), encoding="utf-8").read()
 check("and the default is the only place a provider is named",
       lib.count("api.anthropic.com") == 1)
+
+# The probe has to ask after the host this machine's tutor will actually open a
+# connection to. Pinned to Anthropic on a machine set to teach for nothing, it
+# asks about a server the tutor never touches: Anthropic answering proves nothing
+# when the free providers are the ones an exit node is challenging, and Anthropic
+# being blocked reports a broken machine that can teach perfectly well.
+cfg_tmp = tempfile.mkdtemp(prefix="tutor-egress-cfg-")
+was_cfg = paths.CONFIG
+try:
+    paths.CONFIG = os.path.join(cfg_tmp, "config.json")
+    egress.paths.CONFIG = paths.CONFIG
+
+    def write_cfg(doc):
+        with open(paths.CONFIG, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh)
+
+    write_cfg({"default_agent": "claude"})
+    check("a machine that teaches with a paid agent probes its provider",
+          egress.egress_probe_urls() == egress.DEFAULT_EGRESS_PROBE)
+
+    write_cfg({"free_only": True, "default_agent": "free"})
+    urls = egress.egress_probe_urls()
+    check("a machine that teaches for nothing probes the free providers instead",
+          urls and all("anthropic" not in u for u in urls)
+          and any("openrouter" in u for u in urls)
+          and any("groq" in u for u in urls))
+
+    # The rule that has not changed: the board is not allowed to know which
+    # assistant is driving it, and a list in the config is how that stays true.
+    write_cfg({"free_only": True, "egress_probe": "https://example.invalid/x"})
+    check("and a list written in the config still beats both",
+          egress.egress_probe_urls() == ("https://example.invalid/x",))
+finally:
+    paths.CONFIG = was_cfg
+    egress.paths.CONFIG = was_cfg
+    shutil.rmtree(cfg_tmp, ignore_errors=True)
 
 # --- rotation ---------------------------------------------------------------
 moved = []

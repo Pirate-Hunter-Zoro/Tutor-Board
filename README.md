@@ -82,6 +82,15 @@ now: one interface, one method, whether the exercises are proofs or functions.
 > and `board doctor` now ends with the same picture off the cache. `scripts/setup-mac.sh` proves
 > the chain answers before it says the machine is set up.
 >
+> **The egress probe was asking after the wrong building.** It is what tells a failed turn apart
+> from a broken network, and it was pinned to Anthropic's endpoint because the default agent was
+> Claude Code. On a machine teaching for nothing that is a question about a server the tutor never
+> opens a connection to — Anthropic answering proves nothing when the free providers are the ones
+> an exit node is being challenged on, and Anthropic being blocked would report a broken machine
+> that can teach perfectly well. The default now follows what the machine teaches with;
+> `egress_probe` in the config still beats both, because the board is still not allowed to know
+> which assistant is driving it.
+>
 > **And a failed turn now says why on the iPad.** It used to say `exit 1` — true, identical for
 > every cause, and a dead end for anybody who is not going to read a log. The turn had almost
 > always already said something better one line further up (*"every model on the chain deliberated
