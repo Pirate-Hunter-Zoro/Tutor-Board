@@ -229,6 +229,41 @@ check("and thinking time is measured in minutes, not seconds",
 
 
 # ---------------------------------------------------------------------------
+# 2b. and a person can still say which machine owns the course
+# ---------------------------------------------------------------------------
+# The guard is aimed at machinery. Somebody deciding "this machine is not the
+# owner" is the one caller it was never meant to argue with -- the same
+# distinction Rule 0 in `choose_target` makes, where a host picked in the hub is
+# the answer rather than a preference to be weighed. It cost an evening to find
+# that out with no way to act on it: the other machine was a Mac with Remote
+# Login off, so its board was the only door it opened and `/handover` was the
+# only thing behind it.
+quiet()
+with open(repo.messages_path, "a", encoding="utf-8") as fh:
+    fh.write(json.dumps({"t": time.time(), "text": "still working"}) + "\n")
+status, doc = post(PORT, "/handover",
+                   headers={"X-Handover": SECRET, "X-Handover-Force": "1"})
+check("a person naming the machine gets the tutor stood down anyway",
+      status == 200 and stopped == [["agent", "stop", "Galois-Theory"]])
+
+quiet()
+status, doc = post(PORT, "/handover", headers={"X-Handover-Force": "1"})
+check("but the override is not a way past the shared secret",
+      status == 403 and not stopped)
+
+fsrc_early = open(os.path.join(ROOT, "bin", "follow"), encoding="utf-8").read()
+check("and the follower never sends it -- a proxy that could force this is "
+      "where the evening started",
+      "X-Handover-Force" not in fsrc_early)
+
+tsrc = open(os.path.join(ROOT, "bin", "tutor"), encoding="utf-8").read()
+check("`tutor agent stop <course> --on <host>` is what does send it",
+      "X-Handover-Force" in tsrc and 'where = _flag(args, "--on")' in tsrc)
+check("and it reaches a peer the way everything else does, proxy included",
+      "socks._socks_open" in tsrc.split("def agent_stop_elsewhere")[1])
+
+
+# ---------------------------------------------------------------------------
 # 3. the caller comes back
 # ---------------------------------------------------------------------------
 # A refusal is only useful if it is asked again. `handover` was called once, at

@@ -294,7 +294,22 @@ def post(h, repo, path):
         given = h.headers.get("X-Handover") or ""
         if not secret or given != secret:
             return h.send_json({"ok": False, "error": "denied"}, status=403)
-        busy = in_use(repo)
+        # A PERSON NAMING THE MACHINE IS A DECISION, NOT A WOBBLE.
+        #
+        # `in_use` exists to stop MACHINERY ending a live sitting: the follower
+        # re-deciding where an address points must not stand down a board
+        # somebody is being taught on. It was never meant to stop the owner of
+        # the course saying which machine owns it -- which is the same
+        # distinction Rule 0 in `choose_target` already makes, where a host
+        # picked in the hub is the answer rather than a preference to be
+        # weighed.
+        #
+        # It is only reachable with the shared secret, so it is not something
+        # the iPad can do, and `bin/follow` deliberately never sends it: a
+        # proxy that could force this would be back to where the evening
+        # started. `tutor agent stop <course> --on <host>` is what sends it.
+        forced = (h.headers.get("X-Handover-Force") or "").strip() not in ("", "0")
+        busy = None if forced else in_use(repo)
         if busy:
             # See `in_use`. The caller is expected to ask again.
             return h.send_json({"ok": False, "error": "busy", "detail": busy},

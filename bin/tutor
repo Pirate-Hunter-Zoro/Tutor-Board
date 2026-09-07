@@ -15,6 +15,8 @@ tutor -- start a tutoring session.
     tutor agent status          which course has an assistant attached
     tutor agent start galois    attach one there, detaching whatever was elsewhere
     tutor agent stop galois     ask it to write its handoff and go
+    tutor agent stop galois --on board    ...on another machine, when a course
+                                          has ended up with two owners
     tutor where                 what is up, on this machine and on the tailnet
     tutor restart [--tutors]    restart every board here (and its tutor) on current code
 
@@ -1382,6 +1384,89 @@ def agent_stop(course, wait=False):
     return 0, "%s in %s is wrapping up" % (st.get("agent"), course["dir"])
 
 
+def agent_stop_elsewhere(cfg, course, host):
+    """Ask another machine to stand this course's tutor down, and mean it.
+
+    `/handover` refuses while somebody is being taught on the board it is asked
+    about -- see `in_use` -- because the caller it was built for is the
+    follower, and a proxy re-deciding where an address points must not end a
+    live sitting. A person is not that caller. Somebody typing this has decided
+    which machine owns the course, which is the one thing `in_use` was never
+    meant to argue with, so this carries the override.
+
+    It exists because saying which machine owns a course used to mean being sat
+    at the one that had to give it up. On a Mac with Remote Login switched off
+    that means being in the room: the board is the only door that machine opens
+    to the tailnet, and `/handover` is the only thing behind it that stops a
+    tutor.
+
+    Reached the way everything else reaches a peer's board -- an ordinary
+    socket first, then the SOCKS proxy, which is the only way out of a machine
+    running tailscaled in userspace mode.
+    """
+    import socket as _socket
+    from tutorboard import machines, ports
+    from tutorboard.net import boards, socks
+
+    secret = machines.handover_secret()
+    if not secret:
+        return 1, ("no handover_secret on this machine, so there is nothing %s "
+                   "would trust; set the same one on both" % host)
+    name = course["dir"]
+    port = None
+    for candidate in ports.port_sequence(name):
+        health = boards.board_health(host, candidate, timeout=4.0)
+        if health and health.get("dir") == name:
+            port = candidate
+            break
+    if port is None:
+        return 1, "no board for %s is answering on %s" % (name, host)
+
+    request = ("POST /handover HTTP/1.0\r\n"
+               "Host: board\r\n"
+               "X-Handover: %s\r\n"
+               "X-Handover-Force: 1\r\n"
+               "Content-Length: 0\r\n"
+               "Connection: close\r\n\r\n" % secret)
+    sock = None
+    if host not in ("127.0.0.1", "::1", "localhost"):
+        proxy = socks.socks_proxy()
+        if proxy:
+            sock = socks._socks_open(host, port, proxy, 20.0)
+    if sock is None:
+        try:
+            sock = _socket.create_connection((host, port), 20.0)
+        except OSError as exc:
+            return 1, "could not reach %s: %s" % (host, exc)
+    buf = b""
+    try:
+        sock.settimeout(20.0)
+        sock.sendall(request.encode())
+        while len(buf) < 65536:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            buf += chunk
+    except OSError as exc:
+        return 1, "could not ask %s: %s" % (host, exc)
+    finally:
+        try:
+            sock.close()
+        except OSError:
+            pass
+    status = buf.split(b"\r\n")[0].decode("utf-8", "replace").strip()
+    body = buf.partition(b"\r\n\r\n")[2].decode("utf-8", "replace")
+    try:
+        doc = json.loads(body)
+    except ValueError:
+        doc = {}
+    if " 200 " not in status:
+        return 1, "%s said %s: %s" % (host, status,
+                                      doc.get("error") or body[:200])
+    return 0, "%s is standing its %s tutor down: %s" % (
+        host, name, doc.get("detail") or "asked")
+
+
 def cmd_agent(cfg, args):
     """tutor agent status|start|stop [course]
 
@@ -1408,6 +1493,14 @@ def cmd_agent(cfg, args):
     course = pick(found, rest[0])
 
     if sub == "stop":
+        # `--on <host>` stops it on ANOTHER machine. A course wants one owner,
+        # and saying which one used to mean being sat at the machine that has
+        # to give it up. See `agent_stop_elsewhere`.
+        where = _flag(args, "--on")
+        if where:
+            code, msg = agent_stop_elsewhere(cfg, course, where)
+            print(msg, file=sys.stderr if code else sys.stdout)
+            return code
         code, msg = agent_stop(course, wait="--wait" in args)
         print(msg, file=sys.stderr if code else sys.stdout)
         return code

@@ -116,6 +116,22 @@ now: one interface, one method, whether the exercises are proofs or functions.
 > because a missing config falls back to the tool's parent directory, which is the same place.
 > `courses()` reads the variable now — one variable, one meaning, everywhere.
 >
+> **And the guard immediately met the case it was not for, which is how the override came about.**
+> Asked, the same evening, to stop the tutor on the Mac — the answer to the two-owners problem
+> below. The Mac's board answered `409 busy, somebody was working here 212 seconds ago`, and it was
+> right: the iPad was on the Mac's board, not this node's. That is the guard doing its job against
+> a caller it was not built to argue with. A person naming the machine has decided which one owns
+> the course; the follower re-deciding where an address points has not. `choose_target` already
+> draws exactly that line in Rule 0, where a host picked in the hub is the answer rather than a
+> preference to be weighed.
+>
+> So `/handover` takes `X-Handover-Force` alongside the secret — still unreachable from the iPad,
+> and `bin/follow` deliberately never sends it, which the suite asserts. `tutor agent stop <course>
+> --on <host>` is what does. It exists because saying which machine owns a course used to mean
+> being sat at the one that has to give it up, and that machine was a Mac with Remote Login off:
+> port 22 refused, 9098 and 443 open. Its board is the only door it opens to the tailnet and
+> `/handover` is the only thing behind it that stops a tutor.
+>
 > **Still not fixed, and still needs a person: two machines are beating on one course.** The
 > transcript beat logged `Cannot fast-forward to multiple branches` again this evening. Nothing
 > above changes that; it is the same decision as before and this file cannot make it.
