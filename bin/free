@@ -667,15 +667,16 @@ def main(argv):
         kind, title, body = parse_card(reply)
         if not unusable(reply):
             break
-        sys.stderr.write("free tutor: got thinking or a plan instead of a card; "
-                         "correcting\n")
+        sys.stderr.write("free tutor: got thinking or a plan instead of a card, "
+                         "correcting and asking again\n")
         user += ("\n\n(Your previous reply was not the card itself. Output ONLY the card "
                  "again, as markdown front matter plus body, with the body being the actual "
                  "teaching prose — state the mathematics directly, addressed to the student. "
                  "Do not narrate what you are doing or reason out loud.)")
 
     if not body:
-        sys.stderr.write("free tutor produced an empty card\n")
+        sys.stderr.write("free tutor: every model on the chain returned an empty "
+                         "card; nothing written\n")
         return 1
     # And if it is STILL deliberation after the correction, write nothing.
     #

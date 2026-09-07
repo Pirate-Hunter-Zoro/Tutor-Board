@@ -305,6 +305,40 @@ def fallback_agent(cfg, current):
     return name
 
 
+# What a turn said on its way down, in the order a person would find useful.
+# `!!` is this file's own marker for something that went wrong; the tutors write
+# their own reasons in the second and third forms.
+FAILURE_MARKERS = ("!! ", "free tutor: ", "error: ", "Error: ")
+
+
+def failure_reason(text, code_note):
+    """Why the turn failed, in words, rather than the number it exited with.
+
+    `exit 1` is what the student's iPad used to say, and it is a dead end: it is
+    true, it is the same for every cause, and there is nothing a person holding
+    the board can do with it except go and find somebody who can read a log. The
+    turn almost always said something better than that on its way down -- "every
+    model on the chain deliberated instead of writing a card", "no provider key
+    on this machine" -- and that sentence is already in the log, one line above
+    the number nobody can use.
+
+    So: the last thing it said that looks like a reason, capped to something that
+    fits in the chrome, with the exit code kept on the end for whoever does open
+    the log. `code_note` when it said nothing at all, which is a real outcome and
+    must not become an empty banner.
+    """
+    lines = [l.strip() for l in (text or "").splitlines() if l.strip()]
+    for line in reversed(lines[-40:]):
+        for mark in FAILURE_MARKERS:
+            if line.startswith(mark):
+                said = line[len(mark):].strip()
+                # `!! exit 1` is this function's own output from a previous turn,
+                # or the line written just above the call. Not a reason.
+                if said and not said.startswith(("exit ", "timed out")):
+                    return "%s (%s)" % (said[:160], code_note)
+    return code_note
+
+
 def turn_output(path, offset, cap=20000):
     """What this turn wrote to the log, which is everything it managed to say.
 
@@ -1582,7 +1616,8 @@ def headless(cfg, course, agent_name, session):
             # itself answers -- the agent said so in its output, and a provider
             # that could say so is a provider we plainly reached, which settles
             # the egress question at the same time and for free.
-            until = limits.reads_as_usage_limit(turn_output(logpath, mark))
+            said = turn_output(logpath, mark)
+            until = limits.reads_as_usage_limit(said)
             if until:
                 limits.mark_limited(until, agent=agent_name)
                 log.write("!! '%s' is out of allowance here until %s\n"
@@ -1655,7 +1690,8 @@ def headless(cfg, course, agent_name, session):
             # one an hour ago -- and can say so at all, which it could not. A
             # student whose working was handed in and answered by nothing is the
             # one state this tool must never present as normal.
-            agent_state(live, state="listening", last_error=err,
+            # In words, not as an exit code. See `failure_reason`.
+            agent_state(live, state="listening", last_error=failure_reason(said, err),
                         failed_at=time.time(), retrying=pending is not None)
         else:
             carried = 1 if fresh else carried + 1

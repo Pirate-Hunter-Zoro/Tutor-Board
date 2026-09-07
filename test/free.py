@@ -329,6 +329,30 @@ check("and it says out loud that it swapped the agent",
       any("free_only" in m and "claude" in m for m in said))
 
 # ---------------------------------------------------------------------------
+# A failed turn says why, in words
+# ---------------------------------------------------------------------------
+# `exit 1` is what the iPad used to be shown, and it is a dead end: true, the
+# same for every cause, and nothing a person holding the board can act on except
+# by finding somebody who can read a log. The turn has almost always already said
+# something better one line further up.
+LOG = """
+=== 19:04:11 turn 3 ===
+free tutor: openrouter/nvidia/x:free -- retired from the free tier
+free tutor: every model on the chain deliberated instead of writing a card; nothing written
+"""
+check("a failed turn is reported by what it said, not by what it exited with",
+      tutor.failure_reason(LOG, "exit 1").startswith(
+          "every model on the chain deliberated"))
+check("and the exit code is kept for whoever does open the log",
+      "(exit 1)" in tutor.failure_reason(LOG, "exit 1"))
+check("a turn that said nothing at all still reports something",
+      tutor.failure_reason("\n\n", "timed out") == "timed out")
+# Otherwise the reason for one turn's failure is the previous turn's exit code,
+# quoted back with a fresh timestamp on it.
+check("and the marker line this file writes itself is not mistaken for a reason",
+      tutor.failure_reason("!! exit 1\n", "exit 1") == "exit 1")
+
+# ---------------------------------------------------------------------------
 # The two machines are set up by two scripts, and neither undoes the other
 # ---------------------------------------------------------------------------
 mac = open(os.path.join(ROOT, "scripts", "setup-mac.sh"), encoding="utf-8").read()

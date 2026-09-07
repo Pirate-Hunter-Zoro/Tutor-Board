@@ -689,6 +689,11 @@ tutorboard/
   outside. `board free` walks the chain and ASKS it; `board free --deep` asks it to read a page;
   `board doctor` ends with the same picture off the cache. When something can only be diagnosed by
   reading a provider's catalogue by hand, that is the bug, not the catalogue.
+- **A failed turn is reported by what it SAID, never by what it exited with.** `exit 1` reached the
+  iPad for every cause there is: a retired model, a missing key, a monologue refused, a timeout.
+  The turn had already written a usable sentence one line above the number. `failure_reason` in
+  `bin/tutor` lifts it out of the turn's own output and hands that to the board, keeping the code
+  in brackets for whoever opens the log. Never stamp a bare exit code as `last_error` again.
 - **A turn pays for what it needs and never for what it already has.** The tutor
   may be a model billed by the token, and every round trip inside a turn resends
   the whole conversation -- so a document re-read is charged again for the rest

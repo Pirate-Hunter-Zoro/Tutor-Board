@@ -82,6 +82,13 @@ now: one interface, one method, whether the exercises are proofs or functions.
 > and `board doctor` now ends with the same picture off the cache. `scripts/setup-mac.sh` proves
 > the chain answers before it says the machine is set up.
 >
+> **And a failed turn now says why on the iPad.** It used to say `exit 1` — true, identical for
+> every cause, and a dead end for anybody who is not going to read a log. The turn had almost
+> always already said something better one line further up (*"every model on the chain deliberated
+> instead of writing a card"*, *"no provider key on this machine"*), so that is the sentence the
+> board is handed, with the exit code kept on the end for whoever does open the log.
+> `failure_reason` in `bin/tutor`.
+>
 > ### Where this was on 3 September 2026 (night)
 >
 > **There is one board now, and one method, in every repository.** Reported from Algo-Solutions:
