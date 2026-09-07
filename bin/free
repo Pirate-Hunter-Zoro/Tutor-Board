@@ -26,50 +26,19 @@ import urllib.request
 
 TOOL = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, TOOL)
-from tutorboard import handoff, reasoning
+from tutorboard import freechain, handoff, reasoning
 
 BOARD = os.path.join(TOOL, "bin", "board")
-KEYS = os.path.join(os.path.expanduser("~"), ".config", "api-keys")
 
-# Free providers, tried in order. A provider is enabled by having its key present.
-# OpenRouter's :free tier leads, Groq's free tier is the independent fallback, so
-# a daily cap on one shared pool does not starve the tutor.
-# The last field is what this provider is asked in order NOT to send back the
-# model's thinking. Every model on this chain reasons before it answers, and an
-# endpoint that forwards that reasoning inside `message.content` puts it on the
-# board. Asking is the cheap half of the defence and it is only half: the reply
-# goes through `reasoning.strip_reasoning` regardless, because a free endpoint
-# ignoring a parameter it does not implement is exactly the shape of this bug.
-#
-# A parameter a provider has never heard of is a 400, so `post_json` drops these
-# and retries once bare -- see `chat`.
-PROVIDERS = (
-    ("openrouter", "https://openrouter.ai/api/v1/chat/completions", "openrouter_key",
-     ("nvidia/nemotron-3-super-120b-a12b:free",
-      "minimax/minimax-m3:free",
-      "minimax/minimax-m2.7:free",
-      "dots-studio/dots-3-note-preview:free",
-      "cohere/north-mini-code:free"),
-     {"reasoning": {"exclude": True}}),
-    ("groq", "https://api.groq.com/openai/v1/chat/completions", "groq_key",
-     ("openai/gpt-oss-120b", "openai/gpt-oss-20b"),
-     {"reasoning_format": "hidden"}),
-)
-
-VISION_MODEL = "qwen/qwen2.5-vl-72b-instruct"
-VISION_URL = "https://openrouter.ai/api/v1/chat/completions"
-VISION_KEY = "openrouter_key"
-
-UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-      "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
-
-
-def read_key(name):
-    try:
-        with open(os.path.join(KEYS, name), encoding="utf-8") as fh:
-            return fh.read().strip()
-    except OSError:
-        return ""
+# Which models this machine can teach with is not written down here any more.
+# It used to be a tuple at the top of this file, and on 7 September 2026 two of
+# its five OpenRouter entries answered 404 -- retired from the free tier -- while
+# the file went on naming them. A free tier's catalogue moves; a constant does
+# not; and the difference between the two is a debugging session. `freechain`
+# asks the providers what they actually serve, ranks it, remembers what has died
+# and keeps a floor for a night with no network. See tutorboard/freechain.py.
+UA = freechain.UA
+read_key = freechain.read_key
 
 
 def post_json(url, key, payload, timeout=180):
@@ -81,9 +50,9 @@ def post_json(url, key, payload, timeout=180):
         return json.loads(resp.read().decode("utf-8", "replace"))
 
 
-def chat(messages, max_tokens=2048, reject=None):
-    """One plain completion over the free chain; moves to the next provider on any
-    failure, exactly the fleet's pattern. Raises when every provider failed.
+def chat(messages, max_tokens=2048, reject=None, chain=None, note=None):
+    """One plain completion over the free chain; moves on at every failure.
+    Raises when nothing on the chain answered.
 
     What comes back is the answer with the model's thinking taken out of it. That
     is not tidying: every model on this chain deliberates first, and a reply whose
@@ -97,45 +66,94 @@ def chat(messages, max_tokens=2048, reject=None):
     what an unusable reply looks like for ITS purpose -- a card is written to the
     student, a handoff is written about them, so this cannot be one rule here --
     and a model that hands back deliberation is passed over for the next one.
+
+    `note` is called with a line per model tried. `board doctor` passes one so a
+    person can see the whole walk; a lesson turn does not, because the walk is
+    only interesting when it ends badly and the log already has that.
     """
+    chain = freechain.text_chain() if chain is None else chain
+    if not chain:
+        missing = freechain.missing_keys()
+        raise RuntimeError(
+            "no free model is reachable: no provider key on this machine (%s)"
+            % ", ".join(missing) if missing else
+            "no free model is reachable: every provider's catalogue came back empty")
     last = "no free provider answered"
-    for name, url, keyfile, models, quiet in PROVIDERS:
-        key = read_key(keyfile)
+    for link in chain:
+        name, model = link["provider"], link["model"]
+        key = read_key(link["key"])
         if not key:
             continue
-        for model in models:
-            body = {"model": model, "messages": messages,
-                    "max_tokens": max_tokens, "temperature": 0.3}
+        body = {"model": model, "messages": messages,
+                "max_tokens": max_tokens, "temperature": 0.3}
+        try:
+            data = post_json(link["url"], key, dict(body, **link["quiet"]))
+        except urllib.error.HTTPError as exc:
+            detail = ""
             try:
-                data = post_json(url, key, dict(body, **quiet))
-            except urllib.error.HTTPError as exc:
-                if exc.code != 400:
-                    last = "%s/%s: %s" % (name, model, exc)
-                    continue
-                # It does not know the parameter. Ask again without it; the
-                # stripping below is what actually holds the line.
-                try:
-                    data = post_json(url, key, body)
-                except (urllib.error.HTTPError, urllib.error.URLError, OSError) as exc2:
-                    last = "%s/%s: %s" % (name, model, exc2)
-                    continue
-            except (urllib.error.URLError, OSError) as exc:
-                last = "%s/%s: %s" % (name, model, exc)
+                detail = exc.read().decode("utf-8", "replace")[:400]
+            except OSError:
+                pass
+            # The provider says this model is gone rather than busy. Write it
+            # down: a retired free model is retired for weeks, and rediscovering
+            # that on every turn of every lesson costs a round trip each time.
+            if freechain.reads_as_dead(exc.code, detail):
+                freechain.bury(name, model)
+                last = "%s/%s: retired from the free tier" % (name, model)
+                if note:
+                    note("%s/%s -- retired from the free tier, skipping from now on"
+                         % (name, model))
                 continue
-            text = ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "")
-            said = (text or "").strip()
-            text = reasoning.strip_reasoning(text)
-            if text and reject and reject(text):
-                last = "%s/%s deliberated instead of answering" % (name, model)
+            if exc.code != 400:
+                last = "%s/%s: %s%s" % (name, model, exc,
+                                        (" -- " + detail.strip()) if detail else "")
+                if note:
+                    note("%s/%s -- %s" % (name, model, exc))
                 continue
-            if text:
-                return text
-            last = ("%s/%s answered with nothing but its own thinking" % (name, model)
-                    if said else "%s/%s returned empty" % (name, model))
+            # It does not know the parameter that suppresses reasoning. Ask again
+            # without it; the stripping below is what actually holds the line.
+            try:
+                data = post_json(link["url"], key, body)
+            except (urllib.error.HTTPError, urllib.error.URLError, OSError) as exc2:
+                last = "%s/%s: %s" % (name, model, exc2)
+                if note:
+                    note("%s/%s -- %s" % (name, model, exc2))
+                continue
+        except (urllib.error.URLError, OSError) as exc:
+            last = "%s/%s: %s" % (name, model, exc)
+            if note:
+                note("%s/%s -- %s" % (name, model, exc))
+            continue
+        text = ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "")
+        said = (text or "").strip()
+        text = reasoning.strip_reasoning(text)
+        if text and reject and reject(text):
+            last = "%s/%s deliberated instead of answering" % (name, model)
+            if note:
+                note("%s/%s -- deliberated instead of answering" % (name, model))
+            continue
+        if text:
+            if note:
+                note("%s/%s -- answered" % (name, model))
+            return text
+        last = ("%s/%s answered with nothing but its own thinking" % (name, model)
+                if said else "%s/%s returned empty" % (name, model))
+        if note:
+            note("%s/%s -- %s" % (name, model,
+                                  "only its own thinking" if said else "empty"))
     raise RuntimeError(last)
 
 
 def ocr_image(path):
+    """Read the student's page. Over the free vision chain, not a paid model.
+
+    This used to name `qwen/qwen2.5-vl-72b-instruct`, which is a fine model and
+    is not free -- so the tutor that exists in order to cost nothing was putting
+    every handed-in page on a credit balance, and would have started answering
+    "insufficient credits" to handwriting on the day that balance ran out, with
+    nothing on the board to say why. Several free models take images now; the
+    chain picks among them exactly as the text chain does.
+    """
     import base64
     mime = "image/png" if path.lower().endswith(".png") else "image/jpeg"
     try:
@@ -143,28 +161,25 @@ def ocr_image(path):
             b64 = base64.b64encode(fh.read()).decode()
     except OSError as exc:
         return "(could not read %s: %s)" % (path, exc)
-    key = read_key(VISION_KEY)
-    if not key:
-        return "(no vision key present)"
+    chain = freechain.vision_chain()
+    if not chain:
+        return ("(no free model on this machine can read an image; the page was "
+                "not transcribed)")
     prompt = ("Transcribe ALL handwriting and text on this page verbatim, including "
               "mathematical notation. Describe any diagrams precisely, so someone who "
               "cannot see the page can follow the working exactly.")
+    message = [{"role": "user", "content": [
+        {"type": "text", "text": prompt},
+        {"type": "image_url", "image_url": {"url": "data:%s;base64,%s" % (mime, b64)}},
+    ]}]
     try:
-        data = post_json(VISION_URL, key, {
-            "model": VISION_MODEL,
-            "messages": [{"role": "user", "content": [
-                {"type": "text", "text": prompt},
-                {"type": "image_url",
-                 "image_url": {"url": "data:%s;base64,%s" % (mime, b64)}},
-            ]}],
-            "max_tokens": 2000,
-        })
-    except (urllib.error.HTTPError, urllib.error.URLError, OSError) as exc:
+        # The vision model reasons as well, and this text is handed to the tutor
+        # as the student's own working -- thinking left in it is read as
+        # handwriting. `chat` strips it, which is why this goes through `chat`
+        # rather than posting for itself as it used to.
+        return chat(message, max_tokens=OCR_LIMIT, chain=chain)
+    except RuntimeError as exc:
         return "(vision failed: %s)" % exc
-    text = ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "")
-    # The vision model reasons as well, and this text is handed to the tutor as
-    # the student's own working -- thinking left in it is read as handwriting.
-    return reasoning.strip_reasoning(text)
 
 
 def ocr(path):
@@ -291,7 +306,23 @@ def parse_card(reply):
     return card_markdown(reply)
 
 
-BRIEF_LIMIT = 800   # tokens for the distilled brief
+# ---------------------------------------------------------------------------
+# Budgets
+# ---------------------------------------------------------------------------
+# On every model of this chain `max_tokens` is NOT a length limit on the answer.
+# It is a budget shared between the model's thinking and its answer, and the
+# thinking goes first. A 550B model asked for a card under an 800-token cap can
+# spend all 800 deliberating and return an empty `content` -- which reads here as
+# "the model returned nothing", moves to the next model, and eventually writes
+# the turn off. The chain looked broken; the budget was.
+#
+# So these are generous, because they cost nothing: every model here is free, and
+# the only price of a larger budget is a few seconds. What keeps a card short is
+# the instruction to write one card, which is where a length limit belongs.
+BRIEF_LIMIT = 2000    # the distilled brief -- capped at 500 words by instruction
+CARD_LIMIT = 2400     # one card
+HANDOFF_LIMIT = 1800  # HANDOFF.md -- under 350 words by instruction
+OCR_LIMIT = 3000      # a transcribed page, which can be long and must not be cut
 
 
 def newest_mtime(paths):
@@ -398,7 +429,8 @@ def write_handoff(root):
             "and what the misunderstanding actually was, what they got right so it is not "
             "re-taught, and the single next thing to teach. No questions, no new "
             "teaching.\n\n"
-            "The lesson (from `board recap`):\n\n%s" % recap(root))}], max_tokens=700)
+            "The lesson (from `board recap`):\n\n%s" % recap(root))}],
+            max_tokens=HANDOFF_LIMIT)
     except RuntimeError as exc:
         sys.stderr.write("free tutor: handoff failed: %s\n" % exc)
         return 1
@@ -411,7 +443,159 @@ def write_handoff(root):
     return 0
 
 
+def check(argv):
+    """Can this machine teach for nothing right now, and if not, why not.
+
+    The question `board doctor` could never answer and the one every bad evening
+    actually turns on. A board can be up, a tutor can be attached, the log can be
+    empty, and the free chain can still be unable to write a word -- because a key
+    file was never created, because every preferred model was retired, because
+    the exit node this machine routes through is blocked by a provider. Each of
+    those looks identical from the board: nothing arrives.
+
+    So this asks for real. It walks the chain, sends one trivial completion, and
+    prints what each model said, ending in a sentence in English about whether a
+    lesson can happen. `--deep` also sends a picture, because handwriting is how
+    most answers arrive here and a text chain that works proves nothing about it.
+    """
+    deep = "--deep" in argv
+    print("free tutor -- what this machine can teach with")
+    print()
+    present = freechain.providers_present()
+    for path in freechain.missing_keys():
+        print("  no key   %s" % path)
+    if not present:
+        print()
+        print("No provider key on this machine, so there is no free tutor at all.")
+        print("Create one of the files above with the key in it, and rerun this.")
+        return 1
+    print("  keys     %s" % ", ".join(present))
+    stale = freechain.dead_models()
+    if stale:
+        print("  retired  %s" % ", ".join(sorted(stale)))
+        print("           (forget them and try again with: board free --forget)")
+
+    chain = freechain.text_chain()
+    print()
+    if not chain:
+        print("Every provider answered, and nothing on offer can write a card.")
+        print("That is unusual enough to be worth reading: board free --list")
+        return 1
+    print("the chain, best first:")
+    for link in chain:
+        print("  %-10s %s" % (link["provider"], link["model"]))
+    print()
+    print("asking it to answer, in order:")
+    answered = []
+    try:
+        reply = chat([{"role": "user",
+                       "content": "Reply with exactly the word: ready"}],
+                     max_tokens=CARD_LIMIT, note=lambda m: print("  " + m))
+        answered.append(("text", reply.strip()[:40]))
+    except RuntimeError as exc:
+        print("  !! %s" % exc)
+
+    if deep and answered:
+        print()
+        print("asking it to read a picture:")
+        png = _eye_test()
+        if not png:
+            print("  !! could not render a test image (is TeX installed? board doctor)")
+        else:
+            got = ocr_image(png)
+            ok = "42" in got and "banana" in got.lower()
+            print("  %s" % (got or "(nothing)").strip().replace("\n", " ")[:200])
+            print("  %s" % ("read it" if ok else
+                            "!! did not read what is on the page"))
+            if ok:
+                answered.append(("vision", "ok"))
+
+    print()
+    if not answered:
+        print("Nothing on the chain answered, so a lesson on this machine would")
+        print("sit in silence. The likeliest causes, in order:")
+        print("  1. no egress -- every request leaves through an exit node here.")
+        print("     check it:  board egress --repair")
+        print("  2. the day's free allowance on both pools is spent; it returns.")
+        print("  3. the keys have expired. Replace them in ~/.config/api-keys.")
+        return 1
+    if deep and not any(k == "vision" for k in [a[0] for a in answered]):
+        print("Cards will be written, but handwriting will not be read: the")
+        print("student's page reaches the tutor as an apology instead of their")
+        print("working. Rerun later -- free vision models are often busy.")
+        return 1
+    print("This machine can teach for nothing. A card was written by a model on")
+    print("the chain above, just now.")
+    return 0
+
+
+def _eye_test():
+    """A tiny image with two things on it nobody could guess. Returns a path or ''.
+
+    Deliberately not a LaTeX render: this has to work on a machine where TeX is
+    not installed, because whether the vision chain answers has nothing to do
+    with whether this machine can typeset. A PNG written byte by byte would be
+    unreadable to a model, so it is drawn as text on a page the only way the
+    stdlib can -- a PBM bitmap of large block digits, converted by nothing.
+    """
+    import tempfile
+    glyphs = {
+        "4": ("#..#", "#..#", "####", "...#", "...#"),
+        "2": ("####", "...#", "####", "#...", "####"),
+        "B": ("###.", "#..#", "###.", "#..#", "###."),
+        "A": ("####", "#..#", "####", "#..#", "#..#"),
+        "N": ("#..#", "##.#", "#.##", "#..#", "#..#"),
+        "Z": ("####", "...#", ".##.", "#...", "####"),
+    }
+    word = "BANANA 42"
+    rows = ["" for _ in range(5)]
+    for ch in word:
+        g = glyphs.get(ch, ("....",) * 5)
+        for i in range(5):
+            rows[i] += g[i] + "."
+    scale = 8
+    w, h = len(rows[0]) * scale, 5 * scale
+    pad = 4 * scale
+    lines = []
+    for _ in range(pad):
+        lines.append("0 " * (w + 2 * pad))
+    for r in rows:
+        line = "0 " * pad + "".join(("1 " if c == "#" else "0 ") * scale for c in r) \
+               + "0 " * pad
+        for _ in range(scale):
+            lines.append(line)
+    for _ in range(pad):
+        lines.append("0 " * (w + 2 * pad))
+    fd, path = tempfile.mkstemp(prefix="free-eye-", suffix=".pbm")
+    os.close(fd)
+    try:
+        with open(path, "w", encoding="ascii") as fh:
+            fh.write("P1\n%d %d\n" % (w + 2 * pad, len(lines)))
+            fh.write("\n".join(l.strip() for l in lines))
+    except OSError:
+        return ""
+    png = path[:-4] + ".png"
+    try:
+        p = subprocess.run(["sips", "-s", "format", "png", path, "--out", png],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=30)
+        if p.returncode == 0 and os.path.exists(png):
+            return png
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    try:
+        p = subprocess.run(["magick", path, png], stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=30)
+        if p.returncode == 0 and os.path.exists(png):
+            return png
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return ""
+
+
 def main(argv):
+    if argv and argv[0] in ("--check", "check"):
+        return check(argv[1:])
     if argv and argv[0] == "--handoff":
         return write_handoff(os.getcwd())
     inbox = (argv[0] if argv else "").strip()
@@ -472,8 +656,8 @@ def main(argv):
     for attempt in range(2):
         try:
             reply = chat([{"role": "system", "content": system},
-                          {"role": "user", "content": user}], max_tokens=800,
-                         reject=unusable)
+                          {"role": "user", "content": user}],
+                         max_tokens=CARD_LIMIT, reject=unusable)
         except RuntimeError as exc:
             if attempt:
                 sys.stderr.write("free tutor: %s\n" % exc)

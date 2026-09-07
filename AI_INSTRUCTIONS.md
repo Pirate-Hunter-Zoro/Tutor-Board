@@ -656,6 +656,39 @@ tutorboard/
   `tutorboard.json`, then the machine by hostname, then `default_agent`. Switching course on the
   hub moves it. Never tie an assistant's lifetime to a terminal session, and never make the student
   start one.
+- **What a machine SPENDS is the machine's own business, and it is decided outside that order.**
+  The Mac mini teaches for nothing; the compute node holds the allowance and teaches with Claude.
+  Three of the four layers above arrive from somewhere else -- a course repository is a clone, so a
+  line in its `tutorboard.json` is a sentence about another machine that lands here in a `git
+  pull`; a `hosts` table is copied; a `--agent` is typed wherever somebody is sitting. So
+  `free_only` is checked AFTER the winner is resolved and overrides all four, and what a recipe
+  costs is written on the recipe. An entry that does not say what it costs is assumed to cost:
+  the other default bills somebody who never asked. Never make `free_only` a fifth layer, and never
+  let a paid agent through it because the config "clearly meant" it. `test/free.py`.
+- **A model name is not a fact, and nothing here may write one down.** `bin/free` once named five
+  free models in a tuple; two were retired from the free tier and the file went on naming them,
+  the chain silently went three deep, and the only symptom was a board that gradually stopped
+  answering. `tutorboard.freechain` asks both providers what they actually serve. What makes it
+  hold is that the ordering is a PREFERENCE and not a permission: a model nobody here has heard of
+  is still in the chain, behind the known ones, so the chain never empties because a favourite was
+  retired. Exclusions are about SHAPE -- a safety classifier and a transcription model cannot write
+  a card whatever a catalogue calls them -- never about quality. A 404 naming the model is a
+  retirement and is remembered for a week; a 429 is a model having a busy evening and is not.
+- **Anything the tutor reaches for must be free on this machine, including its eyes.** The
+  handwriting was being read by a paid vision model on the tutor that exists in order to cost
+  nothing -- one credit balance away from answering "insufficient credits" to every page handed in,
+  with nothing on the board to say why. Vision is picked off the same discovered chain as text.
+- **`max_tokens` on these models is not a length limit.** Every one of them thinks before it
+  answers and the thinking is spent out of the same budget, so an 800-token cap on a 550B reasoner
+  is a cap it can spend entirely on deliberation, returning empty -- which reads from here as "the
+  model returned nothing" and writes the turn off. Budgets are generous because they are free; what
+  keeps a card short is the instruction to write one card.
+- **A fault the person at the board cannot see must have a command that shows it.** The board up, a
+  tutor attached, an empty log and nothing arriving is a state in which everything above the model
+  is fine and looks fine, and working out that two model names had been retired took a session from
+  outside. `board free` walks the chain and ASKS it; `board free --deep` asks it to read a page;
+  `board doctor` ends with the same picture off the cache. When something can only be diagnosed by
+  reading a provider's catalogue by hand, that is the bug, not the catalogue.
 - **A turn pays for what it needs and never for what it already has.** The tutor
   may be a model billed by the token, and every round trip inside a turn resends
   the whole conversation -- so a document re-read is charged again for the rest

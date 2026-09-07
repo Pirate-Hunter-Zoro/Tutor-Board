@@ -38,6 +38,8 @@ The assistant runs these. The student never does.
     board node [name|--unpin]          what this machine calls itself, pinned
     board egress [--repair]            can a turn get out, and through which exit node
     board limit [--clear|--set S]      has the tutor's allowance here run out
+    board free [--deep|--list]         can this machine teach for nothing, and
+                                       on which models -- asked, not assumed
     board eyes [--answer]              can the assistant driving this actually see?
 
 Card kinds: lesson, question, correct, wrong, review, note, recap. (A `review`
@@ -56,8 +58,8 @@ import time
 
 TOOL = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, TOOL)
-from tutorboard import (handoff, limits, machine, ports, processes, reasoning,
-                        tex, worktree)
+from tutorboard import (freechain, handoff, limits, machine, paths, ports,
+                        processes, reasoning, tex, worktree)
 from tutorboard.net import egress, tailscale
 from tutorboard.course import document, homework, review
 SERVE = os.path.join(TOOL, "serve.py")
@@ -1950,6 +1952,59 @@ def cmd_node(live, args):
     return 0
 
 
+def cmd_free(live, args):
+    """The free chain: what it is, whether it answers, and what has died.
+
+        board free              ask it to answer, now, and say whether it did
+        board free --deep       and ask it to read a page, which is how most
+                                answers actually arrive here
+        board free --list       the whole chain, without asking it anything
+        board free --refresh    re-read both catalogues rather than the cache
+        board free --forget     un-bury the models recorded as retired
+
+    This is the command for the question `board status` cannot answer: the board
+    is up, a tutor is attached, and nothing is arriving. Everything above the
+    model is fine in that state and looks fine, which is why it used to take
+    somebody else to work out that the fault was two model names having been
+    retired from a free tier three days earlier.
+    """
+    if "--forget" in args:
+        freechain.exhume()
+        print("forgotten. The whole catalogue is back in the chain; the next turn")
+        print("will find out again which of it still answers.")
+        return 0
+    if "--refresh" in args:
+        found = freechain.catalogue(refresh=True)
+        if not found:
+            print("neither catalogue answered; the chain is whatever was cached.",
+                  file=sys.stderr)
+            return 1
+        for name, entries in sorted(found.items()):
+            print("%-12s %d models" % (name, len(entries)))
+    if "--list" in args or "--refresh" in args:
+        print()
+        print("what a card would be written by, best first:")
+        for link in freechain.text_chain():
+            print("  %-11s %-52s %s" % (link["provider"], link["model"],
+                                        ("%dk ctx" % (link["context"] // 1000))
+                                        if link["context"] else ""))
+        print()
+        print("what a handed-in page would be read by:")
+        for link in freechain.vision_chain():
+            print("  %-11s %s" % (link["provider"], link["model"]))
+        buried = freechain.dead_models()
+        if buried:
+            print()
+            print("recorded as retired (skipped; board free --forget to retry):")
+            for k in sorted(buried):
+                print("  %s" % k)
+        return 0
+    cmd = [sys.executable, os.path.join(TOOL, "bin", "free"), "--check"]
+    if "--deep" in args:
+        cmd.append("--deep")
+    return subprocess.run(cmd, cwd=live.root).returncode
+
+
 def cmd_doctor(live, args):
     import platform as _pl
     import shutil as _sh
@@ -2003,7 +2058,69 @@ def cmd_doctor(live, args):
     if owner:
         print("vpn host: %s%s" % (owner.get("node"),
                                   "" if owner.get("node") == this_node() else "  (not this one)"))
+
+    # --- and the half of the machine that actually teaches -------------------
+    # Everything above this line is about whether the board can be SERVED. None
+    # of it goes wrong on a normal evening. What goes wrong is that the board is
+    # up, a tutor is attached, and nothing arrives -- and until this section
+    # existed, `board doctor` reported a healthy machine in exactly that state.
+    print()
+    ok = tutor_health(live) and ok
     return 0 if ok else 1
+
+
+def tutor_health(live):
+    """Who teaches on this machine, and can they. Printed; True if they can.
+
+    Read off the config and the cached catalogue rather than by asking a
+    provider, so `board doctor` stays something you can run while somebody is
+    waiting. `board free` is the same picture with the models actually asked,
+    and this points at it.
+    """
+    cfg = {}
+    try:
+        with open(paths.CONFIG, "r", encoding="utf-8") as fh:
+            cfg = json.load(fh) or {}
+    except (OSError, ValueError):
+        pass
+    only = bool(cfg.get("free_only"))
+    wanted = cfg.get("default_agent") or "(unset)"
+    if only:
+        print("teaching: for nothing (free_only) — a billed agent asked for here")
+        print("          is refused, whatever names it; '%s' takes every lesson"
+              % (cfg.get("fallback_agent") or "free"))
+    else:
+        print("teaching: '%s' (this machine may spend; free_only is off)" % wanted)
+
+    keys = freechain.providers_present()
+    if keys:
+        print("free keys: %s" % ", ".join(keys))
+    for path in freechain.missing_keys():
+        print("           no key at %s" % path)
+
+    chain = freechain.text_chain()
+    eyes = freechain.vision_chain()
+    if chain:
+        print("free chain: %s%s"
+              % (chain[0]["model"],
+                 (", then %d more" % (len(chain) - 1)) if len(chain) > 1 else ""))
+        print("free eyes:  %s" % (eyes[0]["model"] if eyes else
+                                  "NONE — handwriting would not be read"))
+    else:
+        print("free chain: EMPTY — nothing on this machine can teach for nothing")
+
+    buried = freechain.dead_models()
+    if buried:
+        print("retired:  %s" % ", ".join(sorted(buried)))
+
+    if only and not chain:
+        print()
+        print("This machine may not spend and has nothing free to spend instead,")
+        print("so a lesson here would sit in silence. Start with:  board free")
+        return False
+    print()
+    print("ask them for real (this one talks to the providers):  board free")
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -2015,7 +2132,7 @@ COMMANDS = {
     "net": cmd_net, "vpn": cmd_vpn, "init": cmd_init, "eyes": cmd_eyes,
     "finish": cmd_finish, "push": cmd_push, "history": cmd_history,
     "hw": cmd_hw, "review": cmd_review, "recap": cmd_recap, "node": cmd_node,
-    "egress": cmd_egress, "limit": cmd_limit,
+    "egress": cmd_egress, "limit": cmd_limit, "free": cmd_free,
 }
 
 

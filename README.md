@@ -45,7 +45,44 @@ now: one interface, one method, whether the exercises are proofs or functions.
 >   board that is answering) but it is worth confirming: the port the HTTPS name points at should
 >   be the course they are working in.
 >
-> ### Where this is right now, 3 September 2026 (night)
+> ### Where this is right now, 7 September 2026
+>
+> **The Mac mini teaches for nothing, and the compute node keeps Claude.** Asked for directly:
+> *"I want you to modify everything to be FREE AI ONLY on the mac mini side. Compute node side
+> still gets to use claude. I want to get all code running on this mac mini to graduate from me
+> needing to use claude to debug it, and I want the tutor to not use claude either."*
+>
+> That splits into two jobs, and the second one is the larger of the two.
+>
+> **The policy is `free_only`, and it sits OUTSIDE the four-layer agent order.** Three of those
+> four layers reach a machine from somewhere else — a course's `tutorboard.json` arrives by `git
+> pull`, a `hosts` table is written once and copied, a `--agent` is typed on whichever machine
+> somebody happens to be sitting at — so a machine told not to spend must not be talked into it by
+> a file that landed in a pull. The resolved agent is checked against what it costs; a paid one is
+> reported and replaced. What a recipe costs is written ON the recipe, and an entry that does not
+> say is assumed to cost, because the other default bills somebody who never asked. `free` is two
+> programs and says so twice: `cost: free` for its headless turns and `cmd_cost: paid` for its
+> opencode terminal, so a free-only machine runs every turn and declines to open a session.
+>
+> **The second job was the free chain itself, which was quietly rotting.** `bin/free` named five
+> OpenRouter models in a tuple. Two of them had been retired from the free tier — *"this model is
+> unavailable for free; the paid version is available now"* — and the file went on naming them.
+> That is the exact shape of the thing being asked about: a fault nobody at the board can see,
+> that needs somebody outside to go and read a provider's catalogue. It is now discovered rather
+> than declared (`tutorboard/freechain.py`): both catalogues are asked, ranked by a PREFERENCE
+> list rather than a permission list, so a model published tomorrow is in the chain tomorrow and
+> the chain never empties when a favourite is retired. Retired models are remembered for a week; a
+> 429 is not a retirement. And the handwriting was being read by a **paid** vision model, on a
+> tutor whose entire reason to exist is costing nothing — that was one credit balance away from
+> answering "insufficient credits" to every page the student handed in.
+>
+> **`board free` is the command that replaces the debugging session.** The board is up, a tutor is
+> attached, the log is empty, nothing arrives — everything above the model is fine in that state
+> and looks fine. `board free` walks the chain and asks it, `--deep` also asks it to read a page,
+> and `board doctor` now ends with the same picture off the cache. `scripts/setup-mac.sh` proves
+> the chain answers before it says the machine is set up.
+>
+> ### Where this was on 3 September 2026 (night)
 >
 > **There is one board now, and one method, in every repository.** Reported from Algo-Solutions:
 > *"I don't like the tutoring interfase. This whole ready to check button, etc. is messing with my
@@ -1698,8 +1735,9 @@ push with no assistant attribution; Tailscale in userspace mode with HTTPS; the 
   knobs are `SMOOTH` and `RESAMPLE` at the top of `web/slate-core.js`.
 - *How it looks.* There is no browser on the machine this was written on. Every visual judgement
   in here is inference.
-- *macOS.* The platform paths in `tutorboard/`, `bootstrap.sh` and the LaunchAgent are written from
-  documentation, not from a Mac.
+- *macOS.* No longer unverified: this is now written and tested **on** the Mac mini, which is the
+  always-on host. The platform paths in `tutorboard/`, `bootstrap.sh` and the LaunchAgent are
+  exercised every time the suite runs here.
 - *Headless mode.* `tutor headless` has never been run against a real agent end to end. The
   `headless` recipes in the config are best guesses at each tool's non-interactive flags. The
   wrap-up turn that writes `HANDOFF.md` rides on that path and is equally unexercised.
@@ -1708,11 +1746,11 @@ push with no assistant attribution; Tailscale in userspace mode with HTTPS; the 
   the match is under test; the match itself is only confirmed the first time an allowance really
   runs out. If it turns out to say something else, that is one list in the config and no code —
   and the failure mode of a miss is the old behaviour, a turn that failed, rather than anything new.
-- *Always-on hosting.* There is no machine that is awake when the cluster allocation is not, so
-  the iPad can only reach a board while a session is already running somewhere. The plan for
-  fixing that is written up under
-  [Not yet built](#always-on-with-the-machine-that-holds-the-repository-preferred) and is waiting on a
-  Mac mini to exist.
+- *Always-on hosting.* Built and running. The Mac mini is the always-on host — it has the `follow`
+  block, `bin/follow` proxies the one tailnet address to whichever machine is serving, and it
+  teaches for nothing so that being awake all day costs nothing (see [the machine that may not
+  spend](#the-machine-that-may-not-spend)). The compute node holds the allowance and gets the
+  lesson when there is one to spend.
 
 ### Things that broke, and must not break again
 
@@ -2314,20 +2352,74 @@ places is one policy that drifts the first time either moves, and of the two the
 the half anybody can actually see. `test/agents.py` holds both halves of that.
 
 One entry is not a terminal agent at all: **`free`** is the built-in lightweight tutor. Its
-headless turn is `bin/free`, a stdlib script that runs the lesson through `board recap`, OCRs the
+headless turn is `bin/free`, a stdlib script that runs the lesson through `board recap`, reads the
 student's handwriting with a free vision model, and writes one card as a plain completion over the
-free-model chain (OpenRouter `:free`, then Groq). It exists because a general coding agent carries a
-~38k-token tool prompt every turn, which exhausts the free tiers; a tutoring turn is three small
-steps and this does exactly those. `raw_prompt` hands the script the raw inbox instead of the
-instruction prompt, and its interactive `cmd` is opencode, so a person asking for a terminal
-session still gets one.
+free-model chain. It exists because a general coding agent carries a ~38k-token tool prompt every
+turn, which exhausts the free tiers; a tutoring turn is three small steps and this does exactly
+those. `raw_prompt` hands the script the raw inbox instead of the instruction prompt, and its
+interactive `cmd` is opencode, so a person asking for a terminal session still gets one.
 
-It is no longer the default and it is not going anywhere: it is what a machine you want to run
-without paying for a model runs, and it is selected like anything else — `--agent free`, a course's
-`tutorboard.json`, or `hosts` and `default_agent` in this file. It is also the floor the whole
-arrangement stands on. When the paid tutor's allowance runs out and no compute node can pick the
-lesson up, this is what answers — see [when the allowance runs
-out](#when-the-allowance-runs-out).
+It is the default on the Mac mini and it is the floor everywhere else: when the paid tutor's
+allowance runs out and no compute node can pick the lesson up, this is what answers — see [when the
+allowance runs out](#when-the-allowance-runs-out).
+
+#### The chain finds its own models
+
+`bin/free` used to name five OpenRouter models in a tuple at the top of the file. On 7 September
+2026 two of them answered *"this model is unavailable for free; the paid version is available
+now"* — retired from the free tier some days earlier — and nothing anywhere said so. The chain was
+quietly three models deep, then two, and the only symptom at the board was cards arriving more
+slowly and then not at all. **A free tier's catalogue moves every few weeks. Anything that writes
+one down goes stale, and a stale chain is a board that stops teaching for a reason nobody at the
+board can see.**
+
+So the chain is discovered. `tutorboard/freechain.py` asks both providers what they actually serve,
+keeps what is free, and puts it in an order. Three things hold it together and the middle one is
+the one worth reading twice:
+
+- **A preference list, not a permission list.** Models we have seen teach well lead, in an order.
+  Everything else the provider offers *follows* rather than being excluded — so a model published
+  tomorrow is in the chain tomorrow, at the back, and the chain never empties because a favourite
+  was retired. Delete the preference list entirely and the tutor still works, slightly worse and
+  entirely by itself. That is the property being bought.
+- **A refusal list that is about shape, not quality.** A safety classifier, a transcription model
+  and an embedding model are all "free chat completions" to a catalogue, and none of them can write
+  a card. Handed a tutoring prompt they produce *something*, and that something reaches the board.
+- **A memory of what has died.** A model that answers "no such model" is written down and skipped
+  for a week, so the same dead name is not retried on every turn of every lesson. A 429 is *not*
+  that: a rate-limited model is fine and will answer in a minute, and retiring models over a busy
+  evening would empty the chain.
+
+Underneath all of it is a short pinned list, for a machine that cannot reach a catalogue at the
+moment it needs to teach. It is a floor, never the plan, and discovery replaces it entirely the
+moment it succeeds.
+
+Two smaller things came out of the same evening. The handwriting was being read by
+`qwen/qwen2.5-vl-72b-instruct`, which is a fine model and **is not free** — so the tutor that exists
+in order to cost nothing was putting every handed-in page on a credit balance, and would have begun
+answering "insufficient credits" to handwriting on the day it ran out, with nothing on the board to
+say why. Several free models take images now, and the vision chain is picked the same way the text
+chain is. And every model here *thinks before it answers*, out of the same `max_tokens` budget: an
+800-token cap on a 550B reasoner is a cap the model can spend entirely on deliberation, returning an
+empty reply that reads from here as "the model returned nothing". The budgets are generous now,
+because they cost nothing — what keeps a card short is the instruction to write one card, which is
+where a length limit belongs.
+
+#### Asking it, rather than assuming
+
+```
+board free              walk the chain, ask it to answer, say whether it did
+board free --deep       and ask it to read a page, which is how most answers arrive
+board free --list       the whole chain, without asking it anything
+board free --refresh    re-read both catalogues rather than the cache
+board free --forget     un-bury the models recorded as retired
+```
+
+This is the command for the state `board status` cannot describe: the board is up, a tutor is
+attached, the log is empty, and nothing is arriving. Everything above the model is fine in that
+state *and looks fine*, which is why it took an outside session to work out that the fault was two
+model names having been retired three days earlier. `board doctor` now ends with the same picture
+read off the cache — who teaches here, for how much, on what — and points at this for the real ask.
 
 An agent is a command, and two machines do not have the same commands installed. Naming a
 particular program as the default made that worth checking, so a start whose command is missing now
@@ -2372,6 +2464,56 @@ wants*; the fallback answers *what to do when the one it wants has nothing left 
 name — `free` by default, `null` to turn the whole thing off — and it is used only after a turn has
 failed on a usage limit and no other machine has taken the lesson over. Nothing falls back from it,
 which is the point of it being the free one.
+
+### The machine that may not spend
+
+The Mac mini teaches for nothing. The compute node teaches with Claude. That is one line of
+configuration and it is deliberately **outside** the four-layer order above rather than another
+entry in it:
+
+```json
+{ "free_only": true, "fallback_agent": "free" }
+```
+
+Three of those four layers can reach a machine from somewhere else. A course repository is a clone,
+so `"agent": "claude"` written in one is a sentence about a compute node that arrives on the Mac
+with the next `git pull` and takes effect there silently. A `hosts` table is written once and
+copied. A `--agent claude` is the same mistake made in person, on the wrong machine. **None of those
+is a reason for this machine to start billing**, so none of them wins: the resolved agent is checked
+against what it costs, and a paid one is replaced by whatever this machine runs for nothing.
+
+What it costs is written on the recipe, not inferred from its name:
+
+```json
+"claude": { "cmd": ["claude"], "cost": "paid",  … },
+"free":   { "cmd": ["opencode"], "cost": "free", "cmd_cost": "paid", … }
+```
+
+An entry with no `cost` is **assumed to cost**. That is the only safe default: somebody adding their
+own agent gets a machine that refuses to run it for free, rather than a machine that quietly bills
+for it. Saying `"cost": "free"` is one word, and it is the person adding it who knows.
+
+`cmd_cost` exists because `free` is two programs. Its headless turns run `bin/free`, which costs
+nothing; its interactive `cmd` is opencode, which does not. So a free-only machine runs every turn
+and **declines to open a terminal session**, saying which half still works — and the half that still
+works is the half the board uses. Swapping one billed terminal for another under a different name
+would be the same session this machine said not to open.
+
+A refusal is never silent and never leaves the board empty. The swap is reported, and the lesson
+goes to `fallback_agent` — which is itself verified free, because a config naming a paid fallback on
+a free-only machine is a mistake worth refusing rather than obeying.
+
+The two machines are set up by two scripts, and neither undoes the other:
+
+```
+bash scripts/setup-mac.sh      # free_only on, pins the name, writes the follow block,
+                               # and proves the free chain answers before saying it is done
+bash scripts/setup-node.sh --secret <…>   # free_only off — this is where the allowance lives
+```
+
+Each refuses to run on the other's machine, decided from what is actually true — Slurm answering
+means a compute node, a `follow` block means the always-on host — rather than from a hostname.
+`test/free.py` holds the whole arrangement.
 
 ### The assistant belongs to the course, not to the terminal
 
@@ -3335,7 +3477,8 @@ board hw file 7.2                # file a sent page into the set's handwritten/
 board review list                # everything this repository can be reviewed over
 board review over ch01 ch07      # what a test review covers
 board vpn up|status|serve|down   # the Tailscale link
-board doctor                     # is this machine equipped
+board doctor                     # is this machine equipped, and who teaches on it
+board free                       # can it teach for nothing, and on which models
 board limit                      # has the tutor's allowance here run out
 board stop
 ```

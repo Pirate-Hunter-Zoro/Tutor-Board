@@ -157,7 +157,19 @@ else:
               % (agent or "unset"))
         print("        install Claude Code and rerun this to teach with it")
 
-# --- 5. the block that must not be here -------------------------------------
+# --- 5. this node is the machine that is ALLOWED to spend --------------------
+# `free_only` is the Mac mini's setting: it is awake all day and answers every
+# time the iPad is picked up, which is the machine you do not want metered. This
+# one is the opposite -- it holds the allowance, and the proxy hands it the
+# lesson precisely when there is one to spend. A `free_only` here would mean
+# nothing on the tailnet ever uses the allowance at all, and the symptom would be
+# a board that answers perfectly well and teaches slightly worse for ever.
+if cfg.pop("free_only", None):
+    changed = True
+    print("  ok    free_only: removed — this node has an allowance and should use it")
+    print("        (that key belongs on the Mac mini; see scripts/setup-mac.sh)")
+
+# --- 6. the block that must not be here -------------------------------------
 if cfg.pop("follow", None) is not None:
     changed = True
     print("  ----  removed a `follow` block: that is what marks the always-on host,")
