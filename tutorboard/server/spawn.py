@@ -14,12 +14,35 @@ import time
 from .. import paths
 
 
+# A SERVER HAS NO STANDARD INPUT, AND A CHILD THAT INHERITS ONE THAT IS CLOSED
+# DOES NOT RUN AT ALL.
+#
+# Both helpers below inherited this process's stdin. A board started by launchd,
+# or detached by `board start`, has fd 0 closed -- so the python3 they spawn
+# dies before it reaches its first line, with:
+#
+#     Fatal Python error: init_sys_streams: can't initialize sys standard streams
+#     OSError: [Errno 9] Bad file descriptor
+#
+# which is what the Mac's follower log recorded on 7 September when it asked
+# that machine to hand its tutor over: the answer it got back was an interpreter
+# crash where a wrap-up should have been. Every hub tap that starts a course,
+# opens a chapter or wakes a tutor goes through these two functions, so on that
+# machine none of them could do anything -- and each returned a plausible
+# non-zero and was reported as an ordinary failure.
+#
+# `bin/tutor` already learned this where it forks the daemon (`agent_start`
+# passes DEVNULL); it simply never reached here.
+_NO_STDIN = subprocess.DEVNULL
+
+
 def board_cli(repo, args, timeout=90):
     """Drive the board command line from inside the server, for /switch."""
     cli = os.path.join(paths.TOOL, "bin", "board")
     try:
         p = subprocess.run([sys.executable, cli] + list(args),
-                           cwd=repo, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           cwd=repo, stdin=_NO_STDIN,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                            timeout=timeout)
         return p.returncode, p.stdout.decode("utf-8", "replace")
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -51,7 +74,8 @@ def tutor_cli(args, timeout=30):
     cli = os.path.join(paths.TOOL, "bin", "tutor")
     try:
         p = subprocess.run([sys.executable, cli] + list(args),
-                           cwd=paths.TOOL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           cwd=paths.TOOL, stdin=_NO_STDIN,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                            timeout=timeout)
         return p.returncode, p.stdout.decode("utf-8", "replace")
     except (OSError, subprocess.TimeoutExpired) as exc:

@@ -378,17 +378,42 @@ def wanted_host(*records):
     hub offers the host now, and this is how that choice reaches the address.
     Empty means nobody said, which is the ordinary case and means "wherever it
     is" -- exactly the behaviour before any of this existed.
+
+    AND A BLANK IS NOT A DECISION, WHICH IS THE WHOLE OF THE NEXT PARAGRAPH.
+    This used to take the newest record's host even when that host was empty, so
+    a record saying nothing about the machine ERASED one that named it. The two
+    are not the same thing and recency cannot rank them: "nobody said" has no
+    opinion to be newer than.
+
+    It cost an evening on 7 September. The person tapped Galois Theory under the
+    compute node in the hub; the Mac recorded `host: compute-node…` at
+    ...019.325, and the compute node's own board published the same choice with
+    `host: ""` at ...019.433 -- a tenth of a second later, because the second
+    record is written by the machine being TOLD. The blank was newest, so this
+    returned "", Rule 0 in `choose_target` never fired, `prefer: local` won, and
+    the address sat on the Mac while the record on both machines said compute
+    node. Worse than sitting: with neither side decisive the two boards traded
+    the address back and forth, and every trade fires `handover`, so the tutor
+    the person was waiting on was stopped again and again.
+
+    Only a hub tap names a machine -- `switchTo(c.repo, host)` always carries
+    the row's host -- so a blank comes from a resume, a login hook or
+    `remember_course`, none of which know or care which machine. None of them
+    should be able to overrule somebody's finger.
     """
     best = (0.0, "")
     for rec in records:
         if not rec or not rec.get("dir"):
+            continue
+        host = (rec.get("host") or "").strip()
+        if not host:
             continue
         try:
             at = float(rec.get("at") or 0)
         except (TypeError, ValueError):
             at = 0.0
         if at >= best[0]:
-            best = (at, (rec.get("host") or "").strip())
+            best = (at, host)
     return best[1]
 
 

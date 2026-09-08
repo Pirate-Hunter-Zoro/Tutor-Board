@@ -158,6 +158,49 @@ now: one interface, one method, whether the exercises are proofs or functions.
 > `test/keeping.py` drives the real route with the far machine stubbed, and asserts the handler is
 > never used as a loop variable anywhere in that file.
 >
+> **And the follower's log, once somebody read it, held the reason the address never moved — and
+> two more defects.** Asked for after the third round of *"will things WORK from now on"*:
+>
+> ```
+> [19:07:21] preferring this machine; following compute-node, listening on 127.0.0.1:8844
+> [19:07:21] serving here at 127.0.0.1:9098
+> [19:10:48] not moving to compute-node:9098 yet -- 127.0.0.1 still answers for Galois-Theory
+> [19:10:50] asked 127.0.0.1 to hand over: ms: can't initialize sys standard streams
+>            OSError: [Errno 9] Bad file descriptor
+> [19:10:50] serving the compute node at compute-node:9098
+> [19:10:54] not moving to 127.0.0.1:9098 yet -- compute-node still answers for Galois-Theory
+> [19:11:27] asked compute-node to hand over: claude in Galois-Theory is wrapping up
+> [19:11:27] serving here at 127.0.0.1:9098
+> ```
+>
+> **A blank is not a decision, and `wanted_host` was ranking one as though it were.** It took the
+> newest record's host even when that host was EMPTY, so a record saying nothing about the machine
+> erased one that named it. The person tapped Galois Theory under the compute node; the Mac wrote
+> `host: compute-node…` at ...019.325 and the compute node's own board published the same choice
+> with `host: ""` at ...019.433 — a tenth of a second later, because the second record is written
+> by the machine being TOLD. The blank was newest, so `want_host` came back empty, Rule 0 in
+> `choose_target` never fired, and `prefer: local` decided instead. Only a hub tap names a machine;
+> a blank comes from a resume, a login hook or `remember_course`, none of which know which machine
+> anybody meant, and none of which should overrule somebody's finger.
+>
+> **With neither side decisive the two boards traded the address, and every trade fires a
+> handover.** That is the last four lines above: the compute node's tutor stopped at 19:11:27 by a
+> proxy oscillating, minutes after the guard was written to stop exactly that — and the guard was
+> right to allow it, because the student was on the OTHER machine at the time. The wobble rule
+> (`not moving … yet`) makes each side defer once and then move anyway, which is a slower flap
+> rather than none. Fixing the blank fixes the oscillation at its source: the choice is decisive
+> again, so there is nothing to oscillate about.
+>
+> **And a server has no standard input.** `asked 127.0.0.1 to hand over` came back with an
+> interpreter crash where a wrap-up should have been. `spawn.tutor_cli` and `spawn.board_cli` let
+> their children inherit this process's stdin, and a board detached by `board start` — or started
+> by launchd — has fd 0 closed, so the python3 they spawn dies before its first line with *"can't
+> initialize sys standard streams"*. Every hub tap that starts a course, opens a chapter or wakes a
+> tutor goes through those two functions, so on that machine none of them could do anything, and
+> each failure was reported as an ordinary one. `bin/tutor` already passes `DEVNULL` where it forks
+> the daemon; it had simply never reached here, or `lesson/git.py`, where `board hw build` from the
+> iPad has the same shape.
+>
 > **Still not fixed, and still needs a person: two machines are beating on one course.** The
 > transcript beat logged `Cannot fast-forward to multiple branches` again this evening. Nothing
 > above changes that; it is the same decision as before and this file cannot make it.

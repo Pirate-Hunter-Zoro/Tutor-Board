@@ -359,6 +359,64 @@ follow.probe = lambda host, port, timeout=2.0: None
 check("and a machine that is not answering has no tutor to wrap up",
       follow.handover("127.0.0.1", SPORT, SECRET, said.append) is True)
 
+# ---------------------------------------------------------------------------
+# 3b. a blank is not a decision about a machine
+# ---------------------------------------------------------------------------
+# The record the person's finger wrote, and the record the machine being TOLD
+# writes a tenth of a second later. The second one says nothing about the host
+# because nothing about a resume, a login hook or `remember_course` knows which
+# machine anybody meant -- and it was winning on recency, so `want_host` came
+# back empty, Rule 0 never fired, `prefer` decided instead, and the two boards
+# traded the address between them with a `handover` on every trade.
+tapped = {"dir": "Galois-Theory", "at": 1788826019.325,
+          "host": "compute-node.tail0c6c62.ts.net"}
+told = {"dir": "Galois-Theory", "at": 1788826019.433, "host": ""}
+check("a newer record that names no machine cannot erase one that does",
+      follow.wanted_host(tapped, told) == "compute-node.tail0c6c62.ts.net")
+check("whichever order they are read in",
+      follow.wanted_host(told, tapped) == "compute-node.tail0c6c62.ts.net")
+check("and the newest record that DOES name one still wins",
+      follow.wanted_host(tapped, dict(told, host="board.tail0c6c62.ts.net"))
+      == "board.tail0c6c62.ts.net")
+check("with nobody naming a machine it is still 'wherever it is'",
+      follow.wanted_host(told, {"dir": "Galois-Theory", "at": 9.0}) == "")
+
+
+# ---------------------------------------------------------------------------
+# 3c. a server has no standard input
+# ---------------------------------------------------------------------------
+# The Mac's follower log, asked to hand its tutor over, recorded an interpreter
+# crash where a wrap-up should have been: "can't initialize sys standard
+# streams", "OSError: [Errno 9] Bad file descriptor". A board detached by
+# `board start` has fd 0 closed and every child python3 inherited it.
+import subprocess as _sub                                        # noqa: E402
+
+_probe = os.path.join(TMP, "probe.py")
+with open(_probe, "w", encoding="utf-8") as fh:
+    fh.write("print('RAN')\n")
+_devnull = os.open(os.devnull, os.O_RDONLY)
+_closed = os.dup(_devnull)
+os.close(_devnull)
+os.close(_closed)          # a descriptor number that is now closed
+try:
+    _p = _sub.run([sys.executable, _probe], stdin=_sub.DEVNULL,
+                  stdout=_sub.PIPE, stderr=_sub.STDOUT, timeout=60)
+    check("a child given DEVNULL for stdin starts even where the parent has none",
+          _p.returncode == 0 and b"RAN" in _p.stdout)
+except OSError:
+    check("a child given DEVNULL for stdin starts even where the parent has none",
+          False)
+
+for mod, why in (("server/spawn.py", "the hub's own commands"),
+                 ("lesson/git.py", "building the homework from the board")):
+    src = open(os.path.join(ROOT, "tutorboard", mod), encoding="utf-8").read()
+    spawns = [ln for ln in src.splitlines() if "sys.executable" in ln]
+    check("%s spawns python and says so (%s)" % (mod, why), bool(spawns))
+    check("and every one of them is handed a stdin (%s)" % why,
+          all("stdin" in src.split(ln)[1].split(")")[0] or "stdin" in ln
+              for ln in spawns))
+
+
 fsrc = open(os.path.join(ROOT, "bin", "follow"), encoding="utf-8").read()
 loop = fsrc.split("def follower(")[1]
 check("the follower carries a machine it still owes a wrap-up to",

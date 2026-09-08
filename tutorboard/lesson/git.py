@@ -95,7 +95,12 @@ def run_hw_build(repo):
     if not os.path.exists(cli):
         return {"ok": False, "detail": "the board CLI is not where it should be"}
     try:
+        # stdin=DEVNULL: a board detached by `board start`, or started by
+        # launchd, has fd 0 closed, and a python3 that inherits that dies with
+        # "can't initialize sys standard streams" before it runs a line. See
+        # the note in `server/spawn.py`.
         p = subprocess.run([sys.executable, cli, "hw", "build"], cwd=repo.root,
+                           stdin=subprocess.DEVNULL,
                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                            timeout=300)
         out = p.stdout.decode("utf-8", "replace").strip()
@@ -133,7 +138,12 @@ def build_before_push(repo):
     if not os.path.exists(cli):
         return None
     try:
+        # stdin=DEVNULL: a board detached by `board start`, or started by
+        # launchd, has fd 0 closed, and a python3 that inherits that dies with
+        # "can't initialize sys standard streams" before it runs a line. See
+        # the note in `server/spawn.py`.
         p = subprocess.run([sys.executable, cli, "hw", "build"], cwd=repo.root,
+                           stdin=subprocess.DEVNULL,
                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                            timeout=180)
         out = p.stdout.decode("utf-8", "replace").strip()
