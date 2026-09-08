@@ -142,6 +142,22 @@ now: one interface, one method, whether the exercises are proofs or functions.
 > `bin/board`. It is `tex_path` now. Run against the compute node's Claude it reads the token, the
 > word and the integral back correctly, so that board can see.
 >
+> **And switching machines from the hub had never worked, for the same reason as `board eyes`.**
+> *"It says 'could not move the board' when I try to access Galois-Theory on the compute node in
+> the app."* That sentence is `web/home.js`'s message for any failed `/switch`, and it could not
+> say more because the server was answering 500. In `/switch`, the branch for a course on the
+> OTHER machine looks up that machine's port with `for h in machines.known_hosts(repo)["hosts"]`
+> — and `h` is the REQUEST HANDLER. Python leaves a loop variable bound after the loop, so every
+> line after it was calling handler methods on a host dictionary: `h.server.hub.worker.dirty.set()`
+> and then `h.send_json(...)`, both dead with *"'dict' object has no attribute"*.
+>
+> It is `entry` now. The branch is reached by exactly one thing — a tap that moves the board
+> between machines — which is why it survived: on a single machine, and on any tap for a course
+> the hub is already serving, the code goes the other way and is fine. The two-machine setup is
+> the whole reason the hub lists hosts at all, and the one gesture it exists for was a 500.
+> `test/keeping.py` drives the real route with the far machine stubbed, and asserts the handler is
+> never used as a loop variable anywhere in that file.
+>
 > **Still not fixed, and still needs a person: two machines are beating on one course.** The
 > transcript beat logged `Cannot fast-forward to multiple branches` again this evening. Nothing
 > above changes that; it is the same decision as before and this file cannot make it.

@@ -183,9 +183,17 @@ def post(h, repo, path):
             # that is not always either of these two.
             machines.announce_later(repo, want, on_host, rec_at)
             port = None
-            for h in machines.known_hosts(repo)["hosts"]:
-                if h.get("host") == on_host:
-                    port = h.get("port")
+            # `entry`, not `h`. `h` is the REQUEST HANDLER, and a `for h in ...`
+            # leaves the loop variable bound after the loop, so every line below
+            # this was calling methods on a host dictionary: `h.server` and
+            # `h.send_json` both died with "'dict' object has no attribute".
+            # This is the branch a tap takes when the course is on the OTHER
+            # machine -- the only branch a person switching machines can reach
+            # -- so it was a 500 every time and the hub said "could not move the
+            # board" without ever being able to say why.
+            for entry in machines.known_hosts(repo)["hosts"]:
+                if entry.get("host") == on_host:
+                    port = entry.get("port")
                     break
             started = None
             if port:

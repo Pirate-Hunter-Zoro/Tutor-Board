@@ -23,6 +23,15 @@ person writing on it. Reported as "Galois-Theory tutor session up and crashed".
 So: the directories are re-asserted before anything writes, and a handover is
 refused while somebody is being taught -- and refused in a way the caller comes
 back from, because it used to be asked exactly once and a no was final.
+
+And a third, later the same evening, reported as "it says 'could not move the
+board' when I try to access Galois-Theory on the compute node in the app". That
+is the hub's message for any failed `/switch`, and it could not say more because
+the server was returning a 500: `for h in machines.known_hosts(...)` rebound
+`h`, which is the REQUEST HANDLER, so `h.server` and `h.send_json` after the
+loop were being called on a host dictionary. It sits in the branch taken when
+the chosen course is on the OTHER machine -- which is every tap that moves the
+board between machines, and nothing else.
 """
 
 import importlib.machinery
@@ -261,6 +270,41 @@ check("`tutor agent stop <course> --on <host>` is what does send it",
       "X-Handover-Force" in tsrc and 'where = _flag(args, "--on")' in tsrc)
 check("and it reaches a peer the way everything else does, proxy included",
       "socks._socks_open" in tsrc.split("def agent_stop_elsewhere")[1])
+
+
+# ---------------------------------------------------------------------------
+# 2c. switching to a course on the other machine
+# ---------------------------------------------------------------------------
+# The hub says "could not move the board" for any failed `/switch` and cannot
+# say more, so the server has to not fail. Everything the cross-machine branch
+# reaches out to is stubbed -- the point is the branch running to its own
+# `send_json` at all, which it could not do while the loop in the middle of it
+# was rebinding the request handler.
+asked_start = []
+machines_route.tailscale.tailnet_self = lambda: "here.example"
+machines_route.choice.remember_chosen = lambda *a, **k: None
+machines_route.machines.announce_later = lambda *a, **k: None
+machines_route.machines.known_hosts = lambda repo: {
+    "hosts": [{"host": "here.example", "port": 1},
+              {"host": "elsewhere.example", "port": 4242}]}
+machines_route.boards.board_post = lambda host, port, path, body, timeout=60: (
+    asked_start.append((host, port, path)) or {"ok": True})
+
+status, doc = post(PORT, "/switch",
+                   json.dumps({"repo": "Galois-Theory",
+                               "host": "elsewhere.example"}).encode())
+check("tapping a course on the other machine answers at all",
+      status == 200 and doc.get("ok"))
+check("and says which machine is bringing it up",
+      "elsewhere" in (doc.get("detail") or ""))
+check("having asked that machine's own board to start it, on its own port",
+      asked_start == [("elsewhere.example", 4242, "/start")])
+
+msrc = open(os.path.join(ROOT, "tutorboard", "server", "routes", "machines.py"),
+            encoding="utf-8").read()
+check("the request handler is never used as a loop variable",
+      not [ln for ln in msrc.splitlines()
+           if ln.strip().startswith(("for h in ", "for h,"))])
 
 
 # ---------------------------------------------------------------------------
