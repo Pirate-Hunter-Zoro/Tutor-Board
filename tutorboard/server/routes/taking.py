@@ -1,4 +1,4 @@
-"""Taking a document off the board and onto the device it is being read on.
+"""Taking a document off the board, and reading one ON the board.
 
 Everything here already exists in the repository and is tracked in git -- that
 is the archival copy and none of it changes. This is the other half, asked for
@@ -12,6 +12,18 @@ from the iPad:
 A repository on a compute node is not a place an iPad can reach, and neither is
 a tailnet path a person can hand to a professor. A download is.
 
+AND READING IT IS NOT THE SAME AS SAVING IT, which is the second report:
+
+    "It compiles the homework, but it's not letting me view the compiled .pdf or
+    save it anywhere locally on the iPad."
+
+*Save a copy* raises the share sheet, and a share sheet is somewhere to put a
+document rather than somewhere to read one. `/view/<kind>` is the reading half:
+the pages come back as PNGs, drawn by the machine that has the PDF, because a
+PDF handed to a frame on iOS is one unscrollable page and a PDF navigated to in
+a standalone web app is a lesson nobody can get back to. `course/paper.py` says
+the whole of why.
+
 THE CLIENT NEVER NAMES A PATH. It names a KIND -- the lesson, or the written-up
 homework -- and this resolves that to a file through the records the board
 already keeps: `live/export.json` for a lesson, `live/hw.json` for a set. A
@@ -20,78 +32,52 @@ waiting to be written, and there is nothing it would buy: there are two
 documents, and the board knows where both of them are.
 """
 
-import json
 import os
 import re
 
 from . import NOT_MINE
+from ...course import paper
 
 
-def _record(repo, name):
-    try:
-        with open(os.path.join(repo.live, name), "r", encoding="utf-8") as fh:
-            return json.load(fh)
-    except (OSError, ValueError):
-        return None
-
-
-def _slug(text):
-    text = re.sub(r"[^A-Za-z0-9]+", "-", (text or "").strip()).strip("-")
-    return text or "lesson"
-
-
-def _pdf_in(repo, rel):
-    """A repo-relative path from one of our own records, resolved and checked.
-
-    Checked even though it came from a file this board wrote: a record is on
-    disk, disk is editable, and "it was ours a moment ago" is not a property
-    that survives. It has to be a .pdf, it has to exist, and it has to be inside
-    the repository.
-    """
-    if not rel or not str(rel).endswith(".pdf"):
-        return None
-    root = os.path.realpath(repo.root)
-    target = os.path.realpath(os.path.join(root, str(rel)))
-    if target != root and not target.startswith(root + os.sep):
-        return None
-    return target if os.path.isfile(target) else None
-
-
-def _named(repo, stem):
-    """What the file should be called once it is off the board.
-
-    The course goes in front, because in a Files app or an inbox this sits
-    beside everything else a person owns and `ch07-homework.pdf` is not enough
-    to tell whose it is or what it is from.
-    """
-    st = repo.state() or {}
-    course = _slug(st.get("course") or os.path.basename(repo.root))
-    stem = _slug(stem)
-    return stem if stem.lower().startswith(course.lower()) else course + "-" + stem
+# The download route's own helpers moved into `course/paper.py`, because the
+# payload and the viewer need the same answers. These names are kept because
+# they are what `test/document.py` asserts against, and because a caller here
+# reads better for them.
+_pdf_in = paper.pdf_in
+_named = paper.named
 
 
 def get(h, repo, path):
-    if path == "/download/lesson":
-        rec = _record(repo, "export.json")
-        target = _pdf_in(repo, (rec or {}).get("pdf"))
+    if path in ("/download/lesson", "/download/homework"):
+        kind = path.rsplit("/", 1)[1]
+        target, filename = paper.resolve(repo, kind)
         if not target:
-            return h.send_bytes(
-                b"There is no exported lesson PDF yet. Export it first.",
-                "text/plain", status=404)
-        return h.send_file(
-            target, download=_named(repo, os.path.splitext(os.path.basename(target))[0]) + ".pdf")
+            return h.send_bytes(_nothing_yet(kind), "text/plain", status=404)
+        return h.send_file(target, download=filename)
 
-    if path == "/download/homework":
-        rec = _record(repo, "hw.json")
-        target = _pdf_in(repo, (rec or {}).get("pdf"))
-        if not target:
-            return h.send_bytes(
-                b"There is no compiled homework PDF yet. Build it first.",
-                "text/plain", status=404)
-        # The SET's name rather than the file's: a course numbers its homework
-        # `ch07-homework.tex` in one place and `hw04.tex` in another, and the
-        # set is what a person calls it either way.
-        stem = (rec or {}).get("set") or os.path.splitext(os.path.basename(target))[0]
-        return h.send_file(target, download=_named(repo, stem) + ".pdf")
+    if path in ("/view/lesson", "/view/homework"):
+        # The pages, rendered here. It is a POST-shaped amount of work behind a
+        # GET, and deliberately: the request is idempotent, the result is a
+        # cache keyed on the PDF's own modification time, and a second open of
+        # the same document is a directory listing.
+        kind = path.rsplit("/", 1)[1]
+        return h.send_json(paper.pages(repo, kind))
+
+    if path.startswith("/paper/"):
+        name = os.path.basename(path[len("/paper/"):])
+        # Content-addressed by construction -- the digest in the name carries
+        # the PDF's modification time -- so it can be cached hard, and a
+        # rebuilt document is a different name rather than a stale picture.
+        if not re.match(r"^[0-9a-f]{6,}-\d+\.png$", name):
+            return h.send_bytes(b"not found", "text/plain", status=404)
+        return h.send_file(os.path.join(paper.cache_dir(repo), name), cache=True)
 
     return NOT_MINE
+
+
+def _nothing_yet(kind):
+    if kind == "homework":
+        return (b"There is no compiled homework PDF yet. Build it first "
+                b"(the menu: export the written-up homework).")
+    return (b"There is no exported lesson PDF yet. Export it first "
+            b"(the menu: export this lesson).")

@@ -10,7 +10,7 @@
    network -- a cached lesson is a stale lesson, which is worse than none.
    ========================================================================== */
 
-var VERSION = "board-shell-v83";
+var VERSION = "board-shell-v84";
 
 var SHELL = [
   "/",
@@ -45,7 +45,18 @@ var RUNTIME = /\/static\/(katex\/fonts|fonts)\//;
 /* `health` and `hosts.json` are here for the same reason as the rest: the hub
    polls /health to find out whether a switch has actually landed, and an
    answer out of a cache would say the address is still where it was. */
-var LIVE = /^\/(events|board\.json|courses\.json|hosts\.json|health|switch|chose|start|say|upload|slate\/(save|state)|figure\/|uploads\/|slate\/page-)/;
+/* AND THE DOCUMENTS, which had been falling through to the shell rule -- the
+   one that caches any 200 it sees. Two things wrong with that and both of them
+   bite the person holding the iPad. A lesson transcript is megabytes, and the
+   shell cache is inside the origin's storage allowance alongside the app itself,
+   so a few exports could push the app out of its own cache. And a document is
+   rebuilt at the SAME URL every time: `/download/homework` is whatever the last
+   compile produced, so a cached one served while the link is briefly down is
+   last week's write-up wearing this week's name. That is the same mistake as a
+   cached lesson, made one layer down, and this file's own rule against it is
+   the reason it is here. `/view/` renders and `/paper/` is content-addressed by
+   the PDF's modification time -- neither wants the shell's cache-then-serve. */
+var LIVE = /^\/(events|board\.json|courses\.json|hosts\.json|health|switch|chose|start|say|upload|slate\/(save|state)|figure\/|uploads\/|slate\/page-|download\/|view\/|paper\/)/;
 
 self.addEventListener("install", function (e) {
   e.waitUntil(

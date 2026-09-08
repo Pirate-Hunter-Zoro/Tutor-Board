@@ -59,6 +59,11 @@ class Hub:
             "unsaved": git.repo_dirty(self.repo),
             "push": state.load_push(self.repo),
             "export": state.load_export(self.repo),
+            # Which documents can be taken off the board, or read on it, RIGHT
+            # NOW -- not which one was just built. A document is a file, not an
+            # event, and the controls for it were living in the banner of the
+            # build that produced it. See `state.load_papers`.
+            "papers": state.load_papers(self.repo),
             "agent": state.load_agent(self.repo),
             # What is in the inbox that nothing has taken. The board's answer to
             # "I sent that and nothing is happening", and it comes off disk

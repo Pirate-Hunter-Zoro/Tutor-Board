@@ -186,6 +186,19 @@ if ! python3 "$HERE/bin/free" --check; then
   problems=$((problems + 1))
 fi
 
+# --- 4b. can a document be READ on the board -------------------------------
+# Not fatal, and said here rather than left to be discovered from a panel that
+# will not fill. A PDF can always be SAVED to the device; reading one on the
+# board needs a page renderer, and a Mac has one only if poppler or Ghostscript
+# was installed. `board doctor` says the same thing.
+say
+if python3 -c 'import sys; sys.path.insert(0, "'"$HERE"'"); from tutorboard.course import paper; sys.exit(0 if paper.renderer() else 1)' 2>/dev/null; then
+  good "a PDF can be read on the board here"
+else
+  warn "no pdftoppm, pdftocairo or gs: the iPad can save a PDF from this"
+  warn "  machine but not read one on the board. brew install poppler"
+fi
+
 # --- 5. put the running processes on the new code --------------------------
 say
 if command -v tutor >/dev/null 2>&1; then tutor restart --tutors

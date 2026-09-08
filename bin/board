@@ -71,7 +71,7 @@ from tutorboard import (brief, carry, freechain, handoff, limits, machine,
                         paths, ports, processes, reasoning, sense, tex,
                         worktree)
 from tutorboard.net import egress, tailscale
-from tutorboard.course import document, homework, review
+from tutorboard.course import document, homework, paper, review
 SERVE = os.path.join(TOOL, "serve.py")
 KINDS = ("lesson", "question", "correct", "wrong", "review", "note", "recap")
 
@@ -2209,6 +2209,15 @@ def cmd_doctor(live, args):
         ok = ok and bool(found)
     print("katex:    %s" % ("vendored" if os.path.exists(
         os.path.join(TOOL, "web", "katex", "katex.min.js")) else "MISSING"))
+    # Not fatal, and said plainly rather than left to be discovered from a panel
+    # that will not fill: without one of these the iPad can still SAVE a PDF, it
+    # just cannot READ one on the board -- `paper.renderer`.
+    _rend = paper.renderer()
+    print("pdf pages: %s" % (
+        "%s  (a document can be read on the board)" % _rend[1] if _rend
+        else "no pdftoppm, pdftocairo or gs — a PDF can be saved to the device "
+             "but not read on the board. Install poppler (brew install poppler, "
+             "or your package manager) to fix that."))
     node = _sh.which("node")
     if node:
         p = subprocess.run([node, "-e", "require('jsdom')"], cwd=TOOL,

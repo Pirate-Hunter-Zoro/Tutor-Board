@@ -319,7 +319,12 @@ def main():
             "of reaching the share sheet")
     tsrc = open(os.path.join(TOOL, "tutorboard", "server", "routes", "taking.py"),
                 encoding="utf-8").read()
-    if tsrc.count("download=") == 2:
+    # One route serves both kinds now -- the resolving and the naming moved into
+    # `course/paper.py`, because the payload and the viewer need the same
+    # answers -- so what matters is that the one route that serves them says
+    # SAVE THIS. The two kinds are driven through it below.
+    if '"/download/lesson", "/download/homework"' in tsrc \
+            and "download=filename" in tsrc:
         ok("and both documents are handed over, not shown")
     else:
         bad("one of the two downloads still renders in the tab")

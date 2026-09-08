@@ -45,7 +45,54 @@ now: one interface, one method, whether the exercises are proofs or functions.
 >   board that is answering) but it is worth confirming: the port the HTTPS name points at should
 >   be the course they are working in.
 >
-> ### Where this is right now, 8 September 2026
+> ### Where this is right now, 8 September 2026 (afternoon)
+>
+> **A document is a file, not an event — and it was being offered as one.** Reported in two
+> sentences: *"I just tried to save a copy of my homework, and it's not working. It compiles the
+> homework, but it's not letting me view the compiled .pdf or save it anywhere locally on the
+> iPad."* Every clause of that was true, and there were three faults behind it.
+>
+> **The button lived for one payload.** `doExportHomework` painted the banner from a record it had
+> invented itself — the reply to `/hw/build`, tagged `kind: "hw"`, on no disk anywhere — and handed
+> it to the argument slot that belongs to `push.json`. About a second later the next payload
+> repainted the same banner from the real `push.json`, which knows nothing about a write-up, and
+> `save a copy` went with it **along with the URL behind it**. A minute of LaTeX, a PDF sitting in
+> the repository, and a tap that did nothing at all. The write-up's record has always been on disk
+> in `live/hw.json`; the payload carries it as `hw.build`, the banner takes it from there, and
+> whether the document EXISTS is now a separate question the payload answers off the files
+> (`papers`, four `stat` calls) rather than something inferred from whichever record is in the
+> banner.
+>
+> **And a document made a minute ago was as unreachable as one made ten days ago**, because the
+> only controls for one lived in the banner of the build that produced it. **⋯ → documents · view
+> or save** lists both, at any moment, with what each one is and when — and offers to make the one
+> that is not there, so it is never a dead end.
+>
+> **There was no way to READ either of them.** The one control was *save a copy*, which raises the
+> share sheet: somewhere to PUT a document, not somewhere to read one. "Did the proof make it in"
+> was unanswerable from the board. **read it** now draws the pages — PNGs, rendered by the machine
+> that holds the PDF (`pdftoppm`, `pdftocairo` or `gs`, found on the same PATH as TeX), shown in a
+> panel the board owns and ✕ closes back into the lesson. Not an `<iframe>`, because iOS renders a
+> PDF in one as a single unscrollable page; and never a navigation, because a PDF navigated to in a
+> home-screen app leaves the board with no chrome and no way back, which is the trap the download
+> button was rewritten to escape in the first place. Pages are cached against the PDF's own
+> modification time, so a rebuild is drawn again and a re-open is instant, and the cache is bounded
+> and carries its own `.gitignore`. A machine with no renderer says so and offers the copy instead
+> of showing an empty panel.
+>
+> **And the service worker had been caching the downloads.** `/download/…` matched neither the live
+> list nor the runtime list, so it fell through to the shell rule, which caches any 200 it sees.
+> Megabytes of transcript inside the app's own storage allowance — and a document that is rebuilt
+> at the same URL every time, so a cached one served while the link blinks is last week's write-up
+> under this week's name. That is the same mistake as a cached lesson, one layer down, in the file
+> whose entire rule is against it.
+>
+> `test/paper.py` holds the server half against a real board on a real socket, and `test/link.js`
+> holds the half that actually failed: two payloads in a row, with the write-up still reachable
+> after the second. `board doctor` and `scripts/setup-mac.sh` both say whether this machine can
+> draw a page, because a panel that will not fill is a bad place to find that out.
+>
+> ### Where this was earlier on 8 September 2026
 >
 > **A turn is its own session, because what a turn costs is round trips times the conversation
 > behind them.** Reported in one sentence — *"one response in Galois-Theory just used 5% of my
@@ -2105,6 +2152,7 @@ these tests fail, the test is right.
 | A new board for the same question came up blank, and an evening's working ended up on one sheet with the mapping to it destroyed. `Slate.create` hands back ONE blank page synchronously — deliberately, so a stroke made before the network answers is not lost — and adopts the saved pages when `/slate/state` arrives. The board read that count to decide which page a question belongs on, so a question recorded against page 3 looked like one recorded past the end: its page was ruled gone, a fresh one was cut, and *that* was written down. Every reload refiled another question onto page 0. Nothing a person could see was lost, which is why it survived — the accident looked like continuity | `api.ready()` and the `onPages` callback; the board files nothing against a page count it has been told not to believe, and is called the moment the real one lands; `test/feedback.js` |
 | And then that fix was defeated by its own ordering, which cost the whole sitting rather than one mapping. `settled()` — the call whose entire job is to say *the page count can be believed now* — ran as the FIRST statement of the `/slate/state` handler, before the saved pages were adopted. So the board was told to believe a count of one, judged the question it was on to be recorded past the end, cut a fresh page for it, and by cutting it pushed the length to two. The adoption guard was `pages.length === 1`. It no longer held, so an evening on disk was refused in silence: every past board a blank photograph, and the next stroke saved a blank sheet over a real page under its new number. **The pattern, in a new coat: a guard written against the only thing that could break it at the time it was written** | the board is told last, once the pages are actually in; adoption asks whether any page has INK rather than how many sheets there are, so nothing blank can refuse a sitting; and the mapping is repaired from the page each answer records having been sent from, which is the one authority a browser cannot rot; `test/adopt.js` |
 | Only one board per question ever existed, so within an exercise the earlier attempts did not persist: you write, hand it in, the tutor replies, and the board that "appeared" under the reply was the same board slid down the run. Reported as "the previous board for this same question that I have not yet completed doesn't persist... I want ALL boards to persist and to operate independently of each other" | a question is a chain, one board per attempt: frozen where it was written as soon as what it holds has been handed in AND the tutor has answered since — both halves, or Send forks the page under your hand and a second hint cuts a board about nothing — and the next attempt opens on a COPY, which is the only way the working carries forward and the two are still independent; `test/chain.js` |
+| The write-up compiled and then could not be reached: *"it compiles the homework, but it's not letting me view the compiled .pdf or save it anywhere locally on the iPad."* `doExportHomework` painted the banner from a record it had invented itself — the reply to `/hw/build` — in the argument slot that belongs to `push.json`, so the next payload a second later repainted from the real push record and took `save a copy` with it, along with the URL behind it. And there was no way to READ either document at all: the one control was the share sheet, which is somewhere to put a document rather than somewhere to read one | whether a document exists is a question the payload answers off the files (`papers`) on every change, and the write-up's own record reaches the banner from `live/hw.json`; **read it** draws the pages as PNGs rendered by the machine holding the PDF, in a panel the board owns — never an `<iframe>`, which iOS gives one unscrollable page, and never a navigation; and **⋯ → documents · view or save** reaches both at any moment rather than only in the banner of the build that made them. The service worker stopped caching `/download/` while it was there; `test/paper.py`, `test/link.js` |
 | `board export` wrote the tutor's cards and nothing else, named with the second it happened, into `live/export/` -- which a course's `.gitignore` throws away. Half a conversation, unfindable, unkept. Asked for instead: the whole thing as one PDF to show a professor | `document.py` interleaves every card and every page handed in, in the board's own reading order and labelled by attempt; it lands in `transcripts/<lesson>-vN.pdf`, is staged in git, and `--all` makes one document of the whole course; `test/document.py` |
 | A card arrived that was the model thinking out loud, with no tag anywhere in it -- the whole reply was the thought, so every strip in `tutorboard.reasoning` passed it through and `bin/free` wrote it after two attempts came back the same way. Eight hundred tokens of deliberation, cut off mid-sentence, as the lesson | `reads_as_reasoning` judges voice rather than syntax -- a card is addressed to somebody, deliberation is about them -- and every caller refuses rather than edits: the chain tries the next model, `board write` writes nothing, and the board, the recap and the export show a notice in place of a card that got to disk another way; `test/reasoning.py` |
 | A save was addressed to "the current page", not to a page. A queued save therefore carried whichever page was in hand when the wire freed up — so switching page while one was in flight left the page being LEFT with an older version of itself on disk. Invisible until the board began switching pages on its own, and then it was ink lost | saves carry a page number, `dirtyPages` remembers which pages are owed, and a page is cleaned only if it did not change while its save was in the air; `test/plane.js` holds a save open on the wire and checks what the queue does with it |
@@ -3698,6 +3746,7 @@ board export --all               # every lesson in the course, as one
 ```
 
 and, on the iPad, **⋯ → export this lesson** and **⋯ → export the whole course (typeset)**.
+Reading one, or getting back to one made a fortnight ago, is **⋯ → documents · view or save**.
 
 **`export this lesson`, from the device, is a photograph of the lesson.** Asked for in those
 words — *"I want it as if it were a screenshot of the entire iPad screen scrolled down over the
@@ -3730,6 +3779,59 @@ beside it, and it never navigates the app anywhere: the document is fetched and 
 system as a file, so iOS raises the share sheet OVER the board — Files, iCloud, a phone by AirDrop,
 an email to a professor — and Cancel puts you back in the lesson, because the lesson never went
 anywhere. The write-up has the same button, from **⋯ → export the written-up homework**.
+
+**And either one can be read without leaving either.** **read it** sits beside *save a copy*, and
+in the panel it opens the pages are pictures: drawn to PNG by the machine that holds the PDF, shown
+in a panel the board owns, closed with ✕ back into the lesson. That is not a decoration over a
+simpler mechanism — it is the only one that works. iOS renders a PDF in an `<iframe>` as one
+unscrollable first page, and *navigating* to a PDF in a home-screen app leaves the board with no
+chrome, no back button and no share sheet, which is the trap the download button was rewritten to
+escape in the first place. A machine with no page renderer on it — `pdftoppm`, `pdftocairo` or
+`gs`, looked for on the same PATH as TeX — says so in the panel and offers the copy instead of
+showing an empty one. The pages are cached against the PDF's own modification time, so the first
+open of a long document takes a few seconds and every one after it is instant, and a rebuilt
+document is drawn again rather than served stale.
+
+**And both documents are reachable at every moment, from ⋯ → documents · view or save.** This is
+the fix rather than the flourish. The controls for a document used to live in the banner of the
+build that made it — and that banner is replaced by the next payload, about a second later.
+Reported from the iPad, mid-sitting: *"I just tried to save a copy of my homework, and it's not
+working. It compiles the homework, but it's not letting me view the compiled .pdf or save it
+anywhere locally."* Every clause of that was true. The compile had worked, the PDF was in the
+repository, and the button for it had a life of about one second — after which a tap did nothing at
+all, because the URL behind it had been cleared with it.
+
+A document is a **file**, not an event. So whether one exists is a question the payload answers on
+every change, off the disk (`papers` in `board.json`, four `stat` calls), and the panel lists both
+— name, when, how big — with **read it here** and **save a copy** on each, and an offer to *make*
+the one that is not there so the panel is never a dead end. A write-up compiled ten days ago is as
+reachable as one compiled ten seconds ago.
+
+Three other things came out of the same report.
+
+- **The write-up's record now comes off disk.** `board hw build`'s outcome reaches the banner from
+  `live/hw.json` by way of the payload, in its own argument rather than in the one that belongs to
+  `push.json`. It used to be a record the client invented from the reply to `/hw/build` — on no
+  disk anywhere — which is why the next payload could paint over it.
+- **The banner is its own function.** `paintBanner` rather than `paintSession` with an empty state,
+  which used to repaint the session badge as *lecture* for the second before the next payload put
+  it back — a homework sitting announcing itself as a lecture at the exact moment somebody exports
+  their homework.
+- **The service worker had been caching the downloads.** `/download/…` matched neither the live
+  list nor the runtime list, so it fell through to the shell rule, which caches any 200 it sees.
+  Megabytes of transcript inside the app's own storage allowance, and — worse — a document that is
+  rebuilt at the same URL every time, so a cached one served while the link blinks is last week's
+  write-up under this week's name. That is the same mistake as a cached lesson, one layer down, in
+  the file whose whole rule is against it. `/download/`, `/view/` and `/paper/` go to the network,
+  always.
+
+`test/paper.py` holds all of it against a real board on a real socket: both documents resolved,
+named for their course and their set, handed over as attachments rather than previews; the pages
+drawn, counted, ordered, cached, re-drawn after a rebuild, and bounded so the cache cannot grow
+without limit; a machine with no renderer degrading rather than showing an empty panel; every
+traversal refused; and, by reading the client, that the record reaches the banner from the payload,
+that nothing navigates the board's own window, and that the service worker leaves all three paths
+alone.
 
 It lands in `transcripts/` — outside `live/`, which is runtime state a course repository ignores
 — as `<lesson>-v1.pdf`, then `-v2.pdf`, then `-v3.pdf`. **Numbered, never stamped with the time.**
@@ -4134,7 +4236,8 @@ tutorboard/        the board itself, organised by what a thing is about:
   machines.py      the other machines, and what each can teach
   net/             reaching them: tailscale, socks, boards, egress
   course/          a course on disk: repo, config, document, homework, review,
-                   syllabus
+                   syllabus, screenshot, paper (the two documents: resolving one,
+                   naming it, and rendering its pages so an iPad can read it)
   lesson/          what is on the board now: cards, turns, notes, slate,
                    archive, state, git, uploads
   server/          app, handler, hub, tikz, spawn, multipart, and routes/ --
@@ -4159,6 +4262,10 @@ live/
   slate/           page-NN.json (strokes) and page-NN.png (what the assistant reads)
                    NN is the page's name, not its place in any list
   tikzcache/       compiled SVG, keyed by content hash
+  paper/           rendered PDF pages, so a document can be READ on the iPad.
+                   Keyed on the PDF's own modification time, bounded to a few
+                   page sets, and it carries its own .gitignore -- a course whose
+                   minimum is "nothing at all" would otherwise commit it
   archive/         previous lessons, filed by `board open` or `board archive`
   .board.json      which node, which pid, which port
 ```
@@ -4184,8 +4291,8 @@ wrong step.
 board doctor
 ```
 
-reports python, `latex`, `pdflatex`, `dvisvgm`, the vendored KaTeX, the node name, the port, and
-the tailnet name. What it is checking for:
+reports python, `latex`, `pdflatex`, `dvisvgm`, the page renderer, the vendored KaTeX, the node
+name, the port, and the tailnet name. What it is checking for:
 
 | Needed | Where it came from here |
 |---|---|
@@ -4193,6 +4300,7 @@ the tailnet name. What it is checking for:
 | A TeX installation | TinyTeX in `~/.TinyTeX` |
 | `dvisvgm`, `standalone` | `tlmgr install dvisvgm standalone varwidth preview needspace` |
 | KaTeX | vendored into `web/katex/`, see step 2 |
+| `pdftoppm` (poppler) | `/usr/bin` on a Linux node; `brew install poppler` on a Mac. Wanted rather than needed: without it — or `pdftocairo`, or Ghostscript's `gs`, which MacTeX brings — a PDF can still be saved to the iPad but cannot be **read on the board**, because the pages are rendered here. `board doctor` says so in as many words rather than leaving it to be found from a panel that will not fill |
 | node | only to run the tests |
 
 ## 1. The tool itself
@@ -4482,6 +4590,12 @@ python3 test/waking.py   that a tutor coming up says so, and that work handed in
 python3 test/annotate.py that marks on a card are anchored to it and can be sent
 python3 test/begin.py    that the first turn of a session can come from the device
 python3 test/homework.py that a sitting finds its problem set, in either layout
+python3 test/paper.py    that both documents can be READ on the board and SAVED off it,
+                         at any moment -- the pages rendered, counted, cached against the
+                         PDF's own timestamp and re-drawn after a rebuild; a machine with
+                         no renderer degrading rather than showing an empty panel; and,
+                         by reading the client, that the write-up's record reaches the
+                         banner from the payload rather than being invented for one frame
 python3 test/teaching.py that the teaching method reaches every course
 python3 test/choice.py   that the address follows the course a person chose
 python3 test/limit.py    that a lesson moves to a machine with an allowance to teach it
@@ -4504,6 +4618,8 @@ markdown parsing and restores it afterwards, because otherwise a subscript or an
 Confirmed by actually exercising it:
 
 - TikZ fences compile and cache; the exported lesson typesets as a PDF.
+- A compiled write-up comes back off a real board as an attachment named for its course, and
+  its pages render to legible PNGs through `pdftoppm` — checked by looking at one.
 - Slate ink round-trips: strokes in, PNG on disk, opened and read.
 - `board wait` blocks and wakes on a send.
 - Inbound over the tailnet works in userspace-networking mode, checked through the SOCKS proxy.

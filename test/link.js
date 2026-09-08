@@ -81,9 +81,11 @@ try {
   // have to be asked of the code rather than read off an attribute.
   let src = fs.readFileSync(path.join(WEB, 'board.js'), 'utf8');
   src = src.replace('})();',
-    'window.__handOver = function () { return handOver; };\n'
+    'window.__papers = function () { return papers; };\n'
+    + 'window.__bannerKind = function () { return bannerKind; };\n'
+    + 'window.__warm = function () { return warm; };\n'
     + 'window.__nameFrom = nameFrom;\n'
-    + 'window.__takeCopy = takeCopy;\n'
+    + 'window.__saveCopy = saveCopy;\n'
     + 'window.__shareIt = shareIt;\n'
     + 'window.__saveBlob = saveBlob;\n'
     + '})();');
@@ -1133,9 +1135,18 @@ if (es) {
     ? ok('a failed export offers nothing to download')
     : fail('the board offered a download for an export that did not compile');
 
+  // WHAT THE BUTTON IS ENABLED FROM IS THE FILE, NOT THE RECORD IN THE BANNER.
+  //
+  // A record can say `ok` and name a PDF that is not there; `papers` is the
+  // board's answer to "which documents are on disk", checked on every payload.
+  // Those are different questions, and conflating them made a `.tex` that
+  // failed to compile and a PDF sitting in the repository look the same here.
+  var lessonDoc = { name: 'Galois-Theory-v3.pdf', at: 1757000000,
+                    size: 12345, iso: '2026-09-08 11:01', scope: 'lesson' };
   var b6 = { state: { course: 'G', session: 'lecture', mode: 'math' },
              cards: [], turns: [], messages: [], uploads: [], slate: [],
              push: null, agent: { agent: 'claude', state: 'listening' },
+             papers: { lesson: lessonDoc },
              export: { ok: true, at: Date.now() / 1000,
                        pdf: 'transcripts/galois-theory-v3.pdf',
                        tex: 'transcripts/galois-theory-v3.tex', detail: '' } };
@@ -1144,14 +1155,134 @@ if (es) {
     ok('and an export that compiled offers the lesson to be saved');
   else fail('a compiled export offers nothing to save');
 
+  var viewBtn = doc.getElementById('pushed-view');
+  viewBtn && !viewBtn.hidden
+    ? ok('and offers to READ it, which the share sheet is not')
+    : fail('there is no way to look at the document from the banner');
+
   // WHICH document it will fetch is still the thing being tested -- it just
   // lives in a variable now rather than in an attribute the browser can follow.
   // The client names a KIND and the server resolves it; a query parameter
   // carrying a path would be a directory traversal waiting to be written.
-  var handing = window.__handOver && window.__handOver().url;
-  handing === '/download/lesson'
+  var handing = window.__bannerKind && window.__bannerKind();
+  handing === 'lesson'
     ? ok('and it is aimed at the lesson, by kind and not by path')
     : fail('the control is aimed at ' + handing + ' rather than the lesson');
+
+  // ------------------------------------------------------------------------
+  // THE DEFECT ITSELF: THE BUTTON THAT LIVED FOR ONE PAYLOAD.
+  //
+  // Reported from the iPad, mid-sitting: "I just tried to save a copy of my
+  // homework, and it's not working. It compiles the homework, but it's not
+  // letting me view the compiled .pdf or save it anywhere locally."
+  //
+  // The compile had worked. `doExportHomework` then painted the banner from a
+  // record it had invented itself -- the reply to `/hw/build`, tagged
+  // `kind: "hw"` -- and handed it to the argument slot that belongs to
+  // `push.json`. The next payload, about a second later, repainted the same
+  // banner from the real `push.json`, and `save a copy` went with it ALONG WITH
+  // THE URL BEHIND IT. So a tap after that second did nothing at all.
+  //
+  // The record for a write-up is on disk, in `live/hw.json`, and the payload
+  // carries it as `hw.build`. Two payloads is the test: the button has to still
+  // be there on the second one.
+  var hwDoc = { name: 'Galois-Theory-ch07.pdf', at: 1757000200,
+                size: 22222, iso: '2026-09-08 11:04', set: 'ch07' };
+  var hwPayload = function (extra) {
+    return Object.assign({
+      state: { course: 'G', chapter: 'Ch 7', session: 'homework' },
+      cards: [], turns: [], messages: [], uploads: [], slate: [],
+      agent: { agent: 'claude', state: 'listening' },
+      papers: { lesson: lessonDoc, homework: hwDoc },
+      hw: { name: 'ch07', rel: 'homework/ch07.tex', problems: [], sets: ['ch07'],
+            total: 0, written: 0,
+            build: { ok: true, at: 1757000200, iso: '2026-09-08 11:04',
+                     set: 'ch07', pdf: 'build/ch07-homework.pdf', detail: '' } },
+      // A push from an hour ago, which is what used to win the banner back.
+      push: { ok: true, at: 1757000000, iso: '2026-09-08 11:00',
+              detail: 'main -> main' }
+    }, extra || {});
+  };
+  es.onmessage({ data: JSON.stringify(hwPayload()) });
+  var text = doc.getElementById('pushed-text').textContent;
+  /compiled/.test(text)
+    ? ok('a compiled write-up is what the banner is about')
+    : fail('the banner is about something else: ' + text);
+  window.__bannerKind() === 'homework'
+    ? ok('and the controls are aimed at the write-up')
+    : fail('the controls are aimed at ' + window.__bannerKind());
+
+  // The second payload. This is the one that used to take it all away.
+  es.onmessage({ data: JSON.stringify(hwPayload()) });
+  var still = doc.getElementById('pushed-text').textContent;
+  if (!getLink.hidden && !viewBtn.hidden && window.__bannerKind() === 'homework'
+      && /compiled/.test(still))
+    ok('and the next payload leaves the write-up reachable, which is the defect');
+  else fail('a payload took the write-up away again — hidden=' + getLink.hidden
+            + ', kind=' + window.__bannerKind() + ', text=' + still);
+
+  // And a document the payload does not list is not offered, however cheerful
+  // the record about it is: a `.tex` that would not compile is not a document.
+  es.onmessage({ data: JSON.stringify(hwPayload({ papers: {} })) });
+  getLink.hidden && viewBtn.hidden
+    ? ok('and a record whose PDF is not on disk offers nothing')
+    : fail('the board offered a document that is not there');
+  es.onmessage({ data: JSON.stringify(hwPayload()) });
+
+  // ------------------------------------------------------------------------
+  // AND BOTH DOCUMENTS ARE REACHABLE WHEN NO BANNER IS UP AT ALL.
+  //
+  // The other half of the same report, and no amount of fixing the banner would
+  // have covered it: a document made ten days ago is still a document, and
+  // until the panel existed there was no control on the page that could reach
+  // one. The banner is dismissed here, exactly as somebody would dismiss it.
+  doc.getElementById('pushed-close').onclick();
+  var papersBtn = doc.getElementById('btn-papers');
+  papersBtn ? ok('the menu carries a way back to a document')
+            : fail('a document is reachable only from the banner that made it');
+  if (papersBtn) {
+    papersBtn.onclick();
+    var panel = doc.getElementById('papers');
+    !panel.hidden
+      ? ok('and it opens with the banner gone')
+      : fail('the documents panel does not open');
+    var rows = panel.querySelectorAll('.paper-row');
+    rows.length === 2
+      ? ok('listing both documents, the lesson and the write-up')
+      : fail('the panel lists ' + rows.length + ' documents rather than two');
+    var labels = Array.prototype.map.call(
+      panel.querySelectorAll('.paper-acts button'),
+      function (b) { return b.textContent; });
+    labels.indexOf('read it here') !== -1 && labels.indexOf('save a copy') !== -1
+      ? ok('each with both ways to have it: read it here, save a copy')
+      : fail('the panel offers ' + JSON.stringify(labels));
+
+    // And it is never a dead end: the document that has not been made yet
+    // offers to make it, rather than saying nothing about itself.
+    es.onmessage({ data: JSON.stringify(hwPayload({ papers: { lesson: lessonDoc } })) });
+    var offers = Array.prototype.map.call(
+      panel.querySelectorAll('.paper-acts button'),
+      function (b) { return b.textContent; });
+    offers.indexOf('compile it now') !== -1
+      ? ok('and a write-up that has never compiled offers to compile')
+      : fail('a missing document is a dead end: ' + JSON.stringify(offers));
+    doc.getElementById('btn-papers-close').onclick();
+    panel.hidden ? ok('and the panel closes')
+                 : fail('the documents panel cannot be closed');
+    es.onmessage({ data: JSON.stringify(hwPayload()) });
+  }
+
+  // ------------------------------------------------------------------------
+  // READING IT IS PICTURES, BECAUSE A PDF IN A FRAME IS ONE PAGE ON iOS.
+  //
+  // And because navigating to one in a standalone app is the trap the whole
+  // handover was rewritten to escape. The pages are drawn by the machine that
+  // holds the PDF and shown in a panel this page owns and can close.
+  var paper = doc.getElementById('paper');
+  var boardHtml = fs.readFileSync(path.join(WEB, 'board.html'), 'utf8');
+  paper && !/\<iframe/.test(boardHtml)
+    ? ok('the document is read in a panel of pictures, not in a frame')
+    : fail('the viewer is a frame, which iOS renders as one unscrollable page');
 
   // The filename is the SERVER's business -- it knows the course and the set --
   // so nothing here names the file. Setting it on this side would get the name
@@ -1172,11 +1303,16 @@ if (es) {
   // without a user gesture, and it is refused. So the fetch starts when the
   // banner appears -- which is also when the button first becomes visible, so
   // the wait is spent where nobody is looking at it.
-  var warm = window.__handOver && window.__handOver();
-  warm && warm.warming
+  var warmed = window.__warm && window.__warm();
+  warmed && warmed.homework && warmed.homework.job
     ? ok('the copy is fetched when it is offered, not when it is tapped')
     : fail('nothing is fetched until the tap, so by the time there is a file to '
            + 'share the user gesture has expired and iOS refuses the share sheet');
+  // And keyed on WHEN the PDF was written, so a rebuild is never handed over
+  // out of this cache: that is the stale-document mistake, one layer in.
+  warmed && warmed.homework && warmed.homework.at === hwDoc.at
+    ? ok('and it is held against the moment that PDF was written')
+    : fail('the fetched copy is not tied to a version of the document');
 
   // AND NOTHING IN THE HANDOVER MAY NAVIGATE THIS WINDOW, at any point in it.
   //
@@ -1218,7 +1354,7 @@ if (es) {
     window.navigator.canShare = function () { return true; };
     window.navigator.share = function (o) { shared = o; return Promise.resolve(); };
     got.file = { name: got.name, type: 'application/pdf' };
-    window.__shareIt(got, '/download/lesson');
+    window.__shareIt(got, 'lesson');
     shared && shared.files && shared.files[0] === got.file
       ? ok('the document is handed to the share sheet as a file')
       : fail('the share sheet was not offered the file: ' + JSON.stringify(shared));
@@ -1233,7 +1369,7 @@ if (es) {
     window.navigator.standalone = true;
     opened = []; clicked = [];
     var blew = tried(function () {
-      window.__saveBlob(got, '/download/lesson', function () {});
+      window.__saveBlob(got, 'lesson', function () {});
     });
     if (blew) fail('handing the document over threw: ' + blew.message);
     opened.length === 1 && opened[0].target === '_blank'
@@ -1248,7 +1384,7 @@ if (es) {
     // 3. An ordinary tab: `download` works there and saves without navigating.
     window.navigator.standalone = false;
     opened = []; clicked = [];
-    window.__saveBlob(got, '/download/lesson', function () {});
+    window.__saveBlob(got, 'lesson', function () {});
     clicked.length === 1 && clicked[0].download === got.name && opened.length === 0
       ? ok('in a tab it saves through a download, without navigating either')
       : fail('the tab route did ' + JSON.stringify({ opened: opened, clicked: clicked }));

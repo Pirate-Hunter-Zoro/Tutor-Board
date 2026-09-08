@@ -554,6 +554,12 @@ from the board's own menu, or with `board export`. Do not assemble one by hand, 
 do not paste the lesson back into a card so that it can be "kept": it is already
 kept, and the export is what turns it into something they can hand to somebody.
 
+Nor is showing them either document. Both the write-up and the transcript can be
+read on the board and saved to the device from **⋯ → documents · view or save**,
+at any moment and however long ago they were made. So never transcribe a compiled
+sheet back into a card "so they can see it", and never tell them to find a laptop
+to open a PDF.
+
 ## Sections are permanent, so do not cram
 
 Every section is archived when the next one opens: cards, questions, and the

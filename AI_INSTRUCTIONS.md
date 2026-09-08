@@ -579,6 +579,15 @@ tutorboard/
   the tail of the log, and the board shows the LaTeX error itself. "The build failed" without the
   reason is a message that sends somebody to a laptop, which is the thing this tool exists to
   avoid.
+- **A document is a file, not an event, and the controls for one must never depend on a banner.**
+  Both PDFs — the lesson and the write-up — are resolved, named and rendered by
+  `course/paper.py`, and the payload says which of them exist on disk (`papers`) on every change.
+  That is the rule rather than a detail: the controls for the write-up used to live in the banner
+  of the build that produced it, which the next payload replaces, so a document that had just
+  compiled was unreachable a second later. Anything new that hands a document over asks `papers`,
+  and never a build record. And the reading half is PNG pages drawn by this machine, never an
+  `<iframe>` and never a navigation of the board's own window — iOS gives a framed PDF one
+  unscrollable page, and a PDF navigated to in a home-screen app is a board with no way back.
 - **The theme has to reach the whole window.** The viewport's background comes from `<html>` and
   only falls through to `<body>` when `<html>` paints none of its own — and the dark palette is
   defined on `body[data-mode="dark"]`, so an `<html>` painting `var(--paper)` resolves it from

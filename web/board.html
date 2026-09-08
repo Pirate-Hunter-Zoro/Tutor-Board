@@ -71,6 +71,15 @@
        to compile the thing an evening was actually spent writing was a terminal,
        which is the one thing this page exists to abolish. -->
   <button id="btn-export-hw" title="compile the problem set you are writing up, and keep it in the repository">⇩  export the written-up homework</button>
+  <!-- AND A WAY BACK TO A DOCUMENT THAT ALREADY EXISTS.
+       The three buttons above MAKE a document. Reaching one used to be possible
+       only in the banner of the build that made it, and that banner is replaced
+       by the next payload -- so a write-up somebody had just compiled became
+       unreachable about a second after it appeared. Reported as "it compiles the
+       homework, but it's not letting me view the compiled .pdf or save it
+       anywhere locally on the iPad." This is here at every moment, whether the
+       document was made ten seconds or ten days ago. -->
+  <button id="btn-papers" title="read either PDF here, or save a copy to Files">▤  documents · view or save</button>
   <button id="btn-reload" title="reload the app">↻  reload the app</button>
 </div>
 
@@ -104,7 +113,12 @@
        replaced by the PDF, with no chrome, no back button and no share sheet.
        Reported as "it just opens the document up, and I can't put it anywhere.
        The only thing I can do is exit the app and go back in again." Nothing
-       that hands a document over may navigate this window -- see `takeCopy`. -->
+       that hands a document over may navigate this window -- see `saveCopy`. -->
+  <!-- Reading it and keeping it are two different things, and only the second
+       one existed. The share sheet is somewhere to PUT a document; it is not
+       somewhere to read one, and "let me see whether the proof is in there"
+       was not answerable from the board at all. -->
+  <button id="pushed-view" class="pushed-get quiet" type="button" hidden>read it</button>
   <button id="pushed-get" class="pushed-get" type="button" hidden>save a copy</button>
   <button id="pushed-close" type="button" title="dismiss">✕</button>
 </div>
@@ -326,6 +340,40 @@
 <div id="reading" class="reading" hidden>
   <span id="reading-what"></span>
   <button id="reading-back" type="button">back to the lesson</button>
+</div>
+
+<!-- The two documents this board can produce, and both ways to have one.
+     A document is a file, not an event: whether it exists is a question with an
+     answer at every moment, and the payload answers it (`papers`). So this
+     panel is reachable whenever somebody wants it, and it offers to make the
+     one that is not there rather than saying nothing about it. -->
+<aside id="papers" hidden>
+  <div class="scratch-head">
+    <strong>Documents</strong>
+    <button id="btn-papers-close">✕</button>
+  </div>
+  <div id="papers-list"></div>
+  <div class="scratch-foot muted">Both are kept in the repository and staged for
+    the next save. <strong>Read it here</strong> draws the pages on the board;
+    <strong>save a copy</strong> hands the PDF to iOS, so it can go to Files,
+    iCloud, a phone, or an email — and Cancel comes straight back to the lesson.</div>
+</aside>
+
+<!-- A PDF, read on the board.
+     NOT an iframe and NOT a navigation, and both of those are the point. iOS
+     renders a PDF in a frame as one unscrollable page, and navigating to one in
+     a standalone web app leaves the board with no chrome and no way back --
+     which is the trap `saveCopy` in board.js was written to avoid. So the pages
+     are drawn to PNG by the machine that holds the PDF and shown here, in a
+     viewer this page owns and can close. See `tutorboard/course/paper.py`. -->
+<div id="paper" class="paper" hidden>
+  <div class="paper-bar">
+    <strong id="paper-name">document</strong>
+    <span id="paper-sub" class="muted"></span>
+    <button id="paper-get" type="button" class="pushed-get">save a copy</button>
+    <button id="paper-close" type="button" title="back to the lesson">✕</button>
+  </div>
+  <div id="paper-pages" class="paper-pages"></div>
 </div>
 
 <aside id="scratch" hidden>

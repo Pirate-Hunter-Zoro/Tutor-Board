@@ -83,6 +83,14 @@ var els = {
   pushedIcon: document.getElementById("pushed-icon"),
   pushedText: document.getElementById("pushed-text"),
   pushedGet: document.getElementById("pushed-get"),
+  pushedView: document.getElementById("pushed-view"),
+  papersPanel: document.getElementById("papers"),
+  papersList: document.getElementById("papers-list"),
+  paper: document.getElementById("paper"),
+  paperName: document.getElementById("paper-name"),
+  paperSub: document.getElementById("paper-sub"),
+  paperGet: document.getElementById("paper-get"),
+  paperPages: document.getElementById("paper-pages"),
   carry: document.getElementById("carry"),
   busy: document.getElementById("busy"),
   busyText: document.getElementById("busy-text"),
@@ -817,7 +825,10 @@ function render(data) {
   var started = (data.cards || []).length > 0;
   els.empty.hidden = started || linkDead;
 
-  paintSession(state, data.push, data.agent, data.export);
+  papers = data.papers || {};
+  renderPapers();                /* a build that lands while it is open shows */
+  paintSession(state, data.push, data.agent, data.export,
+               (data.hw && data.hw.build) || null);
   paintHomework(data.hw);
   paintReview(state, data.review);
   if (!started) paintWaiting(data);
@@ -1202,7 +1213,7 @@ function lastLine(text) {
   return lines.length ? lines[lines.length - 1].trim().slice(0, 160) : "";
 }
 
-function paintSession(state, push, agent, exported) {
+function paintSession(state, push, agent, exported, hwBuilt) {
   /* Whether an assistant is attached, and whether it is thinking. Without this
      the page looks identical when nothing is listening at all. */
   /* Never hidden. A blank space where this belongs reads as "fine", and it is
@@ -1282,21 +1293,45 @@ function paintSession(state, push, agent, exported) {
     if (!savePrompted()) els.finish.hidden = true;
   }
 
-  /* One banner, two things that can land in it. A push and an export are both
-     "something slow happened, here is how it went", and the newer one is the
-     one the person is waiting on -- an export triggers a payload the moment it
-     finishes, and without this that payload would repaint the banner with a
-     push from an hour ago. */
+  paintBanner(push, exported, hwBuilt);
+}
+
+/* THE BANNER, WHICH IS ABOUT A DOCUMENT AND NOT ABOUT THE SITTING.
+
+   Its own function because three things call it and none of them knows anything
+   about the sitting. They used to call `paintSession` with an empty state to
+   reach this code, which repainted the session badge as "lecture" for the
+   second before the next payload put it back -- a homework sitting announcing
+   itself as a lecture at the exact moment somebody exports their homework. */
+function paintBanner(push, exported, hwBuilt) {
+  /* One banner, THREE things that can land in it. A push, an export and a
+     compile of the write-up are all "something slow happened, here is how it
+     went", and the newest one is the one the person is waiting on -- an export
+     triggers a payload the moment it finishes, and without this that payload
+     would repaint the banner with a push from an hour ago.
+
+     THE WRITE-UP'S RECORD COMES OFF DISK NOW, and that is the fix rather than a
+     tidying. It used to reach this function once, invented by the client from
+     the reply to `/hw/build` and belonging to no file anywhere -- so the very
+     next payload, a second later, repainted the banner from `push.json` and
+     took the controls for the document with it. Reported from the iPad: "it
+     compiles the homework, but it's not letting me view the compiled .pdf or
+     save it anywhere locally." The compile had worked. The button lived for
+     about a second, and a tap after that did nothing at all, because the URL
+     behind it had been cleared. `live/hw.json` is where that record has always
+     been written; the payload carries it as `hw.build`. */
   var last = push;
   if (exported && (!push || (exported.at || 0) > (push.at || 0))) last = exported;
+  if (hwBuilt && (!last || (hwBuilt.at || 0) > (last.at || 0))) last = hwBuilt;
   if (!last || last.at <= pushDismissed) {
     els.pushed.hidden = true;
+    offerDocument(null);
     return;
   }
   els.pushed.hidden = false;
   els.pushed.className = "pushed " + (last.ok ? "ok" : "bad");
   els.pushedIcon.textContent = last.ok ? "✓" : "✕";
-  /* AND A WAY TO TAKE IT WITH YOU.
+  /* AND A WAY TO READ IT, AND A WAY TO TAKE IT WITH YOU.
 
      The repository copy is the archival one and nothing about it changes. But a
      compute node is not a place an iPad can reach, and a tailnet path is not
@@ -1305,12 +1340,13 @@ function paintSession(state, push, agent, exported) {
      exactly those terms: "so I can save it to files in my iCloud, get it on my
      phone, and email it to my prof, lickety split."
 
-     Offered only when there IS a PDF: a `.tex` that failed to compile is not a
-     document, and a button that hands over a broken one is worse than no
-     button. */
-  offerDownload(last === exported ? (last.ok && last.pdf ? "/download/lesson" : null)
-                                  : (last.kind === "hw" && last.ok && last.pdf
-                                     ? "/download/homework" : null));
+     Which document this banner is ABOUT is decided here; whether that document
+     EXISTS is decided by the payload, off the files (`papers`), and not by the
+     record that happens to be in the banner. Those are different questions, and
+     conflating them is what made a `.tex` that failed to compile and a PDF
+     sitting on disk look the same from here. */
+  offerDocument(last === exported ? "lesson"
+                : (last === hwBuilt || last.kind === "hw") ? "homework" : null);
   if (last === exported) {
     /* A photograph says how many pages it came to, because that is the one
        thing about it a person cannot see from here and the one thing that says
@@ -1323,7 +1359,7 @@ function paintSession(state, push, agent, exported) {
       ? (last.pdf || last.tex) + howMany
       : "Export failed — "
         + ((last.detail || "no detail").split("\n")[0] || "no detail");
-  } else if (last.kind === "hw") {
+  } else if (last === hwBuilt || last.kind === "hw") {
     els.pushedText.textContent = last.ok
       ? (last.pdf || last.set || "the write-up")
         + " — compiled, kept in the repository, and staged for the next save"
@@ -1337,7 +1373,8 @@ function paintSession(state, push, agent, exported) {
   }
 }
 
-/* Handing a document over, without leaving the app to do it.
+/* ======================================================================
+   THE TWO DOCUMENTS: reading one on the board, and taking one off it.
 
    THIS WAS AN ANCHOR AND THE ANCHOR WAS A TRAP. Reported from the iPad: "when I
    try to do the local export on the iPad, it just opens the document up, and I
@@ -1371,29 +1408,76 @@ function paintSession(state, push, agent, exported) {
        recoverable; a dead end in this one costs the lesson.
 
    `AbortError` is somebody tapping Cancel and is not a failure. Anything else
-   says what went wrong, in the banner, where the export already reports. */
-var handOver = { url: null, busy: false, file: null, warming: null };
+   says what went wrong, in the banner, where the export already reports.
 
-function offerDownload(url) {
-  if (!els.pushedGet) return;
-  if (url !== handOver.url) {
-    handOver.url = url || null;
-    handOver.file = null;
-    handOver.warming = null;
-    /* WARMED THE MOMENT IT IS OFFERED, and this is the difference between the
-       share sheet appearing and an error.
+   AND READING IT IS A DIFFERENT QUESTION, which is the second report and the
+   reason this section is no longer only about downloads: "it compiles the
+   homework, but it's not letting me view the compiled .pdf or save it anywhere
+   locally on the iPad." A share sheet is somewhere to PUT a document. It is not
+   somewhere to read one, and "did the proof make it in" was not answerable from
+   the board at all. `openPaper` is that half -- the pages, drawn to PNG by the
+   machine that holds the PDF, shown in a panel this page owns and can close.
+   Not an `<iframe>`: iOS renders a PDF in a frame as one unscrollable page.
 
-       Safari's transient activation does not survive an `await`: a
-       `navigator.share` called after a fetch has resolved is a share called
-       without a user gesture, and it is refused. The document has to be in hand
-       BEFORE the tap, so it is fetched when the banner appears -- which is also
-       when the person can first see the button, so the wait is spent where
-       nobody is looking at it rather than after they have pressed. */
-    if (url) warmCopy(url);
-  }
-  els.pushedGet.hidden = !url;
-  els.pushedGet.disabled = false;
-  els.pushedGet.textContent = "save a copy";
+   THREE THINGS DECIDE THE CONTROLS, AND ONLY ONE OF THEM IS AN EVENT.
+
+     - `papers`, off the payload, says which documents exist. A file, checked on
+       disk on every payload. This is what the buttons are enabled from.
+     - the banner's record says which document the banner is ABOUT.
+     - the ⋯ menu's `documents` panel needs neither, and is why a document is
+       reachable ten days after it was made rather than for the one second the
+       banner that announced it stayed on screen.
+   ====================================================================== */
+
+/* Which documents exist right now, keyed by kind -- `lesson`, `homework`. Off
+   the payload (`papers`), so it survives every repaint and every reload. */
+var papers = {};
+
+/* One fetched document per kind, kept against the moment the PDF was written so
+   a rebuild is never served from here.
+
+   WARMED THE MOMENT IT IS OFFERED, and this is the difference between the share
+   sheet appearing and an error. Safari's transient activation does not survive
+   an `await`: a `navigator.share` called after a fetch has resolved is a share
+   called without a user gesture, and it is refused. The document has to be in
+   hand BEFORE the tap, so it is fetched when the button appears -- which is also
+   when the person can first see it, so the wait is spent where nobody is looking
+   at it rather than after they have pressed. */
+var warm = Object.create(null);
+
+function paperUrl(kind) { return "/download/" + kind; }
+
+function paperTitle(kind) {
+  return kind === "homework" ? "the written-up homework" : "this lesson";
+}
+
+function warmPaper(kind) {
+  var have = papers[kind];
+  if (!have) return null;
+  var slot = warm[kind];
+  if (slot && slot.at === have.at) return slot.job;
+  var job = fetch(paperUrl(kind), { credentials: "same-origin" })
+    .then(function (res) {
+      if (!res.ok) throw new Error("the board would not give it up (" + res.status + ")");
+      return res.blob().then(function (blob) {
+        var name = nameFrom(res, have.name || "lesson.pdf");
+        var file = null;
+        try {
+          file = new File([blob], name, { type: "application/pdf" });
+        } catch (e) { file = null; }
+        return { blob: blob, name: name, file: file };
+      });
+    });
+  slot = warm[kind] = { at: have.at, job: job, got: null };
+  job.then(function (got) {
+    if (warm[kind] === slot) slot.got = got;
+  }, function () { /* the tap will try again and say so */ });
+  return job;
+}
+
+function inHand(kind) {
+  var slot = warm[kind], have = papers[kind];
+  return slot && have && slot.at === have.at ? slot.got : null;
 }
 
 function nameFrom(res, fallback) {
@@ -1405,23 +1489,25 @@ function nameFrom(res, fallback) {
   return (m && decodeURIComponent(m[1])) || fallback;
 }
 
-function warmCopy(url) {
-  var job = fetch(url, { credentials: "same-origin" }).then(function (res) {
-    if (!res.ok) throw new Error("the board would not give it up (" + res.status + ")");
-    return res.blob().then(function (blob) {
-      var name = nameFrom(res, "lesson.pdf");
-      var file = null;
-      try {
-        file = new File([blob], name, { type: "application/pdf" });
-      } catch (e) { file = null; }
-      return { blob: blob, name: name, file: file };
-    });
-  });
-  handOver.warming = job;
-  job.then(function (got) {
-    if (handOver.warming === job) handOver.file = got;
-  }, function () { /* the tap will try again and say so */ });
-  return job;
+/* ------------------------------------------------- the banner's two buttons */
+var bannerKind = null;
+
+function offerDocument(kind) {
+  if (!els.pushedGet) return;
+  /* A document the payload does not list is a document that is not on disk --
+     a `.tex` that failed to compile, or a lesson nobody has exported. No
+     button at all beats a button that hands over nothing. */
+  var have = kind && papers[kind];
+  bannerKind = have ? kind : null;
+  if (els.pushedView) {
+    els.pushedView.hidden = !have;
+    els.pushedView.disabled = false;
+    els.pushedView.textContent = "read it";
+  }
+  els.pushedGet.hidden = !have;
+  els.pushedGet.disabled = false;
+  els.pushedGet.textContent = "save a copy";
+  if (have) warmPaper(kind);
 }
 
 /* Is this the installed app, with no browser chrome around it?
@@ -1437,34 +1523,48 @@ function global_matches(query) {
   return !!(window.matchMedia && window.matchMedia(query).matches);
 }
 
-function takeCopy() {
-  if (!handOver.url || handOver.busy) return;
-  var url = handOver.url;
-
+/* ------------------------------------------------------- taking a copy away */
+/* `btn` is whichever control was tapped -- the banner's, the documents panel's,
+   or the one in the viewer's own bar. All three do the same thing to the same
+   document, and none of them may navigate this window. */
+function saveCopy(kind, btn) {
+  if (!kind || !papers[kind]) return;
+  var got = inHand(kind);
   /* In hand already: share on the frame of the tap, inside the gesture, which
      is the only moment Safari will allow it. */
-  if (handOver.file) return shareIt(handOver.file, url);
+  if (got) return shareIt(got, kind, btn);
 
-  handOver.busy = true;
-  els.pushedGet.disabled = true;
-  els.pushedGet.textContent = "getting it…";
-  (handOver.warming || warmCopy(url)).then(function (got) {
-    handOver.busy = false;
-    els.pushedGet.disabled = false;
-    els.pushedGet.textContent = "save a copy";
-    handOver.file = got;
-    /* The gesture is gone by now, so sharing may be refused -- `shareIt` falls
-       through to saving, and saving does not need one. */
-    shareIt(got, url);
-  }, function (err) {
-    handOver.busy = false;
-    els.pushedGet.disabled = false;
-    els.pushedGet.textContent = "save a copy";
-    els.pushed.className = "pushed bad";
-    els.pushedIcon.textContent = "✕";
-    els.pushedText.textContent = "Could not hand it over — "
-      + ((err && err.message) || "the board did not answer");
-  });
+  var was = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "getting it…"; }
+  var back = function () {
+    if (btn) { btn.disabled = false; btn.textContent = was || "save a copy"; }
+  };
+  return (warmPaper(kind) || Promise.reject(new Error("nothing to save")))
+    .then(function (ready) {
+      back();
+      /* The gesture is gone by now, so sharing may be refused -- `shareIt`
+         falls through to saving, and saving does not need one. */
+      shareIt(ready, kind, btn);
+    }, function (err) {
+      back();
+      sayBadly("Could not hand it over — "
+               + ((err && err.message) || "the board did not answer"));
+    });
+}
+
+/* Said where the person who tapped is looking. The banner is the board's own
+   place for "something slow happened, here is how it went", and it is where an
+   export already reports -- but a tap in the viewer happens with the banner
+   behind a full-screen panel, so that one says it in the panel instead. */
+function sayBadly(text) {
+  if (els.paper && !els.paper.hidden) {
+    paperSay("<strong>That did not work</strong>" + escapeHtml(text));
+    return;
+  }
+  els.pushed.hidden = false;
+  els.pushed.className = "pushed bad";
+  els.pushedIcon.textContent = "✕";
+  els.pushedText.textContent = text;
 }
 
 /* THE SHARE SHEET FIRST, AND NOTHING THAT NAVIGATES EVER.
@@ -1474,9 +1574,9 @@ function takeCopy() {
    Cancel returns to the lesson, because the lesson never went anywhere. That
    is both halves of what was reported answered by one mechanism, which is why
    it is the first choice and not a nicety. */
-function shareIt(got, url) {
+function shareIt(got, kind, btn) {
   var done = function (label) {
-    if (els.pushedGet) els.pushedGet.textContent = label || "save a copy";
+    if (btn) btn.textContent = label || "save a copy";
   };
   if (got.file && navigator.share && navigator.canShare
       && navigator.canShare({ files: [got.file] })) {
@@ -1486,13 +1586,13 @@ function shareIt(got, url) {
         p.then(function () { done("saved"); }, function (err) {
           /* Cancel is a decision, not a fault. */
           if (err && err.name === "AbortError") { done(); return; }
-          saveBlob(got, url, done);
+          saveBlob(got, kind, done);
         });
         return p;
       }
     } catch (e) { /* refused outright; save instead */ }
   }
-  return saveBlob(got, url, done);
+  return saveBlob(got, kind, done);
 }
 
 /* No share sheet here, and still nothing that navigates THIS window.
@@ -1503,10 +1603,10 @@ function shareIt(got, url) {
    installed app the last resort is a NEW context: that hands the PDF to Safari,
    which has chrome, a share button and a way back. A dead end in another app is
    recoverable; a dead end in this one costs the lesson. */
-function saveBlob(got, url, done) {
+function saveBlob(got, kind, done) {
   var a = document.createElement("a");
   if (standalone() || !("download" in a)) {
-    window.open(url, "_blank", "noopener");
+    window.open(paperUrl(kind), "_blank", "noopener");
     done();
     return;
   }
@@ -1522,6 +1622,194 @@ function saveBlob(got, url, done) {
      for the board. */
   setTimeout(function () { URL.revokeObjectURL(href); }, 60000);
   done("saved");
+}
+
+/* ------------------------------------------------- the documents, at any time */
+/* The three export buttons MAKE a document. This is how you get back to one,
+   and it is the answer to the half of the report that no amount of fixing the
+   banner would have covered: a document made ten days ago is still a document,
+   and until this existed there was no control on the page that could reach it.
+   It also offers to make the one that is not there, so the panel is never a
+   dead end. */
+function openPapers() {
+  els.papersPanel.hidden = false;
+  renderPapers();
+  /* Fetched now, for the same reason the banner fetches when its button
+     appears: Safari will not raise the share sheet for a `navigator.share`
+     called after a fetch resolves, because by then the tap's activation is
+     gone. Opening this panel is somebody about to save one of two documents,
+     which is the right moment to spend the wait. */
+  ["lesson", "homework"].forEach(function (kind) { warmPaper(kind); });
+}
+
+function renderPapers() {
+  if (els.papersPanel.hidden) return;
+  els.papersList.innerHTML = "";
+  ["lesson", "homework"].forEach(function (kind) {
+    var have = papers[kind];
+    var row = document.createElement("div");
+    row.className = "paper-row";
+    var head = document.createElement("strong");
+    /* Which lesson document this is, because there are two and they are not the
+       same document: the photograph of the glass, and the whole course typeset.
+       Both are written under one numbered series in `transcripts/`, so the
+       filename alone does not say which was made last. */
+    head.textContent = kind === "homework" ? "The written-up homework"
+      : have && have.scope === "all" ? "The whole course, typeset"
+      : "This lesson";
+    row.appendChild(head);
+
+    var sub = document.createElement("span");
+    sub.className = "name";
+    if (have) {
+      sub.textContent = [have.name, have.iso, kb(have.size)]
+        .filter(Boolean).join(" · ");
+    } else {
+      sub.textContent = kind === "homework"
+        ? "not compiled yet — the write-up has no PDF on disk"
+        : "not exported yet — nothing has been made of this lesson";
+    }
+    row.appendChild(sub);
+
+    var acts = document.createElement("div");
+    acts.className = "paper-acts";
+    if (have) {
+      acts.appendChild(act("read it here", "pushed-get quiet", function () {
+        els.papersPanel.hidden = true;
+        openPaper(kind);
+      }));
+      acts.appendChild(act("save a copy", "pushed-get", function (e) {
+        saveCopy(kind, e.currentTarget);
+      }));
+    } else {
+      acts.appendChild(act(kind === "homework" ? "compile it now"
+                                              : "export it now",
+                           "pushed-get", function () {
+        els.papersPanel.hidden = true;
+        if (kind === "homework") doExportHomework();
+        else doExport("lesson");
+      }));
+    }
+    row.appendChild(acts);
+    els.papersList.appendChild(row);
+  });
+}
+
+function act(label, cls, fn) {
+  var b = document.createElement("button");
+  b.type = "button";
+  b.className = cls;
+  b.textContent = label;
+  b.addEventListener("click", fn);
+  return b;
+}
+
+function kb(bytes) {
+  if (!bytes) return "";
+  return bytes >= 1048576 ? (bytes / 1048576).toFixed(1) + " MB"
+                          : Math.max(1, Math.round(bytes / 1024)) + " KB";
+}
+
+/* ------------------------------------------------------ reading it, in place */
+/* The pages come back as pictures from `/view/<kind>`, drawn by the machine
+   that holds the PDF. Everything about why it is pictures rather than the PDF
+   itself is in `tutorboard/course/paper.py`; the short of it is that iOS gives
+   a PDF in a frame one unscrollable page, and a PDF navigated to in a
+   standalone app is a lesson with no way back to it. */
+var paperOpen = null;
+
+function openPaper(kind) {
+  if (!kind) return;
+  paperOpen = kind;
+  els.paper.hidden = false;
+  document.body.classList.add("papering");
+  var have = papers[kind];
+  els.paperName.textContent = (have && have.name) || paperTitle(kind);
+  els.paperSub.textContent = "";
+  els.paperGet.hidden = !have;
+  els.paperGet.textContent = "save a copy";
+  els.paperGet.disabled = false;
+  if (have) warmPaper(kind);          /* in hand before the tap; see openPapers */
+  paperSay("<strong>Drawing the pages…</strong>"
+           + "A long document takes a few seconds the first time. "
+           + "After that it opens straight away.");
+  els.paperPages.scrollTop = 0;
+
+  fetch("/view/" + kind, { credentials: "same-origin" })
+    .then(function (r) { return r.json(); })
+    .then(function (got) {
+      if (paperOpen !== kind) return;          /* closed, or another opened */
+      if (!got || !got.ok) return paperFailed(kind, got || {});
+      els.paperName.textContent = got.name || paperTitle(kind);
+      els.paperSub.textContent = got.n + (got.n === 1 ? " page" : " pages")
+        + (got.truncated ? " (the first " + got.n + " only)" : "");
+      els.paperPages.innerHTML = "";
+      got.pages.forEach(function (url, i) {
+        var img = document.createElement("img");
+        img.src = url;
+        /* Lazily, because a hundred-page transcript is a hundred pictures and
+           the person is reading page one. */
+        img.loading = i < 2 ? "eager" : "lazy";
+        img.decoding = "async";
+        img.alt = "page " + (i + 1);
+        els.paperPages.appendChild(img);
+      });
+    })
+    .catch(function () {
+      if (paperOpen !== kind) return;
+      paperFailed(kind, { detail: "the board did not answer" });
+    });
+}
+
+/* A document that cannot be drawn here is still a document. Say why in a
+   sentence, and offer the two things that do work: keep it, or hand it to
+   Safari, which has its own PDF reader and a way back. */
+function paperFailed(kind, got) {
+  var lead = got.why === "none"
+    ? (kind === "homework" ? "The write-up has not been compiled yet."
+                           : "This lesson has not been exported yet.")
+    : got.why === "no-renderer"
+      ? "This machine cannot draw the pages."
+      : "The pages could not be drawn.";
+  var why = got.detail || "";
+  paperSay("<strong>" + escapeHtml(lead) + "</strong>"
+           + (got.why === "none" || got.why === "no-renderer"
+              ? escapeHtml(why)
+              /* A renderer's own output is a log, and a log reads as one. */
+              : '<span class="detail">' + escapeHtml(why) + "</span>"));
+  var box = els.paperPages.querySelector(".paper-say");
+  if (got.why === "none") {
+    box.appendChild(act(kind === "homework" ? "compile it now" : "export it now",
+                        "pushed-get", function () {
+      closePaper();
+      if (kind === "homework") doExportHomework();
+      else doExport("lesson");
+    }));
+    return;
+  }
+  if (papers[kind]) {
+    box.appendChild(act("save a copy", "pushed-get", function (e) {
+      saveCopy(kind, e.currentTarget);
+    }));
+    box.appendChild(act("open it in the browser", "pushed-get quiet", function () {
+      /* A NEW context, never this one. In the installed app that is Safari,
+         which has chrome, a share button and a way back to the board. */
+      window.open(paperUrl(kind), "_blank", "noopener");
+    }));
+  }
+}
+
+function paperSay(html) {
+  els.paperPages.innerHTML = '<div class="paper-say">' + html + "</div>";
+}
+
+function closePaper() {
+  paperOpen = null;
+  els.paper.hidden = true;
+  document.body.classList.remove("papering");
+  /* The pictures go with it. A hundred decoded pages held behind a closed
+     panel is memory the iPad wants for the lesson. */
+  els.paperPages.innerHTML = "";
 }
 
 /* The whole conversation as one document.
@@ -1545,7 +1833,7 @@ function doExportHomework() {
   els.pushed.className = "pushed";
   els.pushedIcon.textContent = "…";
   els.pushedText.textContent = "compiling the write-up — LaTeX takes a moment…";
-  offerDownload(null);
+  offerDocument(null);
   return fetch("/hw/build", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1555,7 +1843,12 @@ function doExportHomework() {
       rec = rec || {};
       rec.kind = "hw";
       rec.at = Date.now() / 1000;
-      paintSession({}, rec, null, null);
+      /* In the write-up's own slot, which is where its record belongs. It
+         used to arrive as `push`, and the next payload -- which carries a real
+         `push.json` and knows nothing about this -- painted straight over it.
+         The payload carries the same record from `live/hw.json` a moment later,
+         so this only fills the second before it arrives. */
+      paintBanner(null, null, rec);
     })
     .catch(function () {
       els.pushed.className = "pushed bad";
@@ -1588,7 +1881,7 @@ function doExport(scope) {
   els.pushed.hidden = false;
   els.pushed.className = "pushed";
   els.pushedIcon.textContent = "…";
-  offerDownload(null);           /* not the last document's link, while this builds */
+  offerDocument(null);           /* not the last document's buttons, while this builds */
 
   if (scope !== "all" && global_TutorShot()) {
     els.pushedText.textContent = "photographing the lesson…";
@@ -1596,7 +1889,7 @@ function doExport(scope) {
       els.pushedText.textContent = "photographing the lesson — card "
         + done + " of " + total + "…";
     }).then(function (rec) {
-      paintSession({}, null, null, rec || { ok: false, detail: "no answer" });
+      paintBanner(null, rec || { ok: false, detail: "no answer" }, null);
     }).catch(function (err) {
       els.pushed.className = "pushed bad";
       els.pushedIcon.textContent = "✕";
@@ -1613,7 +1906,7 @@ function doExport(scope) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ scope: scope || "lesson" })
   }).then(function (r) { return r.json(); })
-    .then(function (rec) { paintSession({}, null, null, rec); })
+    .then(function (rec) { paintBanner(null, rec, null); })
     .catch(function () {
       els.pushed.className = "pushed bad";
       els.pushedIcon.textContent = "✕";
@@ -1646,7 +1939,7 @@ function doPush() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({})
   }).then(function (r) { return r.json(); })
-    .then(function (rec) { paintSession({}, rec, null, null); })
+    .then(function (rec) { paintBanner(rec, null, null); })
     .catch(function () {
       els.pushed.className = "pushed bad";
       els.pushedIcon.textContent = "✕";
@@ -4329,7 +4622,22 @@ if (window.TutorShot) {
   };
 }
 
-els.pushedGet.onclick = takeCopy;
+/* Three controls, one document, and none of them navigates this window. */
+els.pushedGet.onclick = function (e) { saveCopy(bannerKind, e.currentTarget); };
+els.pushedView.onclick = function () { openPaper(bannerKind); };
+els.paperGet.onclick = function (e) { saveCopy(paperOpen, e.currentTarget); };
+document.getElementById("paper-close").onclick = closePaper;
+document.getElementById("btn-papers").onclick = openPapers;
+/* Escape leaves the document, the way it leaves the picture viewer. A panel
+   that covers the whole glass needs more than one way out of it. */
+document.addEventListener("keydown", function (e) {
+  if (e.key !== "Escape") return;
+  if (els.paper && !els.paper.hidden) closePaper();
+  else if (els.papersPanel && !els.papersPanel.hidden) els.papersPanel.hidden = true;
+});
+document.getElementById("btn-papers-close").onclick = function () {
+  els.papersPanel.hidden = true;
+};
 document.getElementById("btn-export").onclick = function () { doExport("lesson"); };
 document.getElementById("btn-export-all").onclick = function () { doExport("all"); };
 document.getElementById("btn-export-hw").onclick = doExportHomework;

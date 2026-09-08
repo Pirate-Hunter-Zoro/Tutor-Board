@@ -580,6 +580,14 @@ body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180de
   border: 1px solid var(--note); background: var(--note); color: #fff;
 }
 .pushed-get:hover { filter: brightness(1.1); }
+/* Reading it is the second control on the line and reads as one: the primary
+   colour belongs to the thing that takes the document away, which is the one
+   that leaves the app to finish. */
+.pushed-get.quiet {
+  background: transparent; color: var(--ink); border-color: var(--rule);
+  font-weight: 600;
+}
+.pushed-get.quiet:hover { background: var(--paper-2); filter: none; }
 /* It fetches the document and hands it to the share sheet, which takes a
    moment on a long lesson. Disabled while that is in flight, and it has to LOOK
    disabled: this is the control whose whole defect was a tap that appeared to
@@ -887,7 +895,7 @@ body.tools-out .jump { bottom: calc(6.5rem + env(safe-area-inset-bottom)); }
    picker. #contents used to carry a comment saying it borrowed this and an
    empty rule that borrowed nothing, so it laid out in the flow of the page
    under the lesson rather than over it. An ID selector is not inheritance. */
-#scratch, #contents, #review {
+#scratch, #contents, #review, #papers {
   position: fixed; top: 0; right: 0; bottom: 0; z-index: 60;
   width: min(24rem, 92vw);
   background: var(--paper); border-left: 1px solid var(--rule);
@@ -927,6 +935,7 @@ body.tools-out .jump { bottom: calc(6.5rem + env(safe-area-inset-bottom)); }
                 color: var(--accent); }
 .scratch-head button { border: 0; background: none; font: inherit; cursor: pointer; color: var(--ink-2); }
 #scratch-list { flex: 1; overflow-y: auto; padding: .6rem; }
+#papers-list { flex: 1; overflow-y: auto; padding: .2rem .9rem; }
 #scratch-list a { display: block; margin-bottom: .7rem; color: var(--ink); text-decoration: none; }
 #scratch-list img { width: 100%; border-radius: .4rem; border: 1px solid var(--rule); }
 #scratch-list .name { font-size: .72rem; color: var(--ink-3); word-break: break-all; }
@@ -982,10 +991,78 @@ body.tools-out .jump { bottom: calc(6.5rem + env(safe-area-inset-bottom)); }
 #viewer-close:hover { background: #262a31; }
 body.viewing { overflow: hidden; }
 
+/* ---------- a PDF, read on the board ---------- */
+/* The pages are pictures, drawn by the machine that holds the PDF. Not a frame
+   and not a navigation: iOS renders a PDF in a frame as one unscrollable page,
+   and navigating to one in a standalone app leaves the board with no chrome and
+   no way back. This is a panel the page owns, so ✕ returns to the lesson. */
+#paper {
+  position: fixed; inset: 0; z-index: 95;
+  display: flex; flex-direction: column;
+  background: var(--paper-2, #16171a);
+}
+.paper-bar {
+  flex: none; display: flex; align-items: center; gap: .7rem;
+  padding: .6rem max(.9rem, env(safe-area-inset-right)) .6rem max(.9rem, env(safe-area-inset-left));
+  padding-top: max(.6rem, env(safe-area-inset-top));
+  font-family: var(--ui); font-size: .85rem;
+  background: var(--paper); color: var(--ink);
+  border-bottom: 1px solid var(--rule);
+}
+#paper-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#paper-sub { flex: none; font-size: .78rem; }
+#paper-get { margin-left: auto; flex: none; }
+#paper-close {
+  flex: none; cursor: pointer; width: 2.2rem; height: 2.2rem;
+  border-radius: .35rem; border: 1px solid var(--rule);
+  background: var(--paper); color: var(--ink); font: inherit; line-height: 1;
+}
+/* Scrolls itself. The body is locked while this is up, so a two-finger drag
+   inside the pages cannot end up panning the lesson underneath. */
+.paper-pages {
+  flex: 1 1 auto; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 1rem max(.6rem, env(safe-area-inset-left))
+           max(2rem, env(safe-area-inset-bottom)) max(.6rem, env(safe-area-inset-right));
+  display: flex; flex-direction: column; align-items: center; gap: .9rem;
+}
+/* A page is white because paper is white -- the board's dark skin belongs to
+   the lesson, and a typeset document inverted is a document nobody can read. */
+.paper-pages img {
+  width: 100%; max-width: 46rem; height: auto; display: block;
+  background: #fff; border-radius: .3rem;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .35);
+}
+.paper-say {
+  max-width: 30rem; margin: 2rem auto; text-align: center;
+  font-family: var(--ui); font-size: .9rem; color: var(--ink-2);
+}
+.paper-say strong { display: block; margin-bottom: .5rem; color: var(--ink); }
+.paper-say button { margin-top: .9rem; }
+.paper-say button + button { margin-left: .45rem; }
+.paper-say .detail {
+  display: block; margin-top: .7rem; text-align: left;
+  font-family: var(--mono); font-size: .72rem; color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+body.papering { overflow: hidden; }
+
+/* ---------- the documents panel ---------- */
+.paper-row {
+  padding: .8rem 0; border-bottom: 1px solid var(--rule);
+  font-family: var(--ui); font-size: .85rem;
+}
+.paper-row:last-child { border-bottom: 0; }
+.paper-row strong { display: block; }
+.paper-row .name {
+  display: block; margin: .15rem 0 .55rem;
+  font-size: .78rem; color: var(--ink-2); overflow-wrap: anywhere;
+}
+.paper-acts { display: flex; flex-wrap: wrap; gap: .4rem; }
+
 /* ---------- print ---------- */
 @media print {
-  #bar, #drawbar, #scratch, #contents, #review, .jump, .drop, .finish, .pushed,
-  #panic, #reopen, #viewer { display: none !important; }
+  #bar, #drawbar, #scratch, #contents, #review, #papers, .jump, .drop,
+  .finish, .pushed, #panic, #reopen, #viewer, #paper { display: none !important; }
   body { background: #fff; color: #000; }
   #board { max-width: none; padding: 0; }
   .card { break-inside: avoid; animation: none; }

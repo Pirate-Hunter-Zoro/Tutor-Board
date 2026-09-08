@@ -7,7 +7,7 @@ import os
 import time
 
 from .. import machine, processes
-from ..course import homework, review, syllabus
+from ..course import homework, paper, review, syllabus
 from . import cards
 
 
@@ -159,6 +159,34 @@ def load_contents(repo):
     except Exception:
         sets = []
     return {"chapters": chapters, "sets": sets}
+
+
+def load_papers(repo):
+    """Which of the two documents exist on disk right now, and what they are called.
+
+    THE CONTROLS FOR A DOCUMENT CANNOT LIVE IN THE BANNER OF THE BUILD THAT MADE
+    IT. That is the defect this exists to close, reported from the iPad about
+    the write-up: "it compiles the homework, but it's not letting me view the
+    compiled .pdf or save it anywhere locally."
+
+    The compile worked. What happened next is that the client painted the banner
+    from a record it had invented locally -- `kind: "hw"` on the reply to
+    `/hw/build`, which is on no disk anywhere -- and the very next payload, a
+    second later, repainted the same banner from `push.json`. `save a copy` went
+    with it, along with the URL behind it, so a tap after that second did
+    nothing at all. A minute of LaTeX, a document sitting in the repository, and
+    no way to reach it.
+
+    So whether a document exists is a question the board answers on every
+    payload, from the files, the way it answers every other question about
+    itself. Four `stat` calls behind a payload that is already reading a dozen.
+
+    See `course/paper.py`.
+    """
+    try:
+        return paper.describe(repo)
+    except Exception:                                        # noqa: BLE001
+        return {}
 
 
 def load_push(repo):
