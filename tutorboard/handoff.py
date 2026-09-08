@@ -32,8 +32,63 @@ import time
 _HANDOFF_STAMP = re.compile(r"^<!--\s*chapter:\s*(.*?)\s*-->\s*\n?", re.IGNORECASE)
 
 
+# ---------------------------------------------------------------------------
+# the cap is a door, not a request
+# ---------------------------------------------------------------------------
+# The wrap-up prompt has said "keep it under 350 words" since the day the
+# headless tutor could bill by the token, and on 8 September 2026 the handoff in
+# Galois Theory was 3,824 words -- eleven times the cap, 5.4k tokens, read at
+# the start of every turn. Nothing had gone wrong that a person could see: a
+# prompt asking for brevity is a preference, every turn had been quietly editing
+# the file for weeks, and each edit was reasonable on its own.
+#
+# So the cap is now the only door the file has. `board handoff` takes a body on
+# stdin, counts it, and refuses one that is over -- the turn writes a shorter one
+# in the same turn, which costs a round trip once against a document that would
+# otherwise be paid for on every turn until somebody noticed again.
+#
+# It refuses rather than trimming, because the useful half of a handoff is at
+# the bottom: what to teach next. Cutting the tail keeps the description and
+# throws away the instruction.
+HANDOFF_WORDS = 350
+
+
+def word_count(text):
+    return len(re.findall(r"\S+", text or ""))
+
+
 def handoff_path(root):
     return os.path.join(root, "HANDOFF.md")
+
+
+def write_handoff(root, text, chapter=None, words=HANDOFF_WORDS):
+    """Replace HANDOFF.md, stamped with its chapter. (kept, count, over).
+
+    Over the cap, nothing is written and `over` is True. The stamp goes on here
+    rather than afterwards, because this is the moment something knows which
+    chapter the handoff is about: by the time it is read the board may be two
+    chapters further on.
+    """
+    text = (text or "").strip()
+    n = word_count(text)
+    if n > words:
+        return "", n, True
+    if not text:
+        return "", 0, False
+    body = _HANDOFF_STAMP.sub("", text, count=1).lstrip("\n")
+    path = handoff_path(root)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write("<!-- chapter: %s -->\n%s\n" % ((chapter or "").strip(), body))
+    os.replace(tmp, path)
+    return body, n, False
+
+
+def handoff_length(root):
+    """How long the handoff is, and by how much it is over. (words, over_by)."""
+    text, _ = read_handoff(root)
+    n = word_count(text)
+    return n, max(0, n - HANDOFF_WORDS)
 
 
 def parked_handoff(root, chapter):

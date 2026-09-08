@@ -17,6 +17,8 @@ tutor -- start a tutoring session.
     tutor agent stop galois     ask it to write its handoff and go
     tutor agent stop galois --on board    ...on another machine, when a course
                                           has ended up with two owners
+    tutor cost [galois]         what the turns on this machine actually cost
+    tutor cost --all            every course, one line each
     tutor where                 what is up, on this machine and on the tailnet
     tutor restart [--tutors]    restart every board here (and its tutor) on current code
 
@@ -81,6 +83,44 @@ DEFAULT_CONFIG = {
             # agent is not re-reading the whole contract on every single turn.
             "headless_first": ["claude", "-p", "{prompt}"],
             "headless": ["claude", "-p", "{prompt}", "--continue"],
+            # How this agent can be asked what a turn cost, and what to add to
+            # the command to make it say. Nobody reads stdout, so the JSON is
+            # not cosmetic: it is the only measurement of the thing every
+            # decision in this file is about -- see `read_turn_usage`.
+            #
+            # It is TWO fields and it is appended rather than written into the
+            # recipes above, deliberately. A machine's config file overrides
+            # `agents` one level deep, and this machine's config holds a
+            # verbatim copy of the claude recipe from an older version of this
+            # tool: had the flag gone in the argv, every machine carrying such a
+            # copy would silently stop reporting, which is the one failure a
+            # measurement must not have.
+            "usage": "claude-json",
+            "usage_args": ["--output-format", "json"],
+            # Anything else this machine wants on every headless turn. Empty,
+            # and deliberately so, but this is where the one remaining lever
+            # goes if it is ever wanted.
+            #
+            # After a turn stopped carrying the lesson, OUTPUT became the
+            # largest single line on the bill: measured at 9.5k output tokens a
+            # turn, which at $25 per million is $0.24 of a $0.37 turn -- and a
+            # card is a few hundred words, so most of that is thinking and tool
+            # arguments. `["--effort", "medium"]` here cuts it.
+            #
+            # `["--model", "opus"]` is the other thing that goes here. This
+            # machine's Claude Code settings say `opus[1m]`, and the largest
+            # single request across every measured Galois session was 189,588
+            # tokens -- five per cent short of the 200k line above which a long
+            # context is charged and weighted differently. Twelve cards was
+            # under it; fourteen would not have been. A turn now holds 22k to
+            # 44k, so the 1M window buys nothing.
+            #
+            # It is left empty because both of those are teaching decisions as
+            # much as cost decisions, and this file does not get to make them.
+            # The rule in AI_INSTRUCTIONS.md cuts both ways: teaching quality
+            # comes first, and a change to it is weighed as a change to what it
+            # costs.
+            "extra_args": [],
         },
         "opencode": {
             "cmd": ["opencode"], "prompt": "argv", "cost": "paid",
@@ -163,21 +203,65 @@ DEFAULT_CONFIG = {
     "headless_timeout": 900,
     # How long the wrap-up turn gets. It is one turn, but it writes files.
     "handoff_timeout": 600,
-    # How many turns one of the agent's own sessions is allowed to carry before
-    # the next turn starts a fresh one.
+    # ---------------------------------------------------------------------
+    # How many turns one of the agent's own sessions carries. ONE.
+    # ---------------------------------------------------------------------
+    # This was 12 and the arithmetic says 1. What a turn costs is, very nearly,
+    # ROUND TRIPS x CONTEXT SIZE, and a resumed session grows the second factor
+    # without bound while saving only the cold read.
     #
-    # Resuming is the cheap move up to a point: it saves re-reading the contract,
-    # the method and the lesson. But a resumed turn resends the entire
-    # conversation as input, so the cost of every turn grows with the length of
-    # the lesson -- by turn twenty the agent is paying for nineteen turns of
-    # history, most of it text it will never look at again. A fresh session pays
-    # the cold-start read once (contract, method, `board recap`) and then pays for
-    # nothing it has forgotten, because the lesson is on disk.
+    # Measured in Galois Theory on 8 September 2026, eleven cards on
+    # claude-opus-5[1m], one resumed session throughout:
     #
-    # So: resume for a while, then reset. 0 disables the reset and resumes for
-    # ever, which is right for a flat-rate subscription and wrong for a model
-    # billed by the token.
-    "session_turns": 12,
+    #     turn  context   requests   cost
+    #        1     74k       18      $2.24   (cold: contract + method + handoff)
+    #        3     96k        8      $1.36
+    #        8    152k       36      $4.49   (the turn that also ran `board wait`)
+    #       11    176k        8      $2.43
+    #     session total, 11 cards                     $25.40
+    #
+    # The context column is the whole story. It is not the cache expiring --
+    # a `--continue` turn re-caches only its increment, measured at 40 tokens on
+    # a 43k conversation -- it is that every one of a turn's round trips is
+    # charged for the whole conversation behind it, at $0.50 per million to read
+    # it back plus a cache write that scales with its size. Nineteen turns of
+    # history that the twentieth turn will not look at are paid for on every one
+    # of that turn's eight round trips.
+    #
+    # A fresh session pays instead for what it reads back off disk, and that is
+    # now two commands: `board brief` (the method, this course's unbendable
+    # rules, the handoff, the last turn's note) and `board recap` (the lesson).
+    # Together about 4.5k tokens against the 24k of documents a cold turn used to
+    # read, and the harness prefix itself is free -- measured: a second `claude
+    # -p` in the same directory reads its 28k system prompt out of cache for
+    # $0.015, because the cache is keyed on the prefix and not on the session.
+    #
+    # So a turn holds ~22k instead of 176k, and holds it whether it is turn 2 or
+    # turn 40. What made this possible is that nothing is carried in the
+    # conversation any more: the lesson is on disk, and what the tutor was
+    # THINKING is on disk too, in `live/NEXT.md`, written by every turn with
+    # `board note` and read by the next one out of `board brief`.
+    #
+    # 0 resumes for ever, which is the right answer on a flat rate and the wrong
+    # one on a meter. Any N recycles after N turns, which is what this was.
+    "session_turns": 1,
+    # ---------------------------------------------------------------------
+    # How many tokens the plan's rolling window holds, for `tutor cost`
+    # ---------------------------------------------------------------------
+    # On a subscription -- Max, Team, Enterprise -- what runs out is not money
+    # but a five-hour allowance, and nothing published says how many tokens that
+    # is or how the kinds are weighted. So this is a CALIBRATION and it is null
+    # until somebody sets it: `tutor cost` reports tokens, which is what any
+    # weighting is applied to, and adds a percentage only when this says what to
+    # divide by.
+    #
+    # Calibrate it from one observation. A turn that a person saw take 5% of
+    # their window, measured at 1.39M tokens, puts the window near 28M -- so
+    # `"quota_tokens": 28000000`. It will be approximate, because a cache read
+    # and an output token are certainly not weighted the same; it is still worth
+    # far more than nothing, because the thing worth watching is whether the
+    # figure is FLAT across a lesson, and a constant factor does not affect that.
+    "quota_tokens": None,
 }
 
 
@@ -385,6 +469,148 @@ def turn_output(path, offset, cap=20000):
             return fh.read()
     except OSError:
         return ""
+
+
+# ---------------------------------------------------------------------------
+# What a turn cost, measured rather than argued about
+# ---------------------------------------------------------------------------
+# Every decision in this file about reading, resuming and re-reading is a
+# decision about money, and until now not one of them could be checked. The
+# numbers that justified them were read out of `~/.claude.json` and a session
+# transcript by hand, after the fact, by somebody who knew where to look -- so
+# the next change to any of it would have been guesswork wearing a comment.
+#
+# `--output-format json` makes the agent say what its turn cost. This writes it
+# down, one line per turn, and `tutor cost` adds it up. The cost of the
+# accounting is zero: it is a field in output the daemon was already logging.
+#
+# `usage` in that JSON is cumulative for the whole invocation -- every round trip
+# the turn took, not the last one. Measured: a five-round-trip turn reports
+# cache_read 152,020, which is the sum of its five requests and not any one of
+# them. That is exactly the number worth watching, because ROUND TRIPS x CONTEXT
+# is what a turn is billed for.
+COST_LOG = "cost.jsonl"
+
+
+def with_usage(spec, cmd):
+    """The turn's command, plus whatever makes this agent report what it cost.
+
+    Appended here rather than written into the recipe, because a machine's
+    config file overrides `agents` one level deep and a config holding a
+    verbatim copy of an older recipe would otherwise stop reporting without
+    saying so. Idempotent: a recipe that already carries the flag is left alone.
+    """
+    extra = [a for a in (spec.get("usage_args") or []) if a not in cmd]
+    extra += [a for a in (spec.get("extra_args") or []) if a not in cmd]
+    return list(cmd) + extra
+
+
+def read_turn_usage(path, offset, kind):
+    """What the agent said this turn cost, or {} if it did not say.
+
+    `kind` is the recipe's `usage` field, so an agent that reports nothing --
+    the free tutor, codex, anything driven by a script -- costs nothing here and
+    is simply not accounted for. Never raises: this is bookkeeping beside a
+    lesson, and a lesson does not stop because a number could not be parsed.
+    """
+    if kind != "claude-json":
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            fh.seek(max(0, offset))
+            blob = fh.read(4000000)
+    except OSError:
+        return {}
+    # The last line of the turn that is a result object. Not the only line:
+    # warnings, and anything the agent printed on its way, share this stream.
+    for line in reversed(blob.splitlines()):
+        line = line.strip()
+        if not line.startswith("{") or '"result"' not in line:
+            continue
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        if d.get("type") != "result":
+            continue
+        u = d.get("usage") or {}
+        models = d.get("modelUsage") or {}
+        billed = (int(u.get("input_tokens") or 0)
+                  + int(u.get("output_tokens") or 0)
+                  + int(u.get("cache_creation_input_tokens") or 0)
+                  + int(u.get("cache_read_input_tokens") or 0))
+        return {
+            # Everything that went through the model this turn. On a
+            # subscription this is the number that matters: what runs out is a
+            # five-hour allowance, and a percentage of it is computed from
+            # tokens rather than from dollars.
+            "tokens": billed,
+            "in": int(u.get("input_tokens") or 0),
+            "out": int(u.get("output_tokens") or 0),
+            "cache_write": int(u.get("cache_creation_input_tokens") or 0),
+            "cache_read": int(u.get("cache_read_input_tokens") or 0),
+            # Round trips. This is the lever a prompt can actually pull, and the
+            # one that turned a turn into $4.49 when it also ran `board wait`.
+            "requests": int(d.get("num_turns") or 0),
+            "usd": float(d.get("total_cost_usd") or 0.0),
+            "models": sorted(models),
+            "session": d.get("session_id") or "",
+        }
+    return {}
+
+
+def record_cost(live, log, turn, agent_name, fresh, usage):
+    """One line per turn in `live/cost.jsonl`, and one in the log.
+
+    `live/` is not tracked, so this is a per-machine record of a per-machine
+    bill, which is the right scope: the allowance that paid for it belongs to
+    this machine's account.
+    """
+    if not usage:
+        return
+    rec = dict(usage)
+    rec.update({"t": time.time(), "iso": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "turn": turn, "agent": agent_name, "fresh": bool(fresh),
+                "host": this_host()})
+    try:
+        with open(os.path.join(live, COST_LOG), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec) + "\n")
+    except OSError:
+        pass
+    try:
+        log.write("-- turn %d: %s tokens over %d round trip(s) "
+                  "(cache read %s, cache written %s, out %s), $%.3f\n"
+                  % (turn, thousands(rec.get("tokens", 0)), rec["requests"],
+                     thousands(rec["cache_read"]), thousands(rec["cache_write"]),
+                     thousands(rec["out"]), rec["usd"]))
+    except (OSError, ValueError):
+        pass
+
+
+def thousands(n):
+    return "%.1fk" % (n / 1000.0) if n >= 1000 else str(n)
+
+
+def read_costs(root):
+    try:
+        with open(os.path.join(root, "live", COST_LOG), "r", encoding="utf-8") as fh:
+            return [json.loads(l) for l in fh if l.strip()]
+    except (OSError, ValueError):
+        out = []
+        try:
+            with open(os.path.join(root, "live", COST_LOG), "r",
+                      encoding="utf-8") as fh:
+                for l in fh:
+                    l = l.strip()
+                    if not l:
+                        continue
+                    try:
+                        out.append(json.loads(l))
+                    except ValueError:
+                        pass
+        except OSError:
+            pass
+        return out
 
 
 def wait_for_takeover(running, seconds):
@@ -627,17 +853,19 @@ turns.
 # opening cold and asking the student to recap their own lesson.
 HANDOFF_PROMPT = (
     "This session is ending now. You get one turn and nobody will read stdout.\n\n"
-    # This turn runs on the resumed session, so the lesson is already in front of
-    # it. It used to be told nothing of the sort and would re-read the cards, the
-    # contract and the old handoff before writing a word.
-    "You have this session in your context. Do not re-read the cards, the "
-    "contract, TEACHING.md or the old HANDOFF.md to write this. If the earlier "
-    "part of the lesson is missing from it, `board recap` gives you the whole "
-    "shape in one call.\n\n"
-    "Write `HANDOFF.md` at the root of this repository -- replacing it, not "
-    "appending. **Keep it under 350 words.** It is read in full at the start of "
-    "every future session, so length here is a cost paid over and over, and a "
-    "long one gets skimmed. Short and concrete:\n\n"
+    # A teaching turn is its own session now, so this one is resumed onto the
+    # LAST turn and holds one card, not the evening. Reading the lesson back is
+    # therefore not optional here -- but it is one call, not twelve.
+    "Run `board recap` first: this session holds only the last turn of the "
+    "lesson, and the recap is the whole shape of it in one call. Do not read "
+    "live/cards/ file by file, and do not read AI_INSTRUCTIONS.md, "
+    "live/TEACHING.md or the old HANDOFF.md to write this.\n\n"
+    "Then write the handoff by piping it to `board handoff` -- that command is "
+    "the only thing that writes HANDOFF.md, it stamps the chapter for you, and "
+    "**it refuses a body over 350 words.** The cap is not a suggestion: this "
+    "file is read at the start of every turn of every future session, so length "
+    "here is a cost paid over and over. If it refuses, cut it and pipe it "
+    "again. Short and concrete:\n\n"
     "- where the student got to, by topic, not by card number\n"
     "- what they got wrong, and what the misunderstanding actually was\n"
     "- what they got right, so it is not re-taught\n"
@@ -710,53 +938,84 @@ def handoff_clause(root):
             else NO_HANDOFF_CLAUSE)
 
 
-HEADLESS_FIRST_PROMPT = (
-    "You are running headless: there is no terminal and nobody will read stdout. "
-    "The student is on the board.\n\n"
-    "Read these once, in this order: AI_INSTRUCTIONS.md (the contract for this "
-    "course), live/TEACHING.md (the method -- the lesson is EXERCISES, not "
-    "explanation: the section's exercises first, a manageable few, each one "
-    "stated in full, laddered with tiny things the student works themselves, "
-    "then re-posed in full; one question per turn, then stop). %(handoff)s\n\n"
-    # One call instead of one per card. The lesson is a transcript and an
-    # assistant resuming it needs its shape, its last card and the student's last
-    # move -- not every card re-read in full.
-    "Then run `board recap`. That one command prints the session, every card as a "
-    "single line, the newest card in full and the student's latest turn with its "
-    "file paths. Do not read live/cards/ file by file; the recap is the lesson.\n\n"
-    "They just sent this:\n\n%(inbox)s\n\n"
-    "That text is the inbox -- it already carries every file path, so do not run "
-    "`board inbox` as well; it has been marked read and will tell you nothing. "
-    "Open anything the text names -- handwriting and PDFs: read them however your "
-    "model sees images, opening the file directly or calling `describe_image` on "
-    "the path and reading its OCR -- "
-    "then reply by writing ONE new card into live/cards/. Do not write more than "
-    "one card. Do not ask them to type in a terminal.\n\n"
-    "Write that card FIRST, before any verifying, filing or handoff. It appears on "
-    "their board the instant the file exists, so everything else you do happens "
-    "while they are reading rather than while they are staring at a blank page.\n\n"
-    "What you have read stays in this session for the turns that follow. You will "
-    "not be asked to read it again."
+# The single line every turn ends on, and the two things it must not do. Both
+# were measured costing real money, and neither could be fixed by asking nicely
+# in a longer paragraph -- `board wait` and `board handoff` refuse now.
+TURN_TAIL = (
+    "Before you finish, leave the next turn a note: `board note`, at most 120 "
+    "words on stdin -- what you actually READ in their answer (the misreading, "
+    "not the mark) and the one thing you are aiming at next. Not a summary of "
+    "the lesson; `board recap` has that. This turn is its own session and "
+    "nothing you are holding survives it, so that note is the only thing that "
+    "does.\n\n"
+    "Two things not to do, both of which cost real money before they were "
+    "refused outright:\n"
+    "- **Do not run `board wait`.** A turn does not wait. The daemon that "
+    "started this turn is already blocked on the student's next message and "
+    "will hand it to a fresh turn the moment it lands. Waiting here holds this "
+    "whole conversation open while they think and then answers them inside it.\n"
+    "- **Do not touch `HANDOFF.md`.** Not a read, not an edit. The wrap-up turn "
+    "at the end of the session writes it, once, with `board handoff`. A "
+    "teaching turn that edits it pays to read five thousand tokens of it first "
+    "and hands the next turn a longer one.\n\n"
+    "End your turn when the card and the note are written."
 )
 
+HEADLESS_FIRST_PROMPT = (
+    "You are running headless: there is no terminal and nobody will read "
+    "stdout. The student is on the board.\n\n"
+    # Two calls, and they are the whole of the cold read. This used to be three
+    # documents in three round trips -- AI_INSTRUCTIONS.md, live/TEACHING.md and
+    # HANDOFF.md, 24k tokens in Galois Theory -- read before a word of teaching
+    # was written, and then carried for the rest of the session. `board brief`
+    # is the tenth of that which a turn acts on.
+    "Run these two commands first, and read nothing else before them:\n"
+    "- `board brief` -- the method, this course's rules that do not bend, the "
+    "handoff from the last session, and the note the turn before this one left "
+    "you.\n"
+    "- `board recap` -- the lesson: every card as a line, the newest in full, "
+    "the student's own turns, and which question is still open.\n\n"
+    "**Do not read AI_INSTRUCTIONS.md, live/TEACHING.md, live/BRIEF.md or "
+    "HANDOFF.md, and do not read live/cards/ file by file.** Those two commands "
+    "are what a turn needs; the documents are on disk and the brief names their "
+    "sections for the rare rule that needs its detail. Every round trip you "
+    "take is charged for the whole conversation behind it, so a document read "
+    "here is paid for again by everything you do afterwards.\n\n"
+    "They just sent this:\n\n%(inbox)s\n\n"
+    "That text is the inbox -- it already carries every file path, so do not "
+    "run `board inbox` as well; it has been marked read and will tell you "
+    "nothing. Open anything the text names: handwriting is a PNG and a problem "
+    "sheet a PDF, read however your model sees images -- opening the file "
+    "directly, or calling `describe_image` on the path and reading its OCR.\n\n"
+    "Then reply by writing ONE new card into live/cards/. Not two. Write that "
+    "card FIRST, before any verifying, filing or transcribing: it appears on "
+    "their board the instant the file exists, so everything else you do happens "
+    "while they are reading rather than while they are staring at a blank "
+    "page.\n\n"
+    + TURN_TAIL
+)
+
+# Kept for `session_turns` other than 1 -- a flat-rate machine has no reason to
+# start a fresh session, and this is what a resumed turn is told. It is no
+# longer the common case.
 HEADLESS_RESUME_PROMPT = (
     "Same session, next turn. Your own conversation is resumed, so you already "
-    "hold the contract, the method, the handoff and every card you have written. "
-    "**Do not re-read AI_INSTRUCTIONS.md, live/TEACHING.md, live/BRIEF.md, "
-    "HANDOFF.md, or the cards in live/cards/.** Re-reading what is already in "
-    "front of you is the most expensive thing you can do here and it teaches "
-    "nothing.\n\n"
+    "hold the brief, the lesson and every card you have written. **Do not "
+    "re-read AI_INSTRUCTIONS.md, live/TEACHING.md, live/BRIEF.md, HANDOFF.md, "
+    "or the cards in live/cards/, and do not run `board brief` again.** "
+    "Re-reading what is already in front of you is the most expensive thing you "
+    "can do here and it teaches nothing.\n\n"
     "They just sent this:\n\n%(inbox)s\n\n"
     "That text is the inbox and carries every file path, so do not run `board "
-    "inbox` as well. Open what it names -- handwriting and PDFs, read however your "
-    "model sees images (open directly, or `describe_image` on the path and read "
-    "its OCR) -- and reply by writing ONE new "
-    "card into live/cards/. Write the "
-    "card FIRST; nothing else needs reading before it.\n\n"
+    "inbox` as well. Open what it names -- handwriting and PDFs, read however "
+    "your model sees images (open directly, or `describe_image` on the path and "
+    "read its OCR) -- and reply by writing ONE new card into live/cards/. Write "
+    "the card FIRST; nothing else needs reading before it.\n\n"
     "Teach the way you already read: locate the break in a wrong answer rather "
     "than repairing it, one question, then stop. If you have genuinely lost the "
     "thread, `board recap` gives you the whole lesson in one call -- reading the "
-    "cards one by one is never the answer."
+    "cards one by one is never the answer.\n\n"
+    + TURN_TAIL
 )
 
 
@@ -1637,9 +1896,14 @@ def headless(cfg, course, agent_name, session):
             out, pending = pending, None
             log.write("-- answering the message whose turn failed before\n")
         else:
+            # `--force`, because `board wait` now refuses a caller that is
+            # inside a headless turn -- and this is the one caller that is not.
+            # The guard reads `agent.json`, which still says `working` from the
+            # turn that just finished at the moment this starts, so the daemon
+            # cannot be told apart from its own turn by state alone.
             running["waiter"] = subprocess.Popen(
-                [sys.executable, BOARD, "wait", "--timeout", "300"], cwd=root,
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                [sys.executable, BOARD, "wait", "--timeout", "300", "--force"],
+                cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             raw = running["waiter"].communicate()[0]
             code = running["waiter"].returncode
             out = raw.decode("utf-8", "replace")
@@ -1709,7 +1973,7 @@ def headless(cfg, course, agent_name, session):
                             if handoff.handoff_applies(root, chapter_now(root))
                             else NO_HANDOFF_CLAUSE)}
         prompt = out.strip() if spec.get("raw_prompt") else template % fill
-        cmd = [a.replace("{prompt}", prompt) for a in use]
+        cmd = with_usage(spec, [a.replace("{prompt}", prompt) for a in use])
         # Where this turn's own words begin, so that if it fails we can read
         # back what it said rather than guess at why.
         mark = os.path.getsize(logpath) if os.path.exists(logpath) else 0
@@ -1725,8 +1989,8 @@ def headless(cfg, course, agent_name, session):
                 # -- would produce a card written against no contract at all.
                 # Retry as what it actually is: a first turn.
                 log.write("!! resume failed, retrying as a fresh turn\n")
-                cmd = [a.replace("{prompt}", HEADLESS_FIRST_PROMPT % fill)
-                       for a in first]
+                cmd = with_usage(spec, [a.replace("{prompt}", HEADLESS_FIRST_PROMPT % fill)
+                                        for a in first])
                 p = subprocess.run(cmd, cwd=root, stdout=log, stderr=subprocess.STDOUT,
                                    timeout=cfg.get("headless_timeout", 900))
                 err = None if p.returncode == 0 else "exit %d" % p.returncode
@@ -1830,6 +2094,11 @@ def headless(cfg, course, agent_name, session):
                         failed_at=time.time(), retrying=pending is not None)
         else:
             carried = 1 if fresh else carried + 1
+            # What it cost, from the turn's own mouth. Written before anything
+            # else here, because this is the whole justification for a turn
+            # being its own session and it is worth nothing unmeasured.
+            record_cost(live, log, turns, agent_name, fresh,
+                        read_turn_usage(logpath, mark, spec.get("usage")))
             # A turn that worked on the agent we actually want is proof the
             # allowance is back, whatever the record still says. The reset time
             # a provider hands out is a promise, and this is a measurement.
@@ -1860,10 +2129,17 @@ def headless(cfg, course, agent_name, session):
         # A script agent may have its own way to write the handoff; default to the
         # ordinary turn recipe otherwise.
         wrap = spec.get("handoff") or recipe
-        cmd = [a.replace("{prompt}", HANDOFF_PROMPT) for a in wrap]
+        cmd = with_usage(spec, [a.replace("{prompt}", HANDOFF_PROMPT) for a in wrap])
+        mark = os.path.getsize(logpath) if os.path.exists(logpath) else 0
         try:
             subprocess.run(cmd, cwd=root, stdout=log, stderr=subprocess.STDOUT,
                            timeout=cfg.get("handoff_timeout", 600))
+            # The wrap-up is a turn and it is billed like one, so it is counted
+            # like one. It used to be the most expensive turn of the session --
+            # it re-read the cards, the contract and the old handoff before
+            # writing a word -- and nothing would have shown that.
+            record_cost(live, log, turns + 1, agent_name, False,
+                        read_turn_usage(logpath, mark, spec.get("usage")))
             wrote = os.path.isfile(os.path.join(root, "HANDOFF.md"))
             # Say which chapter it is about, now, while this is the only process
             # that knows. The wrap-up is a model call and takes as long as it
@@ -2279,6 +2555,130 @@ def ensure_agent(cfg, course, args, say):
     return (", %s attached" % name) if code == 0 else (", no tutor (%s)" % msg)
 
 
+def cmd_cost(cfg, args):
+    """What the turns on this machine actually cost, per turn and in total.
+
+        tutor cost              the course an assistant is attached to
+        tutor cost galois       a course by name
+        tutor cost --all        every course on this machine, one line each
+        tutor cost galois --turns   every turn, oldest first
+
+    This is the only honest answer to "is the new arrangement cheaper", and it
+    is the reason `usage_args` is on the recipe. Read straight out of
+    `live/cost.jsonl`, which every headless turn appends one line to.
+
+    TOKENS is the headline, not dollars. On a subscription what runs out is a
+    five-hour allowance, and a percentage of that is computed from what went
+    through the model -- input, output, and cache both written and read. Set
+    `quota_tokens` in the config and this says what share of a window a turn
+    took; leave it null and it says the tokens and lets you divide.
+
+    Two other columns matter. ROUND TRIPS is what a prompt can change, and the
+    only thing that turned one turn into 1.4M tokens. And the LAST line is the
+    one to read: a second half that costs more per turn than the first means a
+    turn is carrying context it should have read back off disk, which is the
+    defect this whole arrangement exists to prevent and the one that is
+    invisible in every other kind of monitoring, because nothing is broken while
+    it happens.
+    """
+    found = courses(cfg)
+    everything = "--all" in args
+    per_turn = "--turns" in args
+    rest = [a for a in args if not a.startswith("--")]
+    try:
+        window = int(cfg.get("quota_tokens") or 0)
+    except (TypeError, ValueError):
+        window = 0
+
+    def share(tokens):
+        """That many tokens as a share of one allowance window, if calibrated."""
+        return ("  (%.2f%% of a window)" % (100.0 * tokens / window)) if window else ""
+
+    if everything:
+        rows = [(c, read_costs(c["root"])) for c in found]
+        rows = [(c, r) for c, r in rows if r]
+        if not rows:
+            print("no turn has reported a cost on this machine yet.")
+            print("Turns record one only on a recipe that says how -- "
+                  "`usage: claude-json` on the claude recipe; see `tutor --agents`.")
+            return 0
+        print("%-22s %6s %8s %11s %10s" %
+              ("course", "turns", "trips/t", "tokens/t", "total"))
+        for c, r in sorted(rows, key=lambda x: -sum(t.get("tokens", 0) for t in x[1])):
+            n = len(r)
+            print("%-22s %6d %8.1f %11s %9.2f" %
+                  (c["dir"][:22], n,
+                   sum(t.get("requests", 0) for t in r) / float(n),
+                   thousands(sum(t.get("tokens", 0) for t in r) / float(n)),
+                   sum(t.get("usd", 0) for t in r)))
+        total = sum(t.get("tokens", 0) for _, r in rows for t in r)
+        print("\n%s tokens across %d turn(s) on %s%s"
+              % (thousands(total), sum(len(r) for _, r in rows), this_host(),
+                 share(total)))
+        return 0
+
+    if rest:
+        course = pick(found, rest[0])
+    else:
+        # The course an assistant is actually attached to, or the only one that
+        # has ever billed anything. Asking "which course?" when there is exactly
+        # one answer is the sort of question a tool should not need to ask.
+        course = next((c for c in found if agent_live(c["root"])), None)
+        if not course:
+            billed = [c for c in found if read_costs(c["root"])]
+            course = billed[0] if len(billed) == 1 else None
+    if not course:
+        print("which course? try: tutor cost --all", file=sys.stderr)
+        return 1
+    rows = read_costs(course["root"])
+    if not rows:
+        print("%s: no turn has reported a cost here yet." % course["dir"])
+        return 0
+
+    if per_turn:
+        print("%-19s %5s %-7s %6s %10s %10s %8s %8s %8s" %
+              ("when", "turn", "session", "trips", "tokens", "cacheread",
+               "cachewrit", "out", "cost"))
+        for t in rows:
+            print("%-19s %5s %-7s %6d %10s %10s %10s %8s %8.3f" %
+                  (t.get("iso", "?"), t.get("turn", "?"),
+                   "fresh" if t.get("fresh") else "resumed",
+                   t.get("requests", 0), thousands(t.get("tokens", 0)),
+                   thousands(t.get("cache_read", 0)),
+                   thousands(t.get("cache_write", 0)), thousands(t.get("out", 0)),
+                   t.get("usd", 0)))
+        print()
+
+    n = len(rows)
+    tokens = sum(t.get("tokens", 0) for t in rows)
+    fresh = sum(1 for t in rows if t.get("fresh"))
+    print("%s — %d turn(s) on %s, %d of them their own session"
+          % (course["dir"], n, this_host(), fresh))
+    print("  %s tokens a turn%s, %.1f round trips a turn"
+          % (thousands(tokens / float(n)), share(tokens / float(n)),
+             sum(t.get("requests", 0) for t in rows) / float(n)))
+    print("  %s tokens in total%s, $%.2f" % (thousands(tokens), share(tokens),
+                                             sum(t.get("usd", 0) for t in rows)))
+    dear = max(rows, key=lambda t: t.get("tokens", 0))
+    print("  dearest turn: %s tokens%s over %d round trips (%s)"
+          % (thousands(dear.get("tokens", 0)), share(dear.get("tokens", 0)),
+             dear.get("requests", 0), dear.get("iso", "?")))
+    if not window:
+        print("  set `quota_tokens` in the config to see these as a share of "
+              "one allowance window")
+    # The number this whole arrangement exists to hold flat. A rising trend here
+    # means a turn is carrying something it should have read back off disk.
+    if n >= 6:
+        half = n // 2
+        early = sum(t.get("tokens", 0) for t in rows[:half]) / float(half)
+        late = sum(t.get("tokens", 0) for t in rows[half:]) / float(n - half)
+        print("  first half %s a turn, second half %s -- %s"
+              % (thousands(early), thousands(late),
+                 "flat, which is the point" if late <= early * 1.25
+                 else "RISING: a turn is carrying context it could read back"))
+    return 0
+
+
 def cmd_where(cfg, args):
     """What is up, and whether anything is listening."""
     host = this_host()
@@ -2395,6 +2795,9 @@ def main(argv):
     if args and args[0] == "where":
         return cmd_where(cfg, args[1:])
 
+    if args and args[0] == "cost":
+        return cmd_cost(cfg, args[1:])
+
     if args and args[0] == "resume":
         rest = argv[argv.index("resume") + 1:]
         # Before anything, and before the course is caught up: this is what a
@@ -2489,9 +2892,13 @@ def main(argv):
         return 1
 
     cmd = list(spec.get("cmd", []))
-    opener = ("Read AI_INSTRUCTIONS.md, live/BRIEF.md and live/TEACHING.md, then run "
-              "`board recap` for the lesson so far and begin. The board is already "
-              "running; do not start another.")
+    opener = ("Read live/BRIEF.md, then run `board brief` and `board recap` and "
+              "begin. Those two commands are the method, this course's unbendable "
+              "rules, the handoff and the lesson; AI_INSTRUCTIONS.md and "
+              "live/TEACHING.md are on disk for the rule that needs its detail, "
+              "and reading either in full costs about ten thousand tokens you "
+              "will then carry all session. The board is already running; do not "
+              "start another.")
     if spec.get("prompt") == "argv":
         cmd.append(opener)
     else:

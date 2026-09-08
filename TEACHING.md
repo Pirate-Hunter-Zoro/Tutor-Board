@@ -242,12 +242,39 @@ not invent another.
 
 ---
 
+## A turn is its own session
+
+You are not carrying a conversation. Each turn starts fresh, reads the two
+commands it needs — `board brief` for the method, this course's unbendable rules,
+the handoff and the note the last turn left; `board recap` for the lesson — and
+ends. Nothing else survives it.
+
+That is a cost decision and it is not a small one. A turn is billed for its round
+trips multiplied by the conversation behind each of them, so a session carried
+across twelve turns pays on turn twelve for eleven turns of history it will never
+look at again. Measured in Galois Theory: turn 3 held 96k tokens and cost $1.36;
+turn 11 held 176k and cost $2.43; the session came to $25.40 for eleven cards. A
+turn that reads what it needs off disk holds about 22k, whether it is turn 2 or
+turn 40.
+
+Two rules come out of it, and both are enforced by the commands rather than left
+to you:
+
+- **Leave the next turn a note.** `board note`, at most 120 words, on what you
+  actually read in their answer — the misreading, not the mark — and the one
+  thing you are aiming at next. The recap carries the lesson; only the note
+  carries your reading of it.
+- **Do not wait.** `board wait` belongs to the daemon that started you, and it is
+  already blocked on the student's next message. A turn that waits as well holds
+  its whole conversation open while they think, and then answers them inside it —
+  one such turn took 36 round trips and cost $4.49, four times what a turn should.
+
 ## Write the card before you do anything else
 
 The student is watching a blank board while you work. Whatever else a turn
-involves — checking a macro, updating `HANDOFF.md`, filing a page, reading ahead,
-transcribing a problem statement into the `.tex` — **write the card first and let
-it land.** There is no exception to this, and nothing else in this file overrides
+involves — checking a macro, filing a page, reading ahead, transcribing a problem
+statement into the `.tex`, leaving the next turn a note — **write the card first
+and let it land.** There is no exception to this, and nothing else in this file overrides
 it: where another rule says something must happen "first", it means first among
 the things that happen *after* the card. It appears on the board the instant
 the file exists, so everything you do afterwards happens while they are already
@@ -535,10 +562,18 @@ reason to hurry a section to a conclusion, and no reason to cover an exercise
 badly rather than leave it for a return visit. Say, at the end, what was left
 undone — it is a note to the student and to whoever picks this up next.
 
-Write `HANDOFF.md` before the session ends: which section, which exercises were
-done, what the student got wrong and what the misunderstanding actually was, and
-which exercises were deliberately left. That file is the only continuity there
-is.
+Write `HANDOFF.md` before the session ends — with `board handoff`, which is the
+only thing that writes it, and which refuses a body over 350 words: which
+section, which exercises were done, what the student got wrong and what the
+misunderstanding actually was, and which exercises were deliberately left. That
+file is the only continuity that crosses a machine.
+
+**During the session, leave `board note` instead.** It is at most 120 words and
+it is what one turn tells the next. Do not edit `HANDOFF.md` on a teaching turn:
+editing it means reading it first, five thousand tokens of it, and handing the
+turn after you a longer one. Doing that on every turn for a fortnight is how the
+handoff in Galois Theory reached 3,824 words against a cap of 350, and how every
+turn after that came to pay for reading it.
 
 ---
 

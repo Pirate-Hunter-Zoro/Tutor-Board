@@ -45,6 +45,72 @@ now: one interface, one method, whether the exercises are proofs or functions.
 >   board that is answering) but it is worth confirming: the port the HTTPS name points at should
 >   be the course they are working in.
 >
+> ### Where this is right now, 8 September 2026
+>
+> **A turn is its own session, because what a turn costs is round trips times the conversation
+> behind them.** Reported in one sentence — *"one response in Galois-Theory just used 5% of my
+> five-hour quota"* — and the agent's own transcript holds the whole of it. Eleven cards, one
+> resumed session, `claude-opus-5[1m]`, **17.9M tokens**:
+>
+> | turn | context held | round trips | tokens | cost |
+> |---|---|---|---|---|
+> | 1 (cold) | 74k | 18 | 1.14M | $2.24 |
+> | 3 | 96k | 8 | 0.76M | $1.36 |
+> | 8 | 152k | 36 | **5.22M** | $4.49 |
+> | 11 | 176k | 8 | 1.39M | $2.43 |
+>
+> Measured after the change, on a copy of the same course: **225k tokens over 6 round trips**, and
+> 443k on the first turn in a directory whose harness prefix is not yet cached. One seventh of
+> what a turn was taking, and it does not climb.
+>
+> Four defects, and the arithmetic was the same in all four: something was being read or carried
+> that was already on disk.
+>
+> - **The turn was running `board wait` at the end of itself.** That is turn 8. The course
+>   contract documents `board wait` as the way to be woken — true, and right for a person at a
+>   terminal — so a headless tutor that read the contract in full did as it was told: it held its
+>   whole conversation open while the student thought, took their next message out from under the
+>   daemon's own waiter, and answered it inside the previous turn's context. Two cards, 36 round
+>   trips, 5.05M cached input tokens, $4.49. No prompt wording can fix an instruction that is
+>   correct in the document it appears in, so `board wait` now asks `live/agent.json` whether a
+>   headless turn is in flight and refuses — exit 0, saying what to do instead, because a
+>   non-zero exit reads to an agent as a broken command and gets retried. The daemon's own waiter
+>   passes `--force`.
+> - **`HANDOFF.md` was 3,824 words against a documented cap of 350.** `live/TEACHING.md` listed
+>   "updating `HANDOFF.md`" among the things a turn involves, so every turn read it (5.4k tokens),
+>   edited it, and handed the next turn a longer one. Each edit was reasonable. Now `board
+>   handoff` is the only writer, it **refuses** a body over the cap rather than trimming one — the
+>   useful half of a handoff is at the bottom — and a teaching turn is told not to touch it at all.
+> - **A cold turn read three whole documents in three round trips.**
+>   `AI_INSTRUCTIONS.md` 9.1k, `live/TEACHING.md` 9.5k, `HANDOFF.md` 5.4k. `board brief` is the
+>   tenth of that a turn acts on: the method as a paragraph, this course's own *rules that do not
+>   bend* pulled out of its contract, the chapter's handoff, and the note the last turn left. The
+>   documents stay on disk with their sections named for the rare rule that needs its detail.
+> - **`session_turns` was 12 and the arithmetic says 1.** It is not the cache expiring — a
+>   `--continue` turn re-caches only its increment, measured at 40 tokens on a 43k conversation —
+>   it is that turn eleven paid on each of its eight round trips to read back ten turns it would
+>   never look at again. A fresh session costs nothing for the harness: a second `claude -p` in
+>   the same directory reads its 28k system prompt out of cache for $0.015, because the cache is
+>   keyed on the prefix and not on the session. So every turn is cold, holds ~22k whether it is
+>   turn 2 or turn 40, and what the tutor was *thinking* goes to disk too — `board note`, at most
+>   120 words in `live/NEXT.md`, read by the next turn out of the brief.
+>
+> **And it is measured now, which it was not.** Every number above was dug out of a session
+> transcript by hand, after the fact. `--output-format json` on the recipe makes the agent report
+> what its turn cost; every headless turn appends a line to `live/cost.jsonl` and `tutor cost`
+> adds it up, including the one line that matters — whether the second half of a session cost
+> more per turn than the first. The flag is appended from the recipe's `usage_args` rather than
+> written into its `headless` argv, because a machine's config overrides `agents` one level deep
+> and this machine holds a verbatim copy of the old claude recipe; in the argv, every such
+> machine would have stopped reporting silently.
+>
+> **Not fixed, and worth knowing.** The `board wait` paragraph is still in each course's own
+> `AI_INSTRUCTIONS.md`, where it is correct for the interactive session it was written for. The
+> guard is what stops it costing money, not the wording. And the handoff already on disk in
+> Galois Theory is still over its cap: the next wrap-up turn replaces it, and until then
+> `board brief` prints it in full and says by how much it is over — losing continuity is worse
+> than paying for it once.
+>
 > ### Where this is right now, 7 September 2026 (evening)
 >
 > **A board keeps the lesson it is holding.** Reported in four words — *"Galois-Theory tutor
@@ -2402,35 +2468,167 @@ tailnet, with its own clones of the course repositories, kept in step by pushing
 
 ### What a session costs, and why that is a design question
 
-The tutor may be a model billed by the token rather than a flat-rate
-subscription, and a headless course is a long sequence of turns against a
-conversation that only grows. Two facts drive everything here: **a re-read is
-charged again for the rest of the turn and again for the rest of the session**,
-because every round trip resends the whole conversation; and **the lesson is
-already on disk**, so nothing has to be carried in the conversation to survive.
+**A turn is charged for its round trips multiplied by the conversation behind
+each of them.** That sentence is the whole of it, and everything below follows.
+The lesson is already on disk, so nothing has to be carried in a conversation to
+survive — and carrying it anyway is the most expensive thing this tool can do.
 
-- **Two prompts, not one.** A cold turn reads the contract, `TEACHING.md` and
-  `HANDOFF.md` once. Every turn after it runs on the agent's own resumed session
-  and is told, in as many words, *not* to re-read them. The single prompt this
-  replaced told every turn to read the lot — roughly fourteen thousand tokens of
-  documents the agent was already holding, plus one round trip per card in the
-  lesson, plus a `board inbox` that answered "inbox empty" because the wake-up
-  had already marked it read.
-- **`board recap` reads a lesson in one call.** Every card as a line, the newest
-  in full, the student's own turns, and which question is still open. Reading a
-  twelve-card lesson card by card is twelve round trips for what fits in one, and
-  it is what picking a course up cold used to mean.
-- **Sessions are recycled.** `session_turns` in the config (12 by default)
-  starts a fresh session once carrying the old one costs more than reading the
-  lesson back off disk. Set it to 0 to resume for ever, which is the right answer
-  on a flat rate and the wrong one on a meter.
-- **The handoff is capped** at 350 words and is no longer invited to review the
-  course's documentation on its way out. It is read in full at the start of every
-  future session, so length there is a cost paid over and over.
+The unit that matters is **tokens through the model** — input, output, and cache
+both written and read — because on a subscription what runs out is a five-hour
+allowance and that is what it is computed from. Dollars are given below as well,
+for a machine on a metered key, but they are the second column.
+
+It was carrying the conversation. Measured in Galois Theory on 8 September 2026 —
+eleven cards on `claude-opus-5[1m]`, one session resumed throughout, read out of
+the agent's own transcript:
+
+| turn | context held | round trips | tokens | cost |
+|---|---|---|---|---|
+| 1 (cold) | 74k | 18 | 1.14M | $2.24 |
+| 3 | 96k | 8 | 0.76M | $1.36 |
+| 8 | 152k | 36 | **5.22M** | $4.49 |
+| 11 | 176k | 8 | 1.39M | $2.43 |
+| **session, 11 cards** | | **150** | **17.9M** | **$25.40** |
+
+The context column is the story. It is *not* the cache expiring: a resumed turn
+re-caches only its increment, measured at 40 tokens on a 43k conversation. It is
+that turn eleven paid, on each of its eight round trips, to read back ten turns
+of history it would never look at again. 1.6M tokens a card, rising, for a lesson
+that fits on two sides of paper.
+
+**Measured after the change, on a copy of that same course:** a turn takes
+**225k tokens over 6 round trips**, and 443k on the very first turn in a
+directory whose harness prefix is not yet cached. That is **one seventh** of what
+a turn was taking, and it does not climb — so a response that took 5% of a
+five-hour window takes something near 0.7% of one now.
+
+**So a turn is its own session.** `session_turns` is 1. Every turn starts cold,
+reads what it needs back off disk in two calls, teaches, writes down what the
+next turn needs to know, and dies. Nothing accumulates, so nothing grows.
+
+- **Two calls, and they are the whole cold read.** `board brief` is the standing
+  rules — the method as a paragraph, this course's own *rules that do not bend*,
+  the chapter's handoff, and the note the last turn left. `board recap` is the
+  lesson — every card as a line, the newest in full, the student's turns, which
+  question is open. Together about 4.5k tokens. They replaced
+  `AI_INSTRUCTIONS.md` (9.1k), `live/TEACHING.md` (9.5k) and `HANDOFF.md` (5.4k)
+  read in three round trips, and the full documents are still on disk with their
+  sections named for the rare rule that needs its detail.
+- **The harness prefix is free.** A second `claude -p` in the same directory
+  reads its 28k-token system prompt out of cache for $0.015, because the cache is
+  keyed on the prefix and not on the session. Measured. This is why a fresh
+  session per turn is cheap and why it was not obvious that it would be.
+- **`live/NEXT.md` is what replaced the conversation.** A recap says what was
+  asked and what came back. It cannot say that the student is reading a ∃ as a ∀,
+  that this is the third attempt at the same line, or that the ladder is aimed at
+  the witness rather than the algebra. Every turn writes that with `board note`,
+  capped at 120 words, and the next turn reads it out of the brief.
+- **A turn does not wait, and `board wait` now refuses it.** Turn 8 above is what
+  that cost. The course contract documents `board wait` as the way to be woken —
+  true, and correct for a person at a terminal — so a headless tutor reading the
+  contract ran it at the end of its own turn, held the whole conversation open
+  while the student thought, and answered their next message inside it. Two cards
+  in one turn, 36 round trips, $4.49. No wording could fix it, so
+  `board wait` asks `live/agent.json` whether a headless turn is in flight and
+  says no; the daemon's own waiter passes `--force`, because it is the one caller
+  that is not that turn.
+- **The handoff is capped by a door, not by a request.** The prompt has said
+  "under 350 words" since the day this could bill by the token. The file was
+  3,824 words. Nothing had gone visibly wrong: `live/TEACHING.md` listed
+  "updating `HANDOFF.md`" among the things a turn involves, every turn duly read
+  it, edited it and handed the next turn a longer one, and each edit was
+  reasonable on its own. Now `board handoff` is the only thing that writes it, it
+  refuses a body over the cap rather than trimming one — the useful half of a
+  handoff is at the bottom — and a teaching turn is told not to touch it at all.
+- **The recap's own card list is bounded.** It was the last thing that grew with
+  the lesson: a hundred and seven cards is 6.4k of titles, read at the start of
+  every turn. It now names the last forty and counts the rest, which is what a
+  turn reasons about — the older end of a chapter is what `HANDOFF.md` is for —
+  and `board recap --all` still prints the lot.
+- **Sessions are still recyclable.** `session_turns: 0` resumes for ever, which
+  is right on a flat rate and wrong on a meter; any N recycles after N turns,
+  which is what this was.
+
+**What is left, and why it is left.** Two things were measured and deliberately
+not changed.
+
+*Output is the one lever left, and it is the expensive kind of token.* 3.2k
+output on the measured turn — small against 225k total, but on a metered key it
+is $0.08 of a $0.39 turn, and a card is a few hundred words, so most of it is
+thinking and tool arguments. `--effort medium` cuts it, and the recipe has an
+`extra_args` field to put it in. It is empty, because that is a teaching decision
+and not a cost decision, and this repository does not get to make it on the
+student's behalf.
+
+*The slate PNGs are fine.* Handwriting arrives at most 1415×762, about 1.2k image
+tokens, and downscaling handwriting to save a fraction of that is how a tutor
+comes to misread a proof. Measured, and left alone.
+
+*And one thing that had not gone wrong yet.* The model is `opus[1m]`, from the
+machine's own Claude Code settings, and the largest single request across every
+Galois session measured **189,588 tokens** — five per cent short of the 200k
+line above which a long context is charged and weighted differently. Twelve
+cards was under it; fourteen would not have been. A turn now holds 22k to 44k,
+so the 1M window buys nothing and the line is nowhere near. If you want the
+standard variant anyway, `extra_args: ["--model", "opus"]` on the recipe pins it
+for the tutor without touching what you use at a terminal.
 
 None of this is allowed to cost teaching quality, and the rule cuts both ways: a
 change to how the tutor teaches is also a change to what it costs, so a new rule
-in `TEACHING.md` is weighed the same way. `test/tokens.py` holds it.
+in `TEACHING.md` is weighed the same way. `test/tokens.py` holds all of it.
+
+### What it actually cost, which is not a matter of opinion
+
+Every claim above is a measurement, and the measuring is now part of the tool
+rather than something somebody did once by hand in a session transcript.
+
+`--output-format json` on the recipe makes the agent report what its turn cost.
+Every headless turn appends one line to `live/cost.jsonl`, writes a summary line
+into `agent.log`, and `tutor cost` adds it up:
+
+```
+tutor cost                # the course an assistant is attached to
+tutor cost galois --turns # every turn, oldest first
+tutor cost --all          # every course on this machine
+```
+
+```
+when                 turn session  trips     tokens  cacheread cachewrit      out     cost
+2026-09-08 11:34:11     1 fresh       10     442.6k     392.5k      43.0k     7.0k    0.804
+2026-09-08 11:38:02     2 fresh        6     225.5k     201.1k      21.2k     3.2k    0.394
+
+Galois-Theory — 2 turn(s) on compute301, 2 of them their own session
+  334.0k tokens a turn  (1.19% of a window), 8.0 round trips a turn
+  668.1k tokens in total  (2.39% of a window), $1.20
+  dearest turn: 442.6k tokens  (1.58% of a window) over 10 round trips
+  first half 442.6k a turn, second half 225.5k -- flat, which is the point
+```
+
+That last line is the one to read. A rising second half means a turn is carrying
+something it should have read back off disk, which is the defect this whole
+arrangement exists to prevent — and it is the defect that is invisible in every
+other form of monitoring, because nothing is broken while it happens.
+
+**The percentage is a calibration, not a published figure.** Nothing says how
+many tokens a five-hour window holds, or how a cache read is weighted against an
+output token. `quota_tokens` in the config is what to divide by, and it is null
+until somebody sets it: calibrate it from one observation — a turn seen taking 5%
+of the window, measured at 1.39M tokens, puts the window near 28M. It will be
+approximate. It is still worth having, because the thing worth watching is
+whether the figure is *flat* across a lesson, and a constant factor does not
+affect that.
+
+Two columns matter more than either number. **Round trips** is what a prompt can
+change, and the only thing that turned a turn into 5.22M tokens. **Cache read** is
+round trips times context: it is what grew without bound while a session was
+resumed for twelve turns, and it is what a turn being its own session holds flat.
+
+The flag is appended from the recipe's `usage_args` rather than written into its
+`headless` command, and that is not fussiness. A machine's config file overrides
+`agents` one level deep, and at least one machine here holds a verbatim copy of
+the claude recipe from an older version of this tool. Had the flag gone in the
+argv, every machine carrying such a copy would have silently stopped reporting —
+which is the one failure a measurement must not have.
 
 ### Knowing what is actually up
 
@@ -2732,6 +2930,13 @@ no student attached, writing **`HANDOFF.md`** at the root of the course: where t
 what they got wrong and what the misunderstanding actually was, what not to re-teach, and the one
 next thing to cover. If the course's README or contract drifted during the session, it fixes those
 too.
+
+**It writes it with `board handoff`, which is the only thing that writes it, and which refuses a
+body over 350 words.** That cap used to be a sentence in a prompt and the file reached 3,824
+words — because every teaching turn was reading it and editing it, and each edit was reasonable on
+its own. A teaching turn now leaves **`board note`** instead: at most 120 words in `live/NEXT.md`,
+read by the next turn out of `board brief`. The note is what one turn tells the next; the handoff
+is what one session tells the next, and it is the only one of the two that crosses a machine.
 
 The brief tells every starting assistant to read that file first. It is committed with the rest of
 the work, so it survives the machine, and it is the only continuity there is — an assistant's own
@@ -3652,7 +3857,11 @@ board push "message"             # or just do it
 board eyes                       # can the assistant driving this see images?
 board open "Galois Theory" "Ch 7 — Splitting fields"
 board next lesson splitting-fields   # -> live/cards/0001-splitting-fields.md
+board brief                      # the standing rules, in one call: the method, this
+                                 #   course's unbendable rules, the handoff, the note
 board recap                      # the lesson so far, in one call
+board note < note.md             # <=120 words for the next turn (a turn is a session)
+board handoff < handoff.md       # HANDOFF.md at session end, <=350 words. Capped.
 board inbox                      # what the student sent back, with file paths
 board slate                      # just the pages written on the iPad
 board wait --timeout 300         # block until the student sends something
@@ -3920,6 +4129,8 @@ tutorboard/        the board itself, organised by what a thing is about:
   processes tex    what is alive here, and where TeX is
   limits reasoning what a model may say, and when it may not say it
   handoff sense    what a turn means, and what it leaves behind
+  brief carry      what a turn reads before it teaches, and what it tells the
+                   next one -- a turn is its own session, so both are files
   machines.py      the other machines, and what each can teach
   net/             reaching them: tailscale, socks, boards, egress
   course/          a course on disk: repo, config, document, homework, review,
@@ -3942,6 +4153,8 @@ Per course repository, all of it ignored by git:
 live/
   state.json       course and chapter labels shown in the title bar
   cards/NNNN-*.md  the lesson, in order
+  NEXT.md          <=120 words from the last turn to this one, via `board note`
+  cost.jsonl       one line per turn: round trips, tokens, dollars. `tutor cost`
   inbox/           messages.jsonl and uploads/
   slate/           page-NN.json (strokes) and page-NN.png (what the assistant reads)
                    NN is the page's name, not its place in any list
@@ -4272,6 +4485,8 @@ python3 test/homework.py that a sitting finds its problem set, in either layout
 python3 test/teaching.py that the teaching method reaches every course
 python3 test/choice.py   that the address follows the course a person chose
 python3 test/limit.py    that a lesson moves to a machine with an allowance to teach it
+python3 test/tokens.py   what a turn is allowed to read, what it must not run, and that
+                         what it cost is measured rather than argued about
 
 bash test/all.sh         all of the above, in order. The two real-DOM suites need
                          jsdom; this fetches it on first run and carries on

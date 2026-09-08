@@ -74,6 +74,9 @@ tutorboard/
   machine processes tex what this machine IS, and what is alive on it
   limits reasoning      what a model may say, and when it may not say it
   handoff sense         what a turn means, and what it leaves behind
+  brief carry           what a turn reads before it teaches, and what it tells
+                        the next one -- a turn is its own session, so both are
+                        files rather than conversation
   machines.py           the other machines, and what each can teach
   net/                  reaching them: tailscale, socks, boards, egress
   course/               a course on disk: repo, config, document, homework,
@@ -699,17 +702,40 @@ tutorboard/
   The turn had already written a usable sentence one line above the number. `failure_reason` in
   `bin/tutor` lifts it out of the turn's own output and hands that to the board, keeping the code
   in brackets for whoever opens the log. Never stamp a bare exit code as `last_error` again.
-- **A turn pays for what it needs and never for what it already has.** The tutor
-  may be a model billed by the token, and every round trip inside a turn resends
-  the whole conversation -- so a document re-read is charged again for the rest
-  of that turn and again for the rest of the session. Hence: two headless
-  prompts, not one (a cold turn reads the contract, the method and the handoff;
-  a resumed turn is told in as many words *not* to re-read them); `board recap`,
-  which hands back the whole lesson in one call instead of one round trip per
-  card; a capped handoff, because it is read in full at the start of every
-  future session; and `session_turns`, which starts a fresh session once
-  carrying the old one costs more than reading the lesson back off disk.
-  `test/tokens.py` holds all of it.
+- **A turn is billed for its round trips multiplied by the conversation behind
+  each of them.** That is the whole arithmetic, and every reading decision in
+  `bin/tutor` follows from it. Measured on 8 September 2026 in Galois Theory,
+  eleven cards on one resumed session: turn 3 held 96k of context over 8 round
+  trips and put 0.76M tokens through the model, turn 11 held 176k over 8 and put
+  1.39M through, and the session came to 17.9M tokens ($25.40). Measured after
+  the change on a copy of the same course: 225k tokens over 6 round trips. It is
+  not the cache expiring -- a `--continue` turn re-caches only its increment, 40
+  tokens on a 43k conversation -- it is history being read back on every round
+  trip of every turn.
+  **Count tokens, not dollars.** On a subscription what runs out is a five-hour
+  allowance and that is computed from what went through the model: input, output,
+  and cache both written and read. `quota_tokens` in the config turns that into
+  a percentage, and it is a calibration rather than a published figure.
+  So: **`session_turns` is 1 and a turn is its own session.** It reads back what
+  it needs in two calls -- `board brief` for the standing rules (the method as a
+  paragraph, this course's own *rules that do not bend*, the chapter's handoff,
+  the last turn's note) and `board recap` for the lesson -- holds about 22k
+  whether it is turn 2 or turn 40, and writes what it was thinking to
+  `live/NEXT.md` with `board note` rather than carrying it. The harness prefix
+  costs nothing to re-open: a second `claude -p` in the same directory reads its
+  28k system prompt out of cache for $0.015.
+  Two things a turn must not do are refused by the command rather than asked in a
+  prompt, because both were correct instructions in the document they appeared in
+  and both cost real money: `board wait` refuses a caller inside a headless turn,
+  and `board handoff` is the only writer of `HANDOFF.md` and refuses a body over
+  350 words. `test/tokens.py` holds all of it.
+- **And what it cost is measured, not argued about.** `usage_args` on a recipe
+  makes the agent report its turn (`--output-format json`); every headless turn
+  appends a line to `live/cost.jsonl` and `tutor cost` adds it up, including
+  whether the second half of a session cost more per turn than the first. Never
+  change a reading decision here on reasoning alone -- run the turns and read
+  `tutor cost --turns`. Every number in this bullet came from that measurement,
+  and the four defects it found had all been invisible for weeks.
 - **Every change to how the tutor teaches is also a change to what it costs.**
   A new rule in `TEACHING.md` is read by every session for ever, a new card kind
   is more output on every turn, an extra instruction in a prompt is paid for on

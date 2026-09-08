@@ -15,8 +15,17 @@ The assistant runs these. The student never does.
     board push ["message"]             commit and push this repository now
     board next [kind] [slug]           print the path of the next card to write
     board write <kind> <slug>          read a card body on stdin, write the card
+    board brief                        what a turn is BOUND by, in ONE call: the
+                                       method, this course's unbendable rules, the
+                                       handoff, the last turn's note
     board recap [--cards N|--all]      the lesson so far in ONE call: every card as
                                        a line, the newest in full, their turns
+    board note < note.md               <=120 words for the next turn: what you read
+                                       in their answer and what you are aiming at
+    board note --show|--clear          read it, or forget it
+    board handoff < handoff.md         write HANDOFF.md at session end, <=350 words,
+                                       stamped with its chapter. The only writer.
+    board handoff --show|--check       read it, or say how long it is
     board inbox [--all]                what the student sent; marks it read
     board slate [--all]                paths of the pages written on the iPad
     board wait [--timeout N]           block until the student sends something
@@ -58,12 +67,19 @@ import time
 
 TOOL = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, TOOL)
-from tutorboard import (freechain, handoff, limits, machine, paths, ports,
-                        processes, reasoning, tex, worktree)
+from tutorboard import (brief, carry, freechain, handoff, limits, machine,
+                        paths, ports, processes, reasoning, sense, tex,
+                        worktree)
 from tutorboard.net import egress, tailscale
 from tutorboard.course import document, homework, review
 SERVE = os.path.join(TOOL, "serve.py")
 KINDS = ("lesson", "question", "correct", "wrong", "review", "note", "recap")
+
+# How many cards `board recap` names as lines. Every turn reads this, so it is
+# the one part of the recap that must not grow with the lesson -- see cmd_recap.
+# Wide enough to hold a whole sitting's worth of shape, which is what a turn
+# reasons about; a chapter's worth is HANDOFF.md's job.
+LINES = 40
 
 
 # ---------------------------------------------------------------------------
@@ -1195,7 +1211,17 @@ def cmd_recap(live, args):
         print("no cards yet — nothing has been taught in this session")
     else:
         print("%d card(s), %d student turn(s)\n" % (len(names), len(live_turns)))
-        for n in names:
+        # The one thing in the recap that still grew with the lesson. A hundred
+        # and seven cards is 6.4k of titles, read at the start of every turn,
+        # for a shape a turn acts on the recent end of -- and the older end is
+        # what HANDOFF.md is for. So the list is the last LINES of them, with
+        # the earlier ones counted rather than named; `--all` prints the lot.
+        shown = names if full >= len(names) else names[-LINES:]
+        if len(shown) < len(names):
+            print("  (%d earlier card(s) not listed — HANDOFF.md is what carries "
+                  "the chapter, `board recap --all` lists them)"
+                  % (len(names) - len(shown)))
+        for n in shown:
             with open(os.path.join(live.cards, n), "r", encoding="utf-8") as fh:
                 meta, _ = card_meta(fh.read())
             cid = n[:4]
@@ -1255,6 +1281,152 @@ def cmd_recap(live, args):
     return 0
 
 
+def cmd_brief(live, args):
+    """Everything a cold turn is bound by, in ONE call.
+
+    Every turn is its own session now, so every turn is a cold turn, and what a
+    cold start costs is what the course costs. It used to be three documents in
+    three round trips -- the contract, the method, the handoff -- 24k tokens in
+    Galois Theory before a word of teaching was written. This is the tenth of
+    that which a turn actually acts on, and the full documents are named at the
+    bottom for the rare rule that needs its detail.
+
+    Pair it with `board recap`, which is the other half: this is the standing
+    rules, that is the lesson so far. Two calls, and a turn needs nothing else
+    before it can teach.
+    """
+    sys.stdout.write(brief.briefing(live, sense))
+    return 0
+
+
+def cmd_note(live, args):
+    """The one thing a turn tells the next turn. Body on stdin.
+
+        board note < note.md        replace it
+        board note --show           print what is there
+        board note --clear          forget it
+
+    A turn is its own session, so nothing the tutor was thinking survives it
+    unless it is written down -- and `board recap` cannot carry that part. The
+    recap says what was asked and what came back; it does not say that the
+    student is reading a ∃ as a ∀, that this is the third attempt at the same
+    line, or that the ladder is aimed at the witness rather than the algebra.
+
+    Capped at 120 words, and the cap refuses rather than trims: this is read at
+    the start of every turn, and a long one is a cost paid over and over. That
+    is exactly how HANDOFF.md reached 3,824 words against a 350-word cap that
+    was only ever a request in a prompt.
+    """
+    if "--show" in args:
+        text = carry.read_note(live.root)
+        print(text if text else "no note")
+        return 0
+    if "--clear" in args:
+        carry.clear_note(live.root)
+        print("note cleared")
+        return 0
+    body = sys.stdin.read()
+    kept, n, over = carry.write_note(live.root, body)
+    if over:
+        print("board note: %d words, and the cap is %d. Nothing was written.\n"
+              "This is read at the start of every turn, so length here is paid "
+              "over and over. Write the misreading and the plan, not the lesson "
+              "-- the lesson is in `board recap`."
+              % (n, carry.NOTE_WORDS), file=sys.stderr)
+        return 1
+    if not kept:
+        print("note cleared")
+        return 0
+    print("%s (%d words)" % (carry.note_path(live.root), n))
+    return 0
+
+
+def cmd_handoff(live, args):
+    """Write HANDOFF.md, capped, stamped with its chapter. Body on stdin.
+
+        board handoff < handoff.md   replace it
+        board handoff --show         print what is there
+        board handoff --check        say how long it is
+
+    This is the ONLY thing that should write that file, and it is written ONCE,
+    by the wrap-up turn at the end of a session -- not edited during a teaching
+    turn. A turn that edits it pays to read 5k tokens of it first, adds a
+    paragraph, and hands the next turn a longer file; do that for a fortnight
+    and the cap in the prompt is a decoration. Leave a `board note` instead.
+
+    The cap refuses rather than trims, because the useful half of a handoff is
+    at the bottom: what to teach next. Cutting the tail keeps the description
+    and throws away the instruction.
+    """
+    if "--show" in args:
+        text, about = handoff.read_handoff(live.root)
+        if not text.strip():
+            print("no handoff")
+            return 0
+        sys.stdout.write(text if text.endswith("\n") else text + "\n")
+        return 0
+    if "--check" in args:
+        n, over = handoff.handoff_length(live.root)
+        if not n:
+            print("no handoff")
+            return 0
+        print("%d words, cap %d%s"
+              % (n, handoff.HANDOFF_WORDS, (", OVER by %d" % over) if over else ", ok"))
+        return 1 if over else 0
+    body = sys.stdin.read()
+    kept, n, over = handoff.write_handoff(
+        live.root, body, chapter=live.state().get("chapter") or "")
+    if over:
+        print("board handoff: %d words, and the cap is %d. Nothing was written.\n"
+              "It is read at the start of every turn of every future session, so "
+              "length here is a cost paid over and over. Keep: where they got to "
+              "by topic, what they got wrong and what the misunderstanding was, "
+              "what they got right so it is not re-taught, and the one next thing."
+              % (n, handoff.HANDOFF_WORDS), file=sys.stderr)
+        return 1
+    if not kept:
+        print("board handoff: nothing on stdin; the handoff was left alone",
+              file=sys.stderr)
+        return 1
+    print("%s (%d words)" % (handoff.handoff_path(live.root), n))
+    return 0
+
+
+def inside_a_daemon_turn(live):
+    """Is a headless turn in flight on this machine right now?
+
+    If one is, then whoever is asking IS that turn, because a headless turn is
+    the only thing running inside it -- and a turn does not wait. The daemon
+    that started it does: it runs `board wait` itself between turns, and that is
+    the whole engine.
+
+    A turn that waits as well holds a full conversation open while the student
+    thinks, and then answers their next message inside the previous turn's
+    context. Measured in Galois Theory on 8 September 2026 as a single turn of
+    36 round trips and 5.05M cached input tokens -- four times what a turn
+    should cost, two cards deep before it let go.
+
+    Nothing in the prompt could stop it: the course contract documents `board
+    wait` as the way to be woken, which is true and correct for a person at a
+    terminal, and a headless tutor reading that contract in full did as it was
+    told. So the guard is here, where wording cannot reach it.
+    """
+    try:
+        with open(live.path("agent.json"), "r", encoding="utf-8") as fh:
+            st = json.load(fh) or {}
+    except (OSError, ValueError):
+        return None
+    if st.get("mode") == "interactive":
+        return None                      # somebody's terminal; their wait to run
+    if (st.get("state") or "") != "working":
+        return None                      # the daemon is between turns, or gone
+    if st.get("host") and st["host"] != this_node():
+        return None                      # another machine's daemon, another home
+    if not processes.agent_is_attached(st, this_node()):
+        return None
+    return st
+
+
 def cmd_wait(live, args):
     """Block until the student sends something, then print it and exit.
 
@@ -1274,6 +1446,19 @@ def cmd_wait(live, args):
     timeout = 900.0
     if "--timeout" in args:
         timeout = float(args[args.index("--timeout") + 1])
+
+    # A turn does not wait; the daemon that started it does. See
+    # `daemon_owns_the_wait` for what this cost before it was refused. It exits
+    # 0 and says what to do instead, deliberately: a non-zero exit reads to an
+    # agent as a broken command and gets retried, which is the same wait again.
+    if "--force" not in args and inside_a_daemon_turn(live):
+        print("A headless turn is in flight on this board, which means this IS "
+              "that turn -- and a turn does not wait.\n"
+              "End your turn instead. The daemon is already blocked on the next "
+              "message and will hand it to a fresh turn the moment it lands. "
+              "Leave `board note` for that turn if it needs to know what you were "
+              "thinking.")
+        return 0
 
     start = time.time()
     while True:
@@ -2138,6 +2323,7 @@ COMMANDS = {
     "finish": cmd_finish, "push": cmd_push, "history": cmd_history,
     "hw": cmd_hw, "review": cmd_review, "recap": cmd_recap, "node": cmd_node,
     "egress": cmd_egress, "limit": cmd_limit, "free": cmd_free,
+    "brief": cmd_brief, "note": cmd_note, "handoff": cmd_handoff,
 }
 
 
