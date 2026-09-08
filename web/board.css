@@ -1251,6 +1251,30 @@ body.tools-out .annbar { bottom: calc(5.6rem + env(safe-area-inset-bottom)); }
   background: var(--paper);
   box-shadow: 0 10px 34px rgba(0, 0, 0, .3);
   font-family: var(--ui); font-size: .84rem;
+
+  /* A MENU TALLER THAN THE GLASS IS A MENU WHOSE LAST ENTRIES DO NOT EXIST.
+     Reported as "I can't see the refresh button when I tap the '...' menu."
+     This hangs off a bar that is stuck to the top of the window, so anything
+     past the bottom edge is not merely below the fold -- there is nothing to
+     scroll to reach it, because the page scrolling moves the lesson and not
+     this. Thirteen entries at the reading type size somebody actually uses is
+     past the bottom of an iPad in landscape, and it got there one entry at a
+     time with nobody counting.
+
+     So it scrolls, and it is capped at the space it actually has. Twice, and
+     the order is the point: the `vh` line is the fallback and goes FIRST, and
+     the `dvh` line overrides it wherever `dvh` is understood -- a browser that
+     does not know the unit drops that declaration and keeps the one above it,
+     while one that does gets the honest figure, because on iOS `vh` is the
+     tall viewport and ignores the toolbar. `board.js` then measures the real
+     gap under the bar when it opens -- the banners in the chrome stack change
+     that -- and this pair is the floor under it. */
+  max-height: calc(100vh - 5rem);
+  max-height: calc(100dvh - 5rem);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  /* The lesson behind must not take over when the menu reaches its end. */
+  overscroll-behavior: contain;
 }
 .barmenu button {
   font: inherit; text-align: left; cursor: pointer;
@@ -1259,6 +1283,15 @@ body.tools-out .annbar { bottom: calc(5.6rem + env(safe-area-inset-bottom)); }
   white-space: nowrap;
 }
 .barmenu button:hover { background: var(--paper-2); }
+/* AND A SIGN THAT THERE IS MORE, because on iOS a scroller shows no bar until
+   a finger is already on it -- so a capped menu and a truncated one look
+   identical, which is the report this whole rule came from wearing a new coat.
+   An INSET shadow, deliberately: it is painted on the menu's own box and stays
+   at the bottom edge, where an `::after` would scroll away with the entries. */
+.barmenu.more {
+  box-shadow: 0 10px 34px rgba(0, 0, 0, .3),
+              inset 0 -1.6rem 1.1rem -1.3rem var(--ink-3);
+}
 #btn-more { font-weight: 700; letter-spacing: .05em; }
 
 /* ---------- the receipt ---------- */

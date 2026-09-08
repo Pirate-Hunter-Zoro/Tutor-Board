@@ -170,6 +170,63 @@ decl(draw, 'top') === null
     : fail('no fallback height: an older browser gets no height at all');
 }
 
+// --- the overflow menu has to fit on the glass ----------------------------
+//
+// Reported as "I can't see the refresh button when I tap the '...' menu."
+// The menu hangs off #chrome, which is stuck to the top of the window, so an
+// entry past the bottom edge is not below the fold -- it is UNREACHABLE:
+// scrolling the page moves the lesson, not this. And it got there one entry at
+// a time with nobody counting, which is why this is a test rather than a
+// tidy-up: the menu is where every occasional control goes, so it only grows.
+{
+  const JS = fs.readFileSync(path.join(__dirname, '..', 'web', 'board.js'), 'utf8');
+  const menu = block('.barmenu') || '';
+
+  /overflow-y:\s*auto/.test(menu)
+    ? ok('the overflow menu scrolls')
+    : fail('the menu does not scroll — entries past the bottom edge are unreachable');
+
+  // Capped against the viewport, with a fallback: on iOS `vh` is the TALL
+  // viewport and ignores the toolbar, so `dvh` is the one that tells the truth
+  // -- and the plain `vh` line has to come first, for anything that does not
+  // know `dvh` and would drop the whole declaration.
+  const caps = menu.match(/max-height:\s*calc\(100d?vh[^;]*/g) || [];
+  caps.some((c) => /100dvh/.test(c))
+    ? ok('and is capped against the dynamic viewport')
+    : fail('the menu has no dvh height cap, so iOS gives it the tall viewport');
+  caps.some((c) => /100vh/.test(c) && !/dvh/.test(c))
+    ? ok('with a vh fallback for browsers that do not know dvh')
+    : fail('no vh fallback: an older browser gets no cap at all');
+
+  /overscroll-behavior:\s*contain/.test(menu)
+    ? ok('and the lesson behind does not take over at the end of it')
+    : fail('scrolling past the end of the menu scrolls the lesson underneath');
+
+  // The CSS cap is the floor. The real figure is measured, because the stack
+  // the menu hangs from grows with its banners -- a save offer, an export
+  // result and the homework strip are all up at exactly the moment somebody
+  // goes looking for the reload.
+  /function placeMenu\(\)/.test(JS) && /getBoundingClientRect\(\)\.top/.test(JS)
+    ? ok('and the room under the bar is measured when it opens, not guessed')
+    : fail('nothing measures the space the menu actually has');
+  /els\.barmenu\.hidden = !els\.barmenu\.hidden;\s*\n\s*if \(!els\.barmenu\.hidden\) placeMenu\(\);/
+    .test(JS)
+    ? ok('measured on the tap that opens it')
+    : fail('the menu is opened without being measured');
+
+  // And a sign that there is more. On iOS a scroller shows no bar until a
+  // finger is on it, so a capped menu and a truncated one look identical --
+  // which is the same defect wearing a new coat.
+  /\.barmenu\.more/.test(CSS) && /classList\.toggle\("more"/.test(JS)
+    ? ok('and says when there is more below it')
+    : fail('a scrollable menu gives no sign that anything is below the fold');
+
+  // The control that was actually missing.
+  /id="btn-reload"/.test(HTML)
+    ? ok('reload the app is in the menu')
+    : fail('there is no reload entry at all');
+}
+
 console.log(errors.length ? '\n' + errors.length + ' FAILURES'
                           : '\nevery bar is where it belongs');
 process.exit(errors.length ? 1 : 0);

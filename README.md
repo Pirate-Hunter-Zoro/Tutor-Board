@@ -87,6 +87,20 @@ now: one interface, one method, whether the exercises are proofs or functions.
 > under this week's name. That is the same mistake as a cached lesson, one layer down, in the file
 > whose entire rule is against it.
 >
+> **And the menu that all of this hangs in could not be scrolled.** Reported straight after:
+> *"I also can't see the refresh button when I tap the '...' menu."* The documents entry was the
+> eleventh, and the menu hangs off `#chrome`, which is stuck to the top of the window — so an
+> entry past the bottom edge of the glass is not below the fold, it is unreachable, because
+> scrolling the page moves the lesson and not the menu. At the reading type size somebody
+> actually uses, that is past the bottom of an iPad in landscape. It scrolls now, capped at the
+> room measured under the bar when it opens rather than guessed — the banners in the chrome stack
+> change that figure, and a save offer, an export result and the homework strip are all up at
+> exactly the moment somebody goes looking for the reload. With a fade at the bottom edge while
+> there is more, because on iOS a scroller shows no bar until a finger is already on it, which
+> makes a capped menu and a truncated one look the same from a foot away. `test/chrome.js` —
+> where the rule that the title bar cannot grow already lived, nothing having said the same about
+> the menu it overflows into.
+>
 > `test/paper.py` holds the server half against a real board on a real socket, and `test/link.js`
 > holds the half that actually failed: two payloads in a row, with the write-up still reachable
 > after the second. `board doctor` and `scripts/setup-mac.sh` both say whether this machine can
@@ -2091,6 +2105,7 @@ these tests fail, the test is right.
 | The writing surface vanished after closing and reopening the app: it survived a send only through an in-memory pin, and a pin is a variable | `test/link.js`, `test/modes.js` |
 | The contents drawer laid out in the flow of the page under the lesson rather than over it: it carried a comment saying it borrowed the scratch drawer and an empty rule that borrowed nothing, because an ID selector is not inheritance | `test/review.js` |
 | A sitting badge reading `TEST REVIEW` pushed the chapter label to `Tes…` and the tutor chip to `no` — the title bar is the one row on this page that cannot grow | `test/review.js` |
+| *"I can't see the refresh button when I tap the '...' menu."* The overflow menu hangs off `#chrome`, which is stuck to the top of the window — so an entry past the bottom edge of the glass is not below the fold, it is **unreachable**: scrolling the page moves the lesson, not the menu. Thirteen entries at the reading type size somebody actually uses is past the bottom of an iPad in landscape, and it got there one entry at a time with nobody counting. The title bar being the row that cannot grow is why the menu exists; nothing said the menu could not grow either | it scrolls, capped at `100dvh` in CSS as a floor and at the room actually measured under the bar when it opens — the banners in the chrome stack change that, and every one of them is up at the moment somebody goes looking for the reload. Plus a fade at the bottom edge while there is more, because on iOS a scroller shows no bar until a finger is already on it, which makes a capped menu and a truncated one look identical; `test/chrome.js` |
 | A marker stroke came out of the export as a black smudge over the working it pointed at: the light-ink-to-dark-ink conversion was applied to a six-times-wide translucent stroke | `asHighlight` in `slate-core.js` |
 | The marker was invisible on black paper and perfect in the sent PNG: a highlighter multiplies, and multiplying into near-black gives back near-black | `test/chrome.js` reads the CSS; the blend now follows the surface, not the setting |
 | A sent answer was frozen into the transcript directly above the surface the same ink was still sitting on | `test/interactive.js`, `test/link.js` |

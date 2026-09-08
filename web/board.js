@@ -2931,7 +2931,47 @@ document.getElementById("btn-contents-close").onclick = function () {
 document.getElementById("btn-more").onclick = function (e) {
   e.stopPropagation();
   els.barmenu.hidden = !els.barmenu.hidden;
+  if (!els.barmenu.hidden) placeMenu();
 };
+
+/* HOW MUCH ROOM THE MENU ACTUALLY HAS, measured rather than guessed.
+
+   Reported as "I can't see the refresh button when I tap the '...' menu."
+   The menu hangs under `#chrome`, which is stuck to the top of the window --
+   so an entry past the bottom edge is not below the fold, it is unreachable:
+   scrolling the page moves the lesson, not this. `board.css` caps it against
+   the viewport, which is the floor; this is the true figure, because the
+   chrome stack it hangs from grows and shrinks with the banners in it. A save
+   offer, an export result and the homework strip together are most of an inch,
+   and every one of those is up at exactly the moment somebody goes looking for
+   the reload. */
+function placeMenu() {
+  if (!els.barmenu || els.barmenu.hidden) return;
+  var top = els.barmenu.getBoundingClientRect().top;
+  var room = window.innerHeight - top - 12;
+  /* Never so small that it is a scroller with one entry in it: below this the
+     menu is the wrong shape for the screen and the cap is the lesser problem. */
+  els.barmenu.style.maxHeight = Math.max(140, room) + "px";
+  menuCue();
+}
+
+/* Is there more below, and is the person being told? On iOS a scroller shows
+   no bar until a finger is already on it, so a capped menu and a truncated one
+   look the same from a foot away -- which is the defect again in a new coat.
+   The fade at the bottom edge is the difference, and it goes when the end of
+   the list is reached, because a permanent one says "more" about nothing. */
+function menuCue() {
+  var m = els.barmenu;
+  if (!m || m.hidden) return;
+  var left = m.scrollHeight - m.clientHeight - m.scrollTop;
+  m.classList.toggle("more", left > 4);
+}
+
+/* Turning the iPad, or the keyboard coming up, changes the room. */
+["resize", "orientationchange"].forEach(function (ev) {
+  window.addEventListener(ev, placeMenu);
+});
+els.barmenu.addEventListener("scroll", menuCue, { passive: true });
 Array.prototype.forEach.call(els.barmenu.querySelectorAll("button"), function (b) {
   b.addEventListener("click", function () { els.barmenu.hidden = true; });
 });
