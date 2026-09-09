@@ -172,7 +172,84 @@ limit_src = open(os.path.join(HERE, "limit.py"), encoding="utf-8").read()
 check("and the suite that walks the tailnet by accident says so",
       'os.environ["BOARD_NO_TAILNET"]' in limit_src)
 
+# ---- the machine that could not be found at all ----------------------------
+#
+# Reported on 9 September, from the app: "I don't see any options to go to the
+# compute node." The node was up and teaching. It was invisible because finding
+# a machine means knocking on ports DERIVED FROM COURSE NAMES, and the only
+# board on it was PSYCH-ASR -- a course the Mac has no clone of, so a port the
+# Mac would never try. One machine in the row, and a row of one used to hide
+# itself, so the whole idea of another machine disappeared from the interface.
+
+import json
+import tempfile
+import time
+
+from tutorboard import machines, paths
+
+box = tempfile.mkdtemp(prefix="peers-known-")
+machines.KNOWN = os.path.join(box, "hosts.json")
+paths.STATE_DIR = box
+
+# What the Mac has cloned, and what the node is actually running.
+MAC = ["Algo-Solutions", "Galois-Theory", "Probability"]
+NODE = [{"repo": "PSYCH-ASR", "running": True}, {"repo": "Attention", "running": False}]
+
+from tutorboard import ports as portmod
+
+check("a machine nobody has ever seen is looked for at the ports of the courses "
+      "cloned here, which is all there is to go on",
+      machines.candidate_ports("node.ts.net", MAC)
+      == [portmod.default_port(n) for n in MAC])
+
+machines.remember_peer("node.ts.net", 9171, NODE)
+after = machines.candidate_ports("node.ts.net", MAC)
+check("a machine that has been seen is asked where it answered last, first",
+      after[0] == 9171)
+check("then at the courses IT said it had -- the running one first, which is "
+      "the port that was never tried",
+      after[:2] == [portmod.default_port("PSYCH-ASR"),
+                    portmod.default_port("Attention")])
+check("and only then at ours",
+      after[2:] == [p for p in [portmod.default_port(n) for n in MAC]
+                    if p not in after[:2]])
+check("nothing is knocked on twice, however many lists name it",
+      len(after) == len(set(after)))
+check("and the walk stays bounded, because a socket timeout each is what a "
+      "follower tick is made of",
+      len(machines.candidate_ports("node.ts.net", ["C%02d" % i for i in range(40)]))
+      <= machines.PORT_KNOCKS)
+
+check("the note survives the process that made it",
+      json.load(open(machines.KNOWN, encoding="utf-8"))["hosts"][0]["port"] == 9171)
+
+quiet = machines.quiet_hosts()
+check("a machine seen before is still offered when it is not answering",
+      len(quiet) == 1 and quiet[0]["host"] == "node.ts.net"
+      and quiet[0]["reachable"] is False)
+check("with the last course list it gave, so there is something to tap",
+      [c["repo"] for c in quiet[0]["courses"]] == ["PSYCH-ASR", "Attention"])
+check("and nothing claiming to be live on a machine that is not answering, "
+      "which is the one thing a remembered list cannot still know",
+      not any(c["running"] for c in quiet[0]["courses"]))
+check("the machine being asked is never offered as somewhere else to go",
+      machines.quiet_hosts(exclude={"node.ts.net"}) == [])
+
+machines.remember_peer("node.ts.net", None, None,
+                       seen=time.time() - machines.KNOWN_KEEP - 60)
+check("and a machine nobody has seen in a fortnight is forgotten rather than "
+      "offered for ever",
+      machines.known_peers() == {} and machines.quiet_hosts() == [])
+
+check("a machine that answers but says nothing keeps the courses it last named, "
+      "because an empty list takes the next walk's ports away with it",
+      (machines.remember_peer("node.ts.net", 9171, NODE)
+       and machines.remember_peer("node.ts.net", 9171, [])
+       and [c["repo"] for c in machines.known_peers()["node.ts.net"]["courses"]]
+       == ["PSYCH-ASR", "Attention"]))
+
 print()
 print("%d FAILURES" % len(fails) if fails
-      else "only a machine somebody could be teaching on is knocked on")
+      else "only a machine somebody could be teaching on is knocked on, and "
+           "every machine that could be is findable")
 sys.exit(1 if fails else 0)

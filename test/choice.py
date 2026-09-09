@@ -746,13 +746,41 @@ check("a second tap while one is in flight is not a second switch",
       "if (moving) return;" in home_src)
 check("and when it does not land, it says so instead of reloading",
       "still on the old board" in home_src)
-# And a machine, once found, is not lost again between refreshes. The walk that
-# finds a peer's board only knows the courses cloned HERE, and the two machines
-# are not the same list -- five courses on one of this pair and nine on the
-# other -- so a peer whose only board is a course this machine has not got is
-# invisible to it. A hub that loses a machine is a machine you cannot switch to.
-check("a machine that answered once is asked at that port first",
-      "_PEER_PORT" in serve_src and "was = _PEER_PORT.get(host)" in serve_src)
+# And a machine, once found, is not lost again. The walk that finds a peer's
+# board knocks on ports DERIVED FROM COURSE NAMES, and the two machines are not
+# the same list -- five course repositories on the Mac and twelve on the compute
+# node -- so a peer whose only board is a course this machine has not got is on a
+# number that will never be tried. Reported on 9 September as "I don't see any
+# options to go to the compute node": the node was up, serving PSYCH-ASR on 9171,
+# which the Mac has no clone of.
+check("a machine that answered once is asked at that port first, and the note "
+      "outlives the process that made it",
+      "def known_peers(" in serve_src and 'add(was.get("port"))' in serve_src)
+check("and the ports of the courses THAT machine said it had are knocked on too",
+      'ports.default_port(c["repo"])' in serve_src)
+check("a board says where it is rather than waiting to be guessed at",
+      "def announce_self(" in serve_src and 'if path == "/hello":' in serve_src)
+check("and it does that as soon as it is listening",
+      "machines.announce_self_later(repo, port)"
+      in source("tutorboard", "server", "app.py"))
+check("and again whenever it finds a machine, because the one with the news is "
+      "usually the one that just came up",
+      "def introduce_later(" in serve_src
+      and "introduce_later(repo, host, found)" in serve_src)
+check("a machine only ever learns of a peer the tailnet agrees is there",
+      "for peer in tailscale.tailnet_peers():"
+      in source("tutorboard", "server", "routes", "machines.py").split('"/hello"')[1])
+check("a machine seen before is still offered when it is not answering, because "
+      "a hub that hides a machine is a machine nobody can reach",
+      "def quiet_hosts(" in serve_src and '"reachable": False' in serve_src)
+check("and the hub asks for one on a machine with no board and is told so, "
+      "rather than recording a choice nothing can act on",
+      "has no board answering" in serve_src)
+check("the row of machines is never hidden",
+      "els.hostsWrap.hidden = !hosts.length;" in home_src
+      and "hosts.length < 2" not in home_src)
+check("and a quiet machine says it is quiet",
+      '"not answering"' in home_src)
 
 sw_src = open(os.path.join(ROOT, "web", "sw.js"), encoding="utf-8").read()
 check("the health check is never answered out of the cache",

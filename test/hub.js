@@ -160,7 +160,51 @@ setTimeout(() => {
         posted.length === 1 && posted[0].repo === 'Galois-Theory'
         && posted[0].host === 'board.tail0c6c62.ts.net');
 
-  console.log(errors.length ? '\n' + errors.length + ' FAILURES'
-                            : '\nthe course list stays inside its card');
-  process.exit(errors.length ? 1 : 0);
+  // ------------------------------------------------- and the quiet machine
+  //
+  // Reported on 9 September: "I don't see any options to go to the compute
+  // node." The node was up and teaching; the machine serving the hub could not
+  // find it, so the row held one machine, and a row of one used to hide itself
+  // -- which draws "nobody has looked yet" and "there is no other machine" the
+  // same way. The row is furniture worth keeping: it is the only place the
+  // other machine is ever mentioned.
+  // The tap above left a switch in flight, and a refresh is deliberately a
+  // no-op while the address is moving. "stay here" is what the person taps.
+  window.document.getElementById('busy-stay').onclick();
+  hostsDoc.hosts = [hostsDoc.hosts[0]];
+  window.dispatchEvent(new window.Event('focus'));
+  setTimeout(() => {
+    check('the row is drawn even when this machine is the only one in it',
+          !window.document.getElementById('hosts-wrap').hidden
+          && window.document.querySelectorAll('#hosts button').length === 1);
+
+    hostsDoc.hosts = [
+      hostsDoc.hosts[0],
+      { host: 'node.ts.net', name: 'compute-node', here: false,
+        reachable: false, courses: MAC },
+    ];
+    window.dispatchEvent(new window.Event('focus'));
+    setTimeout(() => {
+      const btns = window.document.querySelectorAll('#hosts button');
+      check('a machine that is not answering is still offered',
+            btns.length === 2 && /compute-node/.test(btns[1].textContent));
+      check('and says so, rather than being drawn as though it were up',
+            /not answering/.test(btns[1].textContent)
+            && btns[1].classList.contains('off'));
+
+      btns[1].onclick();
+      check('picking it lists the courses it last said it had',
+            window.document.querySelectorAll('#others li button, #past li button')
+              .length === 1);
+      check('and the hint says what a quiet machine means, where somebody is '
+            + 'already looking',
+            /no board answering/.test(
+              window.document.querySelector('#hosts-wrap .hint').textContent));
+
+      console.log(errors.length ? '\n' + errors.length + ' FAILURES'
+                                : '\nthe course list stays inside its card');
+      process.exit(errors.length ? 1 : 0);
+    }, 30);
+  }, 30);
+
 }, 50);

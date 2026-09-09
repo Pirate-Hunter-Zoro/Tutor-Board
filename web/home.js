@@ -16,6 +16,7 @@ var els = {
   dot: document.getElementById("dot"),
   hosts: document.getElementById("hosts"),
   hostsWrap: document.getElementById("hosts-wrap"),
+  hostsHint: document.querySelector("#hosts-wrap .hint"),
   eyebrow: document.getElementById("hero-eyebrow"),
   course: document.getElementById("hero-course"),
   chapter: document.getElementById("hero-chapter"),
@@ -121,13 +122,14 @@ function hostKey(h) { return h && h.host ? h.host : ""; }
 function paintHosts(doc) {
   hosts = (doc && doc.hosts) || [];
   els.hosts.innerHTML = "";
-  /* One machine is not a choice, and a row of one button is furniture. */
-  if (hosts.length < 2) {
-    els.hostsWrap.hidden = true;
-    onHost = null;
-    return;
-  }
-  els.hostsWrap.hidden = false;
+  /* Always drawn, whatever is in it. Hiding a row of one machine was meant as
+     tidiness and read as "there is no other machine": on 9 September the only
+     board on the compute node was a course the Mac has no clone of, so the Mac
+     could not find the node, the row hid itself, and the report was "I don't
+     see any options to go to the compute node". A machine that is quiet is now
+     drawn as a machine that is quiet, and the row is somewhere you can always
+     look. */
+  els.hostsWrap.hidden = !hosts.length;
   if (onHost !== null && !hosts.some(function (h) { return hostKey(h) === onHost; })) {
     onHost = null;          /* it went away while we were looking at it */
   }
@@ -142,7 +144,14 @@ function paintHosts(doc) {
     var sub = document.createElement("span");
     sub.className = "n";
     var n = (h.courses || []).length;
-    sub.textContent = (here ? "serving you · " : "") + n + (n === 1 ? " course" : " courses");
+    var courses = n + (n === 1 ? " course" : " courses");
+    /* Three states, and the third one is the point: a machine seen before that
+       is not answering now. Its courses are the last list it gave, which is
+       still worth showing -- tapping one says where you want to be. */
+    sub.textContent = here ? "serving you · " + courses
+      : h.reachable ? courses
+      : n ? "not answering · " + courses
+      : "not answering";
     b.appendChild(name);
     b.appendChild(sub);
     b.onclick = function () {
@@ -152,6 +161,17 @@ function paintHosts(doc) {
     };
     els.hosts.appendChild(b);
   });
+  /* And say what a quiet machine means, where somebody is already looking. A
+     greyed button with no explanation is the same dead end as no button. */
+  var picked = null;
+  hosts.forEach(function (h) { if (hostKey(h) === (onHost || "")) picked = h; });
+  if (picked && !picked.reachable) {
+    els.hostsHint.textContent = (picked.name || picked.host).split(".")[0]
+      + " has no board answering. Start one on that machine once — its courses "
+      + "cannot be opened from here until then.";
+  } else {
+    els.hostsHint.textContent = "Each machine teaches the courses it has a copy of.";
+  }
 }
 
 function coursesOf(key) {

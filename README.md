@@ -45,6 +45,62 @@ now: one interface, one method, whether the exercises are proofs or functions.
 >   board that is answering) but it is worth confirming: the port the HTTPS name points at should
 >   be the course they are working in.
 >
+> ### Where this is right now, 9 September 2026
+>
+> **A machine you cannot see is a machine you cannot switch to, and the compute node had gone
+> invisible.** Reported while the app was open: *"I don't see any options to go to the compute
+> node"*, with the ask alongside it — *"I want the option to switch tutors to ALWAYS be available
+> and visible on the home screen."* Both halves were right, and the second one is the reason the
+> first was possible to miss.
+>
+> **Measured, both directions, a minute apart.** The Mac's `/hosts.json` named the compute node
+> once and then only itself. The node was up the whole time, teaching PSYCH-ASR on 9171. The Mac
+> has five course repositories — Algo-Solutions, Galois-Theory, Lean-Theorem-Proving,
+> Mathematical-Modeling, Probability — and **PSYCH-ASR is not one of them**.
+>
+> That is the whole defect. A machine is found by knocking, a course's port is a pure function of
+> its name, and the walk knocked on the ports of the courses cloned **here**. So the one board on
+> the node sat on a number the Mac had no reason to ever try, and the only thing that had been
+> keeping the node visible at all was a remembered port from an earlier sighting — 9098,
+> Galois-Theory, whose board is gone. That memo lived in a dictionary in a process, so it expired
+> between two probes and took the machine with it.
+>
+> **A machine's own course list is the answer, and it was already being fetched every time one was
+> found.** It is written down now — `~/.local/state/tutor-board/hosts.json`, per machine: the name,
+> the port that answered, and what that machine said it could teach. The next walk knocks on the
+> ports of **their** courses, the running one first, before falling back to ours. The Mac had
+> PSYCH-ASR in hand every time it drew that row; it simply threw it away.
+>
+> **And a board now says where it is, rather than waiting to be guessed at.** `/hello` — host,
+> port, course list, and the same three things in the reply, so one exchange teaches both machines.
+> Sent when a board starts listening, and again whenever a walk finds a peer, because announcing at
+> start-up alone depends on the other machine already being able to hear you and the machine with
+> the news is usually the one that just came up. Whichever of the pair can see the other teaches it
+> the way back.
+>
+> **The row is never hidden again.** It hid itself at one machine — "one machine is not a choice,
+> and a row of one button is furniture" — which draws *nobody has looked yet* and *there is no
+> other machine* in exactly the same way: as nothing at all. A machine seen before is listed even
+> when it is not answering, marked as not answering, with the last course list it gave and its live
+> flags stripped, because what is running over there is the one thing a remembered list cannot
+> still know. The hub also answers from that file on its first request now, so the app opens with
+> the other machine already in the row instead of thirty seconds later.
+>
+> **And a tap on a machine with no board is told so.** It used to record the choice and hand back
+> "asked for Galois-Theory on compute-node", which moves nothing: nothing on that machine can start
+> a course, because a board is the only thing over there that answers. It now says *compute-node
+> has no board answering. Bring one up on that machine once and it is reachable from here* — and
+> records nothing, so no follower is left chasing a machine that cannot answer.
+>
+> `test/peers.py` holds the walk and the memory, `test/hub.js` the row in a real DOM, `test/choice.py`
+> and `test/keeping.py` the rules and the route. Shell version `board-shell-v86`.
+>
+> **Not fixed, and worth knowing.** The Mac cannot hear an announcement until it is on this code —
+> its own ten-minute pull does that, and the pair introduce themselves on the walk after it. And
+> this node has `tailscale serve` mappings for five ports whose boards are long gone (8780, 8791,
+> 8937, 9071, 9098): harmless, because a health check fails closed on a mapping with nothing behind
+> it, but each one costs the walk a connect.
+>
 > ### Where this is right now, 8 September 2026 (afternoon)
 >
 > **A document is a file, not an event — and it was being offered as one.** Reported in two
@@ -2092,6 +2148,7 @@ these tests fail, the test is right.
 | A bootstrap test renamed the live machine on the tailnet, moving the address the iPad app used | `BOARD_STATE_DIR`, and a guard in `bootstrap.sh` |
 | A headless tutor was refused the card write it was woken to make, and exited 0 — the board showed silence | `test/agents.py`, and `board start` writes the course's permissions |
 | The machine renamed itself from the network mid-session, so a running board became another node's and could not be restarted | `test/node.py` |
+| A whole machine vanished from the hub, because it was looked for at the ports of the courses cloned on the machine doing the looking — and the row of machines hid itself when it was left with one | `test/peers.py`, `test/hub.js` |
 | The proxy moved the address off a live compute node without asking it to wrap up, stranding a tutor that went on teaching into a copy nobody could reach | `test/choice.py` |
 | A restart brought back the tutor that was running rather than the one the config named, so a changed default never reached a course | `test/agents.py` |
 | The default agent's command was not installed, so the daemon read as *listening* and failed every turn into a log | `test/agents.py` |

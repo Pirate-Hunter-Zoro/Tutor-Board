@@ -300,6 +300,30 @@ check("and says which machine is bringing it up",
 check("having asked that machine's own board to start it, on its own port",
       asked_start == [("elsewhere.example", 4242, "/start")])
 
+# And the machine that is offered but not there. The hub now lists a machine it
+# has merely SEEN before -- deliberately, because a machine missing from the row
+# is a machine nobody can reach -- so the tap is where the honest answer about
+# it has to come from. Recording a choice for a machine with no board on it
+# moves nothing, and reads on the iPad as a tap that did nothing.
+asked_start[:] = []
+machines_route.machines.known_hosts = lambda repo: {
+    "hosts": [{"host": "here.example", "port": 1},
+              {"host": "gone.example", "port": None}]}
+machines_route.machines.reach_host = lambda repo, host: None
+recorded_far = []
+machines_route.choice.remember_chosen = lambda *a, **k: recorded_far.append(a)
+
+status, doc = post(PORT, "/switch",
+                   json.dumps({"repo": "Galois-Theory",
+                               "host": "gone.example"}).encode())
+check("a course on a machine with no board answering is refused, in words that "
+      "say what to do about it",
+      status == 503 and not doc.get("ok")
+      and "no board answering" in (doc.get("error") or ""))
+check("and nothing is recorded, so no follower is left chasing a machine that "
+      "cannot answer",
+      recorded_far == [] and asked_start == [])
+
 msrc = open(os.path.join(ROOT, "tutorboard", "server", "routes", "machines.py"),
             encoding="utf-8").read()
 check("the request handler is never used as a loop variable",

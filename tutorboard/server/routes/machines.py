@@ -125,6 +125,65 @@ def post(h, repo, path):
         h.server.hub.worker.dirty.set()
         return h.send_json({"ok": True, "repo": want, "at": at})
 
+    if path == "/hello":
+        # Another machine saying where it is and what it has. The other half of
+        # `machines.announce_self`, and the answer to a machine that cannot be
+        # found by guessing: a peer is discovered by knocking on ports derived
+        # from COURSE NAMES, so a machine whose only board is a course this one
+        # has never heard of sits on a port nobody here will ever try. It said
+        # so itself instead, and the reply says the same three things back, so
+        # one exchange teaches both machines.
+        try:
+            payload = json.loads(h.read_body().decode("utf-8") or "{}")
+        except Exception:                                        # noqa: BLE001
+            payload = {}
+        try:
+            port = int(payload.get("port") or 0)
+        except (TypeError, ValueError):
+            port = 0
+        # Only a machine this tailnet agrees is there, and spelled the way the
+        # netmap spells it: this host goes into a file the board later POSTs to,
+        # so it is checked against something that is not the request. A short
+        # name matches its own first label, because a machine may introduce
+        # itself either way and only the netmap's spelling is routable.
+        said = (payload.get("host") or "").strip().lower().rstrip(".")
+        host = ""
+        for peer in tailscale.tailnet_peers():
+            known = peer.lower()
+            if said and said in (known, known.split(".")[0]):
+                host = peer
+                break
+        if not host or not 1 <= port <= 65535:
+            return h.send_json({"ok": False, "error": "not a machine here"},
+                                  status=403)
+        courses = []
+        for c in (payload.get("courses") or [])[:64]:
+            if not isinstance(c, dict):
+                continue
+            name = c.get("repo") or ""
+            # A name, not a path: the hub joins these to a directory and a
+            # request must never be able to put a traversal in one.
+            if not name or name != multipart.safe_filename(name):
+                continue
+            try:
+                count = int(c.get("cards") or 0)
+            except (TypeError, ValueError):
+                count = 0
+            courses.append({
+                "repo": name,
+                "course": str(c.get("course") or name)[:120],
+                "chapter": str(c.get("chapter") or "")[:200],
+                "cards": max(0, count),
+                "running": bool(c.get("running")),
+                "node": str(c.get("node") or "")[:64] or None,
+                "current": False,
+            })
+        machines.remember_peer(host, port, courses)
+        h.server.hub.worker.dirty.set()
+        return h.send_json({"ok": True, "host": tailscale.tailnet_self() or "",
+                               "port": h.server.server_address[1],
+                               "courses": machines.sibling_courses(repo)})
+
     if path == "/start":
         # Bring a course up ON THIS MACHINE, asked by a hub somewhere else.
         #
@@ -176,30 +235,43 @@ def post(h, repo, path):
         # address at it. Nothing is started here -- starting a second clone of
         # somebody else's course is the thing that made a mess of an evening.
         if on_host and on_host != (tailscale.tailnet_self() or ""):
+            # Where that machine answers, if it does. The hub can offer a
+            # machine it has merely SEEN before -- that is deliberate, a machine
+            # missing from the row is a machine nobody can reach -- so the tap
+            # is where the honest answer about it belongs. Recording a choice
+            # for a machine with no board on it moves nothing and reads as a tap
+            # that did nothing, so it is not recorded at all.
+            port = None
+            for entry in machines.known_hosts(repo)["hosts"]:
+                if entry.get("host") == on_host:
+                    port = entry.get("port")
+                    break
+            if not port:
+                port = machines.reach_host(repo, on_host)
+            if not port:
+                return h.send_json({
+                    "ok": False,
+                    "error": ("%s has no board answering. Bring one up on that "
+                              "machine once and it is reachable from here."
+                              % on_host.split(".")[0]),
+                }, status=503)
             rec_at = time.time()
             choice.remember_chosen(want, "", host=on_host, at=rec_at)
             # Every machine, not only the one being asked to start it. The
             # follower lives on whichever machine holds the address, and
             # that is not always either of these two.
             machines.announce_later(repo, want, on_host, rec_at)
-            port = None
-            # `entry`, not `h`. `h` is the REQUEST HANDLER, and a `for h in ...`
-            # leaves the loop variable bound after the loop, so every line below
-            # this was calling methods on a host dictionary: `h.server` and
-            # `h.send_json` both died with "'dict' object has no attribute".
-            # This is the branch a tap takes when the course is on the OTHER
-            # machine -- the only branch a person switching machines can reach
-            # -- so it was a 500 every time and the hub said "could not move the
-            # board" without ever being able to say why.
-            for entry in machines.known_hosts(repo)["hosts"]:
-                if entry.get("host") == on_host:
-                    port = entry.get("port")
-                    break
-            started = None
-            if port:
-                started = boards.board_post(on_host, port, "/start",
-                                              {"repo": want, "host": on_host},
-                                              timeout=60)
+            # `entry`, not `h`, in the lookup above. `h` is the REQUEST HANDLER,
+            # and a `for h in ...` leaves the loop variable bound after the loop,
+            # so every line below it was calling methods on a host dictionary:
+            # `h.server` and `h.send_json` both died with "'dict' object has no
+            # attribute". This is the branch a tap takes when the course is on
+            # the OTHER machine -- the only branch a person switching machines
+            # can reach -- so it was a 500 every time and the hub said "could
+            # not move the board" without ever being able to say why.
+            started = boards.board_post(on_host, port, "/start",
+                                          {"repo": want, "host": on_host},
+                                          timeout=60)
             h.server.hub.worker.dirty.set()
             return h.send_json({
                 "ok": True, "repo": want, "host": on_host,
