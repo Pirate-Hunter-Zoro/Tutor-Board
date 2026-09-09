@@ -135,7 +135,12 @@ def main(argv):
     # the other machine has no clone of is on a number it will never try -- which
     # is how a whole machine disappears out of the hub. Announcing costs one POST
     # and is the only half of the discovery that cannot be guessed.
-    machines.announce_self_later(repo, port)
+    #
+    # On a heartbeat, not once: the first announcement of the evening went to a
+    # machine still running code that had never heard of `/hello`, and one 404
+    # was the end of it. A walk is no fallback, because a walk happens when
+    # somebody asks and this board may be the one nobody has open.
+    machines.announce_self_forever(repo, port)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

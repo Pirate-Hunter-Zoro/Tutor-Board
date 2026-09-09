@@ -760,9 +760,13 @@ check("and the ports of the courses THAT machine said it had are knocked on too"
       'ports.default_port(c["repo"])' in serve_src)
 check("a board says where it is rather than waiting to be guessed at",
       "def announce_self(" in serve_src and 'if path == "/hello":' in serve_src)
-check("and it does that as soon as it is listening",
-      "machines.announce_self_later(repo, port)"
-      in source("tutorboard", "server", "app.py"))
+check("and it does that as soon as it is listening, and keeps saying so -- one "
+      "announcement to a machine that has not been updated yet is a 404 and the "
+      "end of it, and a board nobody has the hub open against never walks",
+      "machines.announce_self_forever(repo, port)"
+      in source("tutorboard", "server", "app.py")
+      and "def announce_self_forever(" in serve_src
+      and "time.sleep(ANNOUNCE_EVERY)" in serve_src)
 check("and again whenever it finds a machine, because the one with the news is "
       "usually the one that just came up",
       "def introduce_later(" in serve_src

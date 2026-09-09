@@ -276,8 +276,37 @@ def announce_self(repo, port):
                 break
 
 
+# How often a board says where it is, when it has not been heard.
+ANNOUNCE_EVERY = 300.0
+
+
+def announce_self_forever(repo, port):
+    """Say where this board is, at start-up and then on a heartbeat.
+
+    Announcing once at start-up loses every race, and the races are the normal
+    case: the other machine is asleep, or restarting, or -- the one that actually
+    happened -- running older code that has never heard of `/hello`, so the one
+    announcement of the evening was answered with a 404 and nothing tried again.
+
+    The walk cannot be relied on to fix that either, because a walk happens when
+    somebody ASKS: a board nobody has the hub open against does not look for
+    anyone, so the machine with the news is exactly the machine that never sends
+    it. Hence a clock. One POST per machine, at most, every five minutes -- and
+    none at all once the far side has answered, because `announce_self` stops at
+    the first machine that says yes.
+    """
+    def loop():
+        while True:
+            try:
+                announce_self(repo, port)
+            except Exception:                                    # noqa: BLE001
+                pass        # a board must not die of failing to introduce itself
+            time.sleep(ANNOUNCE_EVERY)
+    threading.Thread(target=loop, daemon=True).start()
+
+
 def announce_self_later(repo, port):
-    """`announce_self` off the start-up path. Nothing waits on it."""
+    """`announce_self` off the caller's thread, once."""
     threading.Thread(target=announce_self, args=(repo, port), daemon=True).start()
 
 

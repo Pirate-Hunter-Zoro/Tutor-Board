@@ -73,10 +73,17 @@ now: one interface, one method, whether the exercises are proofs or functions.
 >
 > **And a board now says where it is, rather than waiting to be guessed at.** `/hello` — host,
 > port, course list, and the same three things in the reply, so one exchange teaches both machines.
-> Sent when a board starts listening, and again whenever a walk finds a peer, because announcing at
-> start-up alone depends on the other machine already being able to hear you and the machine with
-> the news is usually the one that just came up. Whichever of the pair can see the other teaches it
-> the way back.
+> Whichever of the pair can see the other teaches it the way back.
+>
+> **On a heartbeat, and that took a second round to get right.** The first version announced at
+> start-up and on every walk, which sounds like enough and is not: the node's boards restarted at
+> the moment of shipping, *before* the Mac had pulled, so the one announcement of the evening was
+> answered by a machine with no `/hello` on it — a 404, and the end of it. The walk is no fallback,
+> because a walk happens when somebody ASKS, and a board nobody has the hub open against never
+> looks for anyone. So the machine holding the news was the one machine that would never send it,
+> and the row still said "board" on its own until the announcement was posted by hand. It is a
+> clock now: every five minutes, one POST per machine at most, and none once the far side has
+> answered.
 >
 > **The row is never hidden again.** It hid itself at one machine — "one machine is not a choice,
 > and a row of one button is furniture" — which draws *nobody has looked yet* and *there is no
