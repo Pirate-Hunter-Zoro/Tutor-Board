@@ -49,39 +49,7 @@
   </div>
 </header>
 
-<div id="barmenu" class="barmenu" hidden>
-  <button id="btn-smaller" title="smaller type">A&minus;  smaller type</button>
-  <button id="btn-bigger" title="larger type">A+  larger type</button>
-  <button id="btn-face" title="typeface">Aa  reading face</button>
-  <button id="btn-theme" title="light / dark / auto">◐  light / dark</button>
-  <button id="btn-notes-again" title="ask about annotations again" hidden>✎  ask about annotations</button>
-  <button id="btn-scratch" title="photos and PDFs">▤  photos and PDFs</button>
-  <button id="btn-history" title="past lessons" hidden>◷  past lessons</button>
-  <button id="btn-print" title="print or save as PDF">⎙  print</button>
-  <!-- Two documents, and they are not the same document. This one is the
-       lesson AS IT WAS READ -- the board's own pixels, photographed by the
-       device that drew them, because that is what was asked for: "I want it as
-       if it were a screenshot of the entire iPad screen scrolled down over the
-       whole tutoring session." The typeset transcript is still what a whole
-       course comes out as; nothing on the device can photograph a sitting that
-       is not on the glass. -->
-  <button id="btn-export" title="this lesson as it looks on the glass — a numbered PDF kept in the repository">⇩  export this lesson</button>
-  <button id="btn-export-all" title="every lesson in this course, typeset as one document">⇩  export the whole course (typeset)</button>
-  <!-- The written-up work is a document too, and it had no button: the only way
-       to compile the thing an evening was actually spent writing was a terminal,
-       which is the one thing this page exists to abolish. -->
-  <button id="btn-export-hw" title="compile the problem set you are writing up, and keep it in the repository">⇩  export the written-up homework</button>
-  <!-- AND A WAY BACK TO A DOCUMENT THAT ALREADY EXISTS.
-       The three buttons above MAKE a document. Reaching one used to be possible
-       only in the banner of the build that made it, and that banner is replaced
-       by the next payload -- so a write-up somebody had just compiled became
-       unreachable about a second after it appeared. Reported as "it compiles the
-       homework, but it's not letting me view the compiled .pdf or save it
-       anywhere locally on the iPad." This is here at every moment, whether the
-       document was made ten seconds or ten days ago. -->
-  <button id="btn-papers" title="read either PDF here, or save a copy to Files">▤  documents · view or save</button>
-  <button id="btn-reload" title="reload the app">↻  reload the app</button>
-</div>
+
 
 <!-- End of session. Asked here, because the person answering is on an iPad. -->
 <div id="finish" class="finish" hidden>
@@ -159,6 +127,55 @@
   <button id="newver-later" type="button" class="quiet">later</button>
 </div>
 </div><!-- /#chrome -->
+
+<!-- THE MENU IS NOT PART OF THE BAR, AND LIVING INSIDE IT COST IT ITS SCROLL.
+     Reported as "there are three dots I can tap to get a menu... that isn't
+     scrollable — or at least when I try to scroll it, the main session page
+     behind it is what scrolls instead."
+
+     It used to hang off `#chrome`, which is `position: sticky`. WebKit does not
+     reliably hand a touch drag to an `overflow` container nested inside a
+     sticky element: the gesture walks straight past it to the page, so the
+     menu was capped and clipped exactly as intended and could not be moved a
+     pixel. Being in there also trapped it in `#chrome`'s stacking context, so
+     its own `z-index` counted for nothing against the rest of the page.
+
+     Out here it is a layer over the lesson, which is what a menu is. `board.js`
+     hangs it under the bar and caps it against the VISIBLE viewport, which is
+     the one measurement that survives a keyboard coming up or a pinch. -->
+<div id="barmenu" class="barmenu" hidden>
+  <button id="btn-smaller" title="smaller type">A&minus;  smaller type</button>
+  <button id="btn-bigger" title="larger type">A+  larger type</button>
+  <button id="btn-face" title="typeface">Aa  reading face</button>
+  <button id="btn-theme" title="light / dark / auto">◐  light / dark</button>
+  <button id="btn-notes-again" title="ask about annotations again" hidden>✎  ask about annotations</button>
+  <button id="btn-scratch" title="photos and PDFs">▤  photos and PDFs</button>
+  <button id="btn-history" title="past lessons" hidden>◷  past lessons</button>
+  <button id="btn-print" title="print or save as PDF">⎙  print</button>
+  <!-- Two documents, and they are not the same document. This one is the
+       lesson AS IT WAS READ -- the board's own pixels, photographed by the
+       device that drew them, because that is what was asked for: "I want it as
+       if it were a screenshot of the entire iPad screen scrolled down over the
+       whole tutoring session." The typeset transcript is still what a whole
+       course comes out as; nothing on the device can photograph a sitting that
+       is not on the glass. -->
+  <button id="btn-export" title="this lesson as it looks on the glass — a numbered PDF kept in the repository">⇩  export this lesson</button>
+  <button id="btn-export-all" title="every lesson in this course, typeset as one document">⇩  export the whole course (typeset)</button>
+  <!-- The written-up work is a document too, and it had no button: the only way
+       to compile the thing an evening was actually spent writing was a terminal,
+       which is the one thing this page exists to abolish. -->
+  <button id="btn-export-hw" title="compile the problem set you are writing up, and keep it in the repository">⇩  export the written-up homework</button>
+  <!-- AND A WAY BACK TO A DOCUMENT THAT ALREADY EXISTS.
+       The three buttons above MAKE a document. Reaching one used to be possible
+       only in the banner of the build that made it, and that banner is replaced
+       by the next payload -- so a write-up somebody had just compiled became
+       unreachable about a second after it appeared. Reported as "it compiles the
+       homework, but it's not letting me view the compiled .pdf or save it
+       anywhere locally on the iPad." This is here at every moment, whether the
+       document was made ten seconds or ten days ago. -->
+  <button id="btn-papers" title="read either PDF here, or save a copy to Files">▤  documents · view or save</button>
+  <button id="btn-reload" title="reload the app">↻  reload the app</button>
+</div>
 
 <!-- The drawing tools, along the bottom, where the hand holding the pen is. -->
 <div id="drawbar" hidden></div>

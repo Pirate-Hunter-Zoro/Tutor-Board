@@ -1251,10 +1251,21 @@ body.tools-out .annbar { bottom: calc(5.6rem + env(safe-area-inset-bottom)); }
 /* ---------- the overflow menu ---------- */
 /* Anchored under the bar rather than floating over the lesson, so it reads as
    part of the chrome it came out of. */
+/* FIXED, AND OUT HERE RATHER THAN INSIDE THE BAR -- see the note in
+   `board.html`. Nested inside `#chrome`, which is `position: sticky`, WebKit
+   would not hand a touch drag to this scroller at all: the gesture walked past
+   it to the lesson, which is "when I try to scroll it, the main session page
+   behind it is what scrolls instead". Being in there also trapped it in
+   `#chrome`'s stacking context, so this `z-index` competed only with the bar's
+   own children and not with the page.
+
+   The `top` and `right` here are the floor for the frame before `board.js`
+   measures. Above the chrome (40) and the bottom bars, below the full-screen
+   drawers (60+) -- a panel opening over this is right. */
 .barmenu {
-  position: absolute; z-index: 45;
+  position: fixed; z-index: 50;
   right: max(.6rem, env(safe-area-inset-right));
-  top: 100%;
+  top: calc(3.2rem + env(safe-area-inset-top));
   display: flex; flex-direction: column; gap: .15rem;
   min-width: 12rem;
   padding: .4rem;
@@ -1283,9 +1294,15 @@ body.tools-out .annbar { bottom: calc(5.6rem + env(safe-area-inset-bottom)); }
   max-height: calc(100vh - 5rem);
   max-height: calc(100dvh - 5rem);
   overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
+  /* No `-webkit-overflow-scrolling: touch`. It is deprecated, it does nothing
+     on any iOS this runs on, and the separate scrolling layer it asks for is
+     implicated in exactly the failure this element had: a nested scroller that
+     never receives the gesture. */
   /* The lesson behind must not take over when the menu reaches its end. */
   overscroll-behavior: contain;
+  /* The gesture is this element's, whatever it is: a drag down the menu is the
+     menu scrolling, and there is nothing here a pinch or a double-tap wants. */
+  touch-action: pan-y;
 }
 .barmenu button {
   font: inherit; text-align: left; cursor: pointer;

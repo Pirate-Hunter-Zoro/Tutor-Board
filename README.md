@@ -45,7 +45,53 @@ now: one interface, one method, whether the exercises are proofs or functions.
 >   board that is answering) but it is worth confirming: the port the HTTPS name points at should
 >   be the course they are working in.
 >
-> ### Where this is right now, 10 September 2026 (evening)
+> ### Where this is right now, 10 September 2026 (late)
+
+> **The ⋯ menu could not be scrolled, and the lesson scrolled instead.** *"At the top right, there
+> are three dots I can tap to get a menu of other things I can do, like refresh the app, etc. That
+> isn't scrollable — or at least when I try to scroll it, the main session page behind it is what
+> scrolls instead."* The menu was capped and given `overflow-y: auto` on 8 September, and both
+> halves of this report say that did not land. Two causes, and the second one produced both
+> symptoms on its own.
+>
+> **It lived inside a sticky element.** The menu hung off `#chrome`, which is `position: sticky`,
+> and WebKit does not reliably hand a touch drag to an `overflow` container nested inside one: the
+> gesture walks past it to the page. So the menu was clipped exactly as intended and could not be
+> moved a pixel — which is the report, word for word. Being in there also trapped it in `#chrome`'s
+> stacking context, so its `z-index: 45` competed with the bar's own children and not with the
+> page. It is a body-level `position: fixed` layer now, which is what a menu is.
+>
+> **And it was measured against the wrong viewport.** `placeMenu` capped its height with
+> `window.innerHeight` — the LAYOUT viewport, which is not what you can see. The iPad keyboard comes
+> up under a typed answer and takes half the glass while `innerHeight` does not move; a pinch
+> magnifies the page and `innerHeight` does not move. The cap was then **bigger than the screen**,
+> which does two things at once: the last entries sit off the bottom, and the menu does not overflow
+> its own box — and a box that does not overflow is not a scroller, so iOS correctly gives the drag
+> to the lesson. One wrong number, both complaints, and the reason the previous fix looked like it
+> had done nothing.
+>
+> This is the same mistake `#panic` was written to escape, in the same file. `test/panic.js` has
+> carried the rule since it was written — *"`position: fixed` is fixed to the LAYOUT viewport.
+> Pinching moves the VISUAL one. A control placed by CSS alone therefore slides off the glass at
+> exactly the moment it is needed, and looks perfect in every test that never zooms"* — and the menu
+> was the second control with the defect. It is placed from `window.visualViewport` now, hung from
+> the real bottom of the chrome stack rather than an ancestor's edge, and re-placed while it is open
+> on every visual-viewport move, coalesced to one placement a frame.
+>
+> `-webkit-overflow-scrolling: touch` is gone with it. It is deprecated, it does nothing on any iOS
+> this runs on, and the separate scrolling layer it asks for is implicated in exactly this failure:
+> a nested scroller that never receives the gesture.
+>
+> **Why no test caught it.** The 8 September tests assert the CSS text — that `overflow-y: auto` is
+> there, that the cap is in `dvh`, that something measures the room. Every one of those was true and
+> the menu still could not be scrolled. `test/chrome.js` now asserts where the element *lives* — that
+> it is not inside `#chrome`, that it is `position: fixed`, that the deprecated scrolling layer has
+> not come back. And `test/panic.js`, which already stands up a zoomable visual viewport, opens the
+> menu with the keyboard up and checks the cap against what can be seen: 204px of a 260px visible
+> viewport, where the old code gave 712px. Both fail against the code they replaced.
+> Shell version `board-shell-v88`.
+>
+> ### Where this was earlier on 10 September 2026 (evening)
 >
 > Two things reported from the iPad in one message, and they are unrelated to each other except
 > that both are the board interrupting somebody in the middle of a proof.

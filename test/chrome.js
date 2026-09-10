@@ -225,6 +225,34 @@ decl(draw, 'top') === null
   /id="btn-reload"/.test(HTML)
     ? ok('reload the app is in the menu')
     : fail('there is no reload entry at all');
+
+  // --- AND IT HAS TO BE ABLE TO RECEIVE THE GESTURE ----------------------
+  //
+  // Reported once it was capped and scrollable: "that isn't scrollable — or at
+  // least when I try to scroll it, the main session page behind it is what
+  // scrolls instead." Two halves, and this is the first: the menu hung inside
+  // `#chrome`, which is `position: sticky`, and WebKit does not reliably hand a
+  // touch drag to a scroller nested in a sticky element. The gesture walked
+  // past it to the lesson. Being in there also trapped it in `#chrome`'s
+  // stacking context, so its own `z-index` competed with the bar's children
+  // rather than with the page.
+  const chromeBlock = HTML.slice(HTML.indexOf('<div id="chrome">'),
+                                 HTML.indexOf('/#chrome'));
+  !/id="barmenu"/.test(chromeBlock)
+    ? ok('the menu is not nested inside the sticky bar')
+    : fail('the menu lives inside #chrome, which is position: sticky — WebKit '
+           + 'will not give a scroller in there the touch drag, so the lesson '
+           + 'scrolls instead');
+  /id="barmenu"/.test(HTML)
+    ? ok('and is still on the page, as a layer over the lesson')
+    : fail('the menu was lost altogether');
+  /position:\s*fixed/.test(menu)
+    ? ok('and is fixed, so it hangs over the lesson rather than inside the bar')
+    : fail('the menu is still positioned against an ancestor');
+  !/-webkit-overflow-scrolling/.test(menu)
+    ? ok('with no deprecated overflow-scrolling layer to lose the gesture in')
+    : fail('-webkit-overflow-scrolling is back; it is the separate scrolling '
+           + 'layer this element could not be scrolled inside');
 }
 
 console.log(errors.length ? '\n' + errors.length + ' FAILURES'

@@ -76,6 +76,7 @@ var els = {
   finishSub: document.getElementById("finish-sub"),
   save: document.getElementById("btn-save"),
   barmenu: document.getElementById("barmenu"),
+  chrome: document.getElementById("chrome"),
   notesAgain: document.getElementById("btn-notes-again"),
   home: document.getElementById("btn-home"),
   finishLeave: document.getElementById("finish-leave"),
@@ -2937,25 +2938,71 @@ document.getElementById("btn-more").onclick = function (e) {
   if (!els.barmenu.hidden) placeMenu();
 };
 
-/* HOW MUCH ROOM THE MENU ACTUALLY HAS, measured rather than guessed.
+/* WHERE THE MENU GOES AND HOW MUCH ROOM IT HAS, measured against the glass.
 
-   Reported as "I can't see the refresh button when I tap the '...' menu."
-   The menu hangs under `#chrome`, which is stuck to the top of the window --
-   so an entry past the bottom edge is not below the fold, it is unreachable:
-   scrolling the page moves the lesson, not this. `board.css` caps it against
-   the viewport, which is the floor; this is the true figure, because the
-   chrome stack it hangs from grows and shrinks with the banners in it. A save
-   offer, an export result and the homework strip together are most of an inch,
-   and every one of those is up at exactly the moment somebody goes looking for
-   the reload. */
+   Reported as "I can't see the refresh button when I tap the '...' menu", and
+   then, once it had been capped and made scrollable, as "that isn't scrollable
+   -- or at least when I try to scroll it, the main session page behind it is
+   what scrolls instead". Two defects, and the second one had two halves.
+
+   The first half is where the element LIVES, and that is fixed in `board.html`:
+   it hung inside `#chrome`, which is `position: sticky`, and WebKit does not
+   reliably hand a touch drag to a scroller nested in a sticky element.
+
+   The second half is this function, which measured with `window.innerHeight`.
+   That is the LAYOUT viewport, and the layout viewport is not what you can see.
+   The iPad keyboard comes up and takes half the glass while `innerHeight` does
+   not move; a pinch magnifies the page and `innerHeight` does not move. The cap
+   was then bigger than the screen, so the last entries were off the bottom AND
+   the menu did not overflow its own box -- and a box that does not overflow is
+   not a scroller, so iOS correctly gave the gesture to the page. That is both
+   halves of the complaint from one wrong number.
+
+   `window.visualViewport` is the honest one, and this file already knows it:
+   `panicPlace` is placed from it for exactly this reason. So the menu hangs
+   from the real bottom of the chrome stack -- which grows and shrinks with the
+   banners in it, a save offer and an export result being most of an inch, and
+   both up at the moment somebody goes looking for the reload -- and is capped
+   at the room left on the VISIBLE viewport below that. */
 function placeMenu() {
   if (!els.barmenu || els.barmenu.hidden) return;
-  var top = els.barmenu.getBoundingClientRect().top;
-  var room = window.innerHeight - top - 12;
+  var vv = window.visualViewport;
+  var h = vv ? vv.height : window.innerHeight;
+  var oy = vv ? vv.offsetTop : 0;
+  var ox = vv ? vv.offsetLeft : 0;
+  var w = vv ? vv.width : window.innerWidth;
+  var pad = 12;
+  /* Under the whole stack, not under the title bar: the menu opens below
+     whatever banners are up, because opening behind one hides its first
+     entries. Never above the top of the glass, and never pushed so far down
+     that there is no room left underneath it. */
+  var stack = els.chrome ? els.chrome.getBoundingClientRect().bottom : 0;
+  var top = Math.min(Math.max(stack + 4, oy + 4), oy + h - 140);
+  /* `right` is measured from the LAYOUT viewport's right edge, because that is
+     what `position: fixed` is fixed to -- so the visible right edge has to be
+     put back in those terms. */
+  var right = Math.max(6, window.innerWidth - (ox + w) + 10);
+  els.barmenu.style.top = top + "px";
+  els.barmenu.style.right = right + "px";
   /* Never so small that it is a scroller with one entry in it: below this the
      menu is the wrong shape for the screen and the cap is the lesser problem. */
-  els.barmenu.style.maxHeight = Math.max(140, room) + "px";
+  els.barmenu.style.maxHeight = Math.max(140, oy + h - top - pad) + "px";
   menuCue();
+}
+
+/* Placed again while it is open, because everything this measures moves: the
+   keyboard comes up under a typed answer, a banner lands in the stack, the iPad
+   is turned. Coalesced to one placement a frame -- a forced layout per scroll
+   event is how a page that is merely scrolling starts to stutter, which is the
+   same reason `panicSoon` exists. */
+var menuFrame = 0;
+
+function placeMenuSoon() {
+  if (menuFrame || !els.barmenu || els.barmenu.hidden) return;
+  menuFrame = window.requestAnimationFrame(function () {
+    menuFrame = 0;
+    placeMenu();
+  });
 }
 
 /* Is there more below, and is the person being told? On iOS a scroller shows
@@ -2970,10 +3017,18 @@ function menuCue() {
   m.classList.toggle("more", left > 4);
 }
 
-/* Turning the iPad, or the keyboard coming up, changes the room. */
-["resize", "orientationchange"].forEach(function (ev) {
-  window.addEventListener(ev, placeMenu);
+/* Turning the iPad, the keyboard coming up, a pinch, a banner arriving: all of
+   them change where the menu can be and how much of it fits. The visual
+   viewport is the one that reports the first three; the window is the fallback
+   for anything without it. */
+["resize", "orientationchange", "scroll"].forEach(function (ev) {
+  window.addEventListener(ev, placeMenuSoon, { passive: true });
 });
+if (window.visualViewport) {
+  ["resize", "scroll"].forEach(function (ev) {
+    window.visualViewport.addEventListener(ev, placeMenuSoon);
+  });
+}
 els.barmenu.addEventListener("scroll", menuCue, { passive: true });
 Array.prototype.forEach.call(els.barmenu.querySelectorAll("button"), function (b) {
   b.addEventListener("click", function () { els.barmenu.hidden = true; });

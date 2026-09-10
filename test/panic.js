@@ -275,6 +275,69 @@ const press = (type, x, y) => btn.dispatchEvent(
     ? ok('pushed into the corner it is still wholly on the glass')
     : fail('the button can be pushed past the edge of the visible window');
 
+  // 8. AND THE SAME LESSON, IN THE OVERFLOW MENU.
+  //
+  // The button above is placed from the visual viewport because `position:
+  // fixed` is fixed to the LAYOUT one, and the two part company the moment
+  // anybody pinches or the keyboard comes up. The ⋯ menu had the identical
+  // defect in the identical place -- `placeMenu` capped its height against
+  // `window.innerHeight` -- and it produced both halves of one report:
+  //
+  //   "There are three dots I can tap to get a menu of other things I can do,
+  //    like refresh the app, etc. That isn't scrollable - or at least when I
+  //    try to scroll it, the main session page behind it is what scrolls
+  //    instead."
+  //
+  // A cap bigger than the glass puts the last entries off the bottom AND stops
+  // the menu overflowing its own box -- and a box that does not overflow is not
+  // a scroller, so iOS gives the drag to the page. One wrong number, both
+  // complaints.
+  {
+    await zoomTo(1, 0, 0);
+    const more = doc.getElementById('btn-more');
+    const menu = doc.getElementById('barmenu');
+    more && menu
+      ? ok('the board has an overflow menu and a control to open it')
+      : fail('no overflow menu to measure');
+
+    if (more && menu) {
+      // The keyboard up under a typed answer: half the glass gone, and
+      // `window.innerHeight` has not moved a pixel.
+      vv.height = 260;
+      vv.width = 800;
+      vv.offsetTop = 0;
+      vv.offsetLeft = 0;
+      vv.dispatchEvent(new window.Event('resize'));
+      await sleep(10);
+
+      more.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+      await sleep(10);
+      !menu.hidden ? ok('and it opens') : fail('the menu did not open');
+
+      const cap = parseFloat(menu.style.maxHeight || '0');
+      cap > 0 && cap <= 260
+        ? ok('and is capped to what can actually be seen (' + cap + 'px of a '
+             + '260px visible viewport)')
+        : fail('the menu is capped at ' + cap + 'px against a visible viewport '
+               + 'of 260px: its last entries are off the glass and it does not '
+               + 'overflow, so the drag goes to the lesson');
+      /px$/.test(menu.style.top || '')
+        ? ok('and hung from a measured top rather than an ancestor\'s edge')
+        : fail('nothing placed the menu; CSS alone cannot follow a keyboard');
+
+      // And it follows the glass while it is open, rather than being measured
+      // once and left behind.
+      const was = parseFloat(menu.style.maxHeight);
+      vv.height = 520;
+      vv.dispatchEvent(new window.Event('resize'));
+      await sleep(30);
+      parseFloat(menu.style.maxHeight) > was
+        ? ok('and is measured again when the keyboard goes away')
+        : fail('the menu keeps the cap it was opened with, so it stays wrong '
+               + 'for as long as it is up');
+    }
+  }
+
   console.log(errors.length ? '\n' + errors.length + ' FAILURES'
                             : '\nthere is always a way back');
   process.exit(errors.length ? 1 : 0);
