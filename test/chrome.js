@@ -60,7 +60,7 @@ draw ? ok('#drawbar has a rule') : fail('#drawbar has no rule at all');
   ? ok('the banners are inside the chrome stack, under the bar')
   : fail('the banners are not part of the chrome stack');
 
-['.finish, .pushed, .linkbad, .hwbar', '#bar'].forEach((sel) => {
+['.finish, .pushed, .linkbad, .hwbar, .newver', '#bar'].forEach((sel) => {
   const b = block(sel);
   if (b === null) return fail(sel + ' has no rule');
   decl(b, 'position') === null || decl(b, 'top') === null

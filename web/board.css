@@ -199,6 +199,17 @@ body { background: var(--paper); min-height: 100vh; min-height: 100dvh; }
 #linkbad-retry { margin-top: 0; margin-left: auto; flex: none; }
 .linkbad { background: color-mix(in srgb, var(--bad) 14%, var(--paper)); }
 
+/* The update strip. Quiet on purpose -- nothing is wrong, and the lesson is
+   what the person is here for. */
+.newver { background: color-mix(in srgb, var(--good) 12%, var(--paper)); font-size: .84rem; }
+.newver button {
+  font: inherit; font-size: .78rem; cursor: pointer; flex: none;
+  padding: .25rem .6rem; border-radius: .35rem;
+  border: 1px solid var(--rule); background: var(--paper); color: var(--ink-2);
+}
+#newver-now { margin-left: auto; }
+.newver button.quiet { border-color: transparent; background: transparent; }
+
 .hwbar { background: color-mix(in srgb, var(--ask) 10%, var(--paper)); font-size: .82rem; }
 #hw-set { font-weight: 700; letter-spacing: .04em; }
 #hw-count { min-width: 0; }
@@ -541,7 +552,7 @@ body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180de
 .to-board:hover { color: var(--ink); border-color: var(--ink-3); }
 
 /* ---------- end of session ---------- */
-.finish, .pushed, .linkbad, .hwbar {
+.finish, .pushed, .linkbad, .hwbar, .newver {
   display: flex; align-items: center; gap: .8rem;
   padding: .7rem max(1rem, env(safe-area-inset-left)) .7rem max(1rem, env(safe-area-inset-right));
   font-family: var(--ui);

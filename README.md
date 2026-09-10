@@ -45,7 +45,85 @@ now: one interface, one method, whether the exercises are proofs or functions.
 >   board that is answering) but it is worth confirming: the port the HTTPS name points at should
 >   be the course they are working in.
 >
-> ### Where this is right now, 10 September 2026
+> ### Where this is right now, 10 September 2026 (evening)
+>
+> Two things reported from the iPad in one message, and they are unrelated to each other except
+> that both are the board interrupting somebody in the middle of a proof.
+>
+> **A pinch showed the page as it was before the mark.** *"Sometimes zooming after writing or
+> erasing on the board glitches out and I have to wait a second for it to work properly and to be
+> able to scroll or erase or write again."* The second is the pinch.
+>
+> The writing surface keeps a bitmap of the page and blits it, stretched, while two fingers are
+> down — one `drawImage` a frame rather than four hundred strokes redrawn sixty times a second.
+> That trick is right and it stays. What was wrong is that the bitmap can be stale in **two
+> different ways and there was one flag between them.** `cacheValid` means *drawn at the view
+> showing now*, which a pinch breaks on every frame, and breaking it is fine: the ink is still the
+> right ink, so a stretched blit is a true picture of the page, softly rendered. A stroke committed
+> or a word rubbed out is a different thing entirely — then the bitmap's **ink** is out of date, and
+> stretching it is not softness, it is the page before the edit. Nothing could tell those apart, so
+> a pinch that began just after a mark was made blitted a bitmap with no such mark in it. The ink
+> came back when the gesture settled, about a second later, which is the "glitches out".
+>
+> The ink has its own flag now. A view change stretches; an ink change costs one rebuild, at the
+> view in hand, and every frame after it stretches again — one rebuild per edit, never one per
+> frame.
+>
+> **And the mend after an erase was painted at the wrong scale.** Rubbing out does not throw the
+> bitmap away; it records the rectangle it emptied and paints that patch back. A patch has to land
+> where the rest of the bitmap thinks that part of the page is, and the transform came from `view` —
+> the same thing as the bitmap's own geometry only until somebody starts a pinch, after which the
+> view moves every frame and the bitmap does not follow. So the repair went in at one scale on top
+> of ink drawn at another. It uses `cacheAt`, the bitmap's own geometry, which is what it was for.
+>
+> **A finger resting on the glass read as an idle surface.** Every test of whether the hand is busy
+> was a timestamp of the last thing it did, and a finger held still does nothing — which is how a
+> pinch is held at the zoom you wanted and how it is repositioned between two pinches. After 1.2
+> seconds of that the surface called itself idle and let a PNG encode land in the middle of the
+> gesture. A contact that is down is now busy, with a twenty-second bound so a lift that was never
+> delivered cannot wedge the encode for ever, and `blur` clears the contacts outright.
+>
+> **The encode was also being invited in by arithmetic.** Whether an autosave carried a picture was
+> worked out from `handBusy()` at the instant the timer fired, and that timer is set `AUTOSAVE_MS`
+> — 1200ms — after the last mark, which is exactly the width of the hand's tail in `handBusy`. The
+> autosave fired a millisecond after the guard expired, every time. A guard asked once, at an
+> instant, cannot cover a window. Carrying a picture is a decision the caller makes now: a send, a
+> leave, or the picture timer whose whole business is finding a gap. And a picture save that failed
+> re-owes the picture instead of leaving the PNG on disk behind the strokes until the next mark —
+> the last mark of an evening being exactly the one nothing follows.
+>
+> **A new version of the app reloaded the page out from under the reader.** *"There are a few times
+> when after I sent a response, the whole screen went white, and then the page reloaded with the
+> tutor response and all prior responses collapsed (though reachable) and all prior boards only
+> yielding the frozen canvas of my work."* Every part of that is one `location.reload()`, fired the
+> instant a new service worker claimed the page.
+>
+> The reload was deliberate and the reason for it is still true: swiping out of an installed iOS app
+> and back in RESUMES it, so without one a fixed bug stays on screen until the app is force-quit.
+> The moment it chose was not. An update is asked for on every return to the foreground, and
+> **sending a response is exactly when an app comes back to the foreground** — which is why it
+> happened where it did. A reload is cheap for the code and expensive for the person: the scroll
+> position goes, every card folds back to how it renders on a first visit, the live surface is
+> replaced by the picture of the last thing sent, and there is a white flash in the middle of a
+> proof.
+>
+> So a new worker is news, not an event. Taken at once when the page is **hidden**, because then it
+> costs nothing and the app is on the new code the moment it is picked up again. Offered otherwise,
+> in a strip that says what it is — *a new version of the board is ready · load it now · later* — so
+> somebody who wants the fix now can have it and somebody mid-exercise is not interrupted by one.
+> And never over ink the disk has not been told about: the surface can be asked what it still owes
+> (`api.owed` — a dirty page, a save on the wire, a retry, a picture outstanding) and both routes ask
+> before they reload. The full-screen slate keeps the same rule, where what would be lost is
+> handwriting.
+>
+> `test/plane.js` holds the surface half — a mark made just before a pinch is drawn rather than
+> stretched away, the frames after it still cost one blit, a mend lands at the geometry the bitmap
+> was drawn at, and a finger resting on the glass is a hand at work. `test/staying.js` is new and
+> holds the other: a handover while the lesson is on screen reloads nothing and says so instead, a
+> handover taken the moment the app is put down, and the ink consulted on the way through. Both fail
+> against the code they replaced. Shell version `board-shell-v87`.
+>
+> ### Where this was earlier on 10 September 2026
 >
 > **One killed git closed every door in the repository, and nothing noticed for seventy minutes.**
 > Reported in one sentence: *"I just tried to push up some work in Galois Theory, and it failed."*

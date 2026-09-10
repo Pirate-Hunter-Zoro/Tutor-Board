@@ -30,6 +30,9 @@ var AUTOSAVE_MS = 1200;
    once, and the picture is a hundred-odd milliseconds of main thread that must
    never land under a pen. See `save`. */
 var PICTURE_MS = 4000;
+/* How long a contact may sit in the map, unheard from, before it is taken to be
+   one whose lift was never delivered. No gesture is held this long. */
+var TOUCH_STALE = 20000;
 var LIVE_IDLE_MS = 3000;
 var LIVE_MIN_GAP_MS = 15000;
 var UNDO_DEPTH = 60;
@@ -350,7 +353,40 @@ function create(opts) {
               that is a scroll that stutters. Reported straight after the pen
               delay: "scrolling via finger on the writing pad is a little delayed
               after erasing, too". */
-           (Date.now() - lastHandAt < 1200);
+           (Date.now() - lastHandAt < 1200) ||
+           /* And a contact that is DOWN but not moving. Every test above is a
+              timestamp of the last thing that happened, so two fingers held
+              still on the glass -- which is how a pinch is held at the zoom you
+              wanted, and how it is repositioned between two pinches -- read as
+              an idle surface after 1.2 seconds and invited an encode into the
+              middle of the gesture. What the hand is doing is not only a matter
+              of when it last did it. */
+           handOnGlass() || !!zooming;
+  }
+
+  /* Is a contact actually resting on the glass.
+
+     Every other test above is a timestamp of the last thing the hand DID, and a
+     finger held still does nothing -- which is how a pinch is held at the zoom
+     you wanted, and how it is repositioned between two pinches. After 1.2
+     seconds of that the surface called itself idle and invited a PNG encode into
+     the middle of the gesture.
+
+     With a staleness bound, because a lift is not always delivered: a nib or a
+     finger that leaves past the edge of the surface, or an app sent to the
+     background mid-gesture, can leave a contact in the map for good -- and a
+     contact that is down for ever would mean a picture that is never encoded.
+     No gesture is held for twenty seconds; a contact that old is one whose lift
+     was lost. */
+  function handOnGlass() {
+    if (!touches) return false;
+    var now = Date.now();
+    var ids = Object.keys(touches);
+    for (var i = 0; i < ids.length; i++) {
+      var t = touches[ids[i]];
+      if (t && now - (t.at || 0) < TOUCH_STALE) return true;
+    }
+    return false;
   }
 
   /* A PEN is never a palm, whatever the id says.
@@ -619,7 +655,7 @@ function create(opts) {
     to.push(page().strokes.slice());
     page().strokes = from.pop();
     clearSelection();
-    invalidate();
+    invalidateInk();
     markDirty();
   }
 
@@ -777,7 +813,8 @@ function create(opts) {
     cache.width = sheet.width;
     cache.height = sheet.height;
     dropRect();
-    invalidate();
+    invalidateInk();       /* setting width CLEARS the bitmap; there is no ink
+                              left in it to stretch */
   }
 
   /* Where the sheet is, cached for the length of a frame.
@@ -959,6 +996,7 @@ function create(opts) {
     paintPaper(cacheCtx, p, view.k);
     paintStrokes(cacheCtx, p, seenBox(), tool.paper === "black");
     cacheValid = true;
+    cacheStale = false;
     /* Which view this bitmap IS. A pinch shows it again, stretched, rather than
        paying to draw the page once per frame -- see `zooming`. */
     cacheAt = { k: view.k, ox: view.ox, oy: view.oy };
@@ -1103,24 +1141,68 @@ function create(opts) {
      and only in the worst case the page, where this costs what the old code cost
      every time. Clipped, so the paper and the surviving strokes inside the box
      paint over the hole and nothing outside it is touched. */
+  /* AT THE VIEW THE BITMAP WAS DRAWN AT, WHICH IS NOT NECESSARILY THE VIEW NOW.
+
+     This paints a patch of the page back into the cache, and a patch has to land
+     where the rest of the bitmap thinks that part of the page is. It used to
+     take the transform from `view`, which is the same thing only while the two
+     agree -- and they stop agreeing the instant somebody starts a pinch, because
+     the view then moves every frame and the bitmap does not follow. An erase
+     followed by a pinch therefore painted the repair at one scale into a bitmap
+     drawn at another, and the stretched result is the "glitches out" that was
+     reported: the mended patch is in the wrong place, at the wrong size, on top
+     of ink it does not line up with.
+
+     `cacheAt` is the bitmap's own geometry and it is what this must use. Handed
+     back so the caller knows whether the mend happened at all. */
   function repairCache(box) {
     var p = page();
-    if (!p || !box) return;
+    if (!p || !box) return false;
+    var at = cacheAt;
+    if (!at || !cache.width) return false;
     var d = dpr();
     cacheCtx.setTransform(1, 0, 0, 1, 0, 0);
     cacheCtx.save();
-    var x = box.x0 * view.k + view.ox, y = box.y0 * view.k + view.oy;
+    var x = box.x0 * at.k + at.ox, y = box.y0 * at.k + at.oy;
     cacheCtx.beginPath();
     cacheCtx.rect(x * d, y * d,
-                  (box.x1 - box.x0) * view.k * d, (box.y1 - box.y0) * view.k * d);
+                  (box.x1 - box.x0) * at.k * d, (box.y1 - box.y0) * at.k * d);
     cacheCtx.clip();
-    cacheCtx.setTransform(d * view.k, 0, 0, d * view.k, d * view.ox, d * view.oy);
-    paintPaper(cacheCtx, p, view.k);
+    cacheCtx.setTransform(d * at.k, 0, 0, d * at.k, d * at.ox, d * at.oy);
+    paintPaper(cacheCtx, p, at.k);
     paintStrokes(cacheCtx, p, box, tool.paper === "black");
     cacheCtx.restore();
+    return true;
   }
 
+  /* THE CACHE IS STALE IN TWO DIFFERENT WAYS AND THEY ARE NOT INTERCHANGEABLE.
+     
+     `cacheValid` says the bitmap was drawn at the view showing now. A pinch
+     breaks that on every frame -- `setZoom` invalidates -- and that is exactly
+     the case the stretch exists for: the ink in the bitmap is still the right
+     ink, so blitting it under a transform is a true picture of the page, softly
+     rendered.
+     
+     `cacheStale` says something else entirely: the bitmap's INK is out of date.
+     A stroke was committed, something was erased, a selection was deleted, the
+     paper changed. Stretching then is not softness, it is showing the page as
+     it was before the edit -- and there was no way to tell the two apart, so a
+     pinch that began just after a mark was made blitted a bitmap that did not
+     contain it. Reported from the iPad: "zooming after writing or erasing on the
+     board glitches out and I have to wait a second for it to work properly".
+     The second is the pinch; the ink comes back when `zoomSettled` finally
+     rebuilds.
+     
+     So the ink gets its own flag. A view change stretches; an ink change costs
+     one rebuild, at the view in hand, and every frame after it stretches again.
+     One rebuild per edit, never one per frame, which is the whole point of the
+     original trick and is unchanged. */
+  var cacheStale = true;
+
   function invalidate() { cacheValid = false; schedule(); }
+
+  /* The page's ink changed, not just where it is being looked at from. */
+  function invalidateInk() { cacheStale = true; invalidate(); }
 
   /* How much of the live stroke is already on the canvas. */
   var livePainted = 0;
@@ -1167,12 +1249,17 @@ function create(opts) {
 
   function draw() {
     if (!page()) return;
-    /* Mid-pinch: stretch what is already drawn rather than drawing it again.
-       Only ever an approximation of a view the cache does hold -- with no cache
-       at all there is nothing to stretch and it has to be built. */
-    var stretch = zooming && cacheAt && cache.width > 0;
+    /* Mend first, because whether the bitmap may be stretched depends on it.
+       A repair that cannot be placed -- no bitmap yet, or none of this size --
+       leaves the ink out of date, and out-of-date ink is rebuilt, not blitted. */
+    if (repairBox) {
+      if (!repairCache(repairBox)) cacheStale = true;
+      repairBox = null;
+    }
+    /* Mid-pinch: stretch what is already drawn rather than drawing it again --
+       but only while what is already drawn is the right INK. */
+    var stretch = zooming && !cacheStale && cacheAt && cache.width > 0;
     if (!cacheValid && !stretch) rebuildCache();
-    else if (cacheValid && repairBox) { repairCache(repairBox); repairBox = null; }
     var d = dpr();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, sheet.width, sheet.height);
@@ -1290,7 +1377,7 @@ function create(opts) {
                                   y1: Math.max(repairBox.y1, took.y1) } : took;
         schedule();
       } else {
-        invalidate();
+        invalidateInk();
       }
       markDirty();
     }
@@ -1316,7 +1403,7 @@ function create(opts) {
       if (drawing && drawing !== "erasing" && drawing._touch) {
         drawing = null;
         livePainted = 0;
-        invalidate();
+        invalidate();      /* the live stroke was never in the bitmap */
       }
       /* And anything already on the glass when the nib arrives is a hand, for
          as long as it stays there. Clearing `touches` alone was not enough:
@@ -1360,7 +1447,7 @@ function create(opts) {
         palms[ev.pointerId] = Date.now();
         return;
       }
-      touches[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
+      touches[ev.pointerId] = { x: ev.clientX, y: ev.clientY, at: Date.now() };
       var ids = Object.keys(touches);
       if (ids.length === 2) {
         var a = touches[ids[0]], b = touches[ids[1]];
@@ -1410,7 +1497,7 @@ function create(opts) {
     if (isPalm(ev)) return;
     if (touches[ev.pointerId]) {
       var prev = touches[ev.pointerId];
-      touches[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
+      touches[ev.pointerId] = { x: ev.clientX, y: ev.clientY, at: Date.now() };
       var ids = Object.keys(touches);
       /* The heel of a hand is a touch. With a finger set to scroll it would drag
          the canvas out from under the nib mid-word, so anything the hand does is
@@ -1451,7 +1538,7 @@ function create(opts) {
         for (var n = 0; n < s.pts.length; n++) { s.pts[n][0] += dx; s.pts[n][1] += dy; }
       });
       dragging.forked = true;
-      invalidate();
+      invalidateInk();
       return;
     }
     if (drawing === "erasing") {
@@ -1538,7 +1625,7 @@ function create(opts) {
         zoomSettled();
       }
     }
-    if (dragging) { dragging = null; markDirty(); invalidate(); return; }
+    if (dragging) { dragging = null; markDirty(); invalidateInk(); return; }
     if (lasso) {
       if (lasso.length > 4) {
         var poly = lasso, p = page(), idx = [];
@@ -1568,7 +1655,7 @@ function create(opts) {
       grow(drawing);
     }
     drawing = null;
-    invalidate();
+    invalidateInk();
     markDirty();
   }
   sheet.addEventListener("pointerup", endStroke);
@@ -1583,7 +1670,13 @@ function create(opts) {
       if (ev.pointerType === "pen") penDown = false;
     }, true);
   });
-  window.addEventListener("blur", function () { penDown = false; });
+  window.addEventListener("blur", function () {
+    penDown = false;
+    /* And no contact survives the app going away: the lift that would have
+       cleared it is exactly the event that is not delivered. */
+    touches = {};
+    pinch = null;
+  });
   ["touchstart", "touchmove", "touchend", "gesturestart", "gesturechange"].forEach(function (t) {
     sheet.addEventListener(t, function (e) { e.preventDefault(); }, { passive: false });
   });
@@ -1609,7 +1702,7 @@ function create(opts) {
       clipboard = selected(); snapshot();
       var drop = {}; sel.idx.forEach(function (i) { drop[i] = true; });
       page().strokes = page().strokes.filter(function (_, i) { return !drop[i]; });
-      clearSelection(); invalidate(); markDirty();
+      clearSelection(); invalidateInk(); markDirty();
     },
     paste: function () {
       if (!clipboard.length) { toast("nothing copied yet"); return; }
@@ -1622,7 +1715,7 @@ function create(opts) {
         p.strokes.push(s);
       });
       sel = { idx: p.strokes.slice(start).map(function (_, n) { return start + n; }) };
-      invalidate(); markDirty();
+      invalidateInk(); markDirty();
     },
     duplicate: function () { ACTIONS.copy(); ACTIONS.paste(); },
     colour: function () {
@@ -1631,13 +1724,13 @@ function create(opts) {
         var s = fork(i);
         if (s) s.c = tool.color;
       });
-      invalidate(); markDirty();
+      invalidateInk(); markDirty();
     },
     "delete": function () {
       snapshot();
       var drop = {}; sel.idx.forEach(function (i) { drop[i] = true; });
       page().strokes = page().strokes.filter(function (_, i) { return !drop[i]; });
-      clearSelection(); invalidate(); markDirty();
+      clearSelection(); invalidateInk(); markDirty();
     },
     done: function () { clearSelection(); schedule(); },
   };
@@ -1733,6 +1826,20 @@ function create(opts) {
   }
 
   /* ---------------------------------------------------------------- save */
+  /* WHETHER A SAVE CARRIES A PICTURE IS A DECISION, NOT AN ACCIDENT OF TIMING.
+
+     `save` used to work it out itself, from `handBusy()`, at the instant it was
+     called -- and the autosave is called by a timer set `AUTOSAVE_MS` after the
+     last mark, which is 1200ms, which is exactly the width of the hand's own
+     tail in `handBusy`. So an autosave following a finger fired at the very
+     moment the guard expired: the encode landed a millisecond after the surface
+     decided the hand was gone, which is about when a hand comes back to pinch.
+     A guard asked once, at an instant, cannot cover a window.
+
+     So the two jobs are separated. The autosave carries strokes, always, at
+     once -- they are what a reload restores and they are cheap. The picture is
+     carried only by a caller that asked for one: a send, a leave, or
+     `armPicture`, whose whole business is finding a gap. */
   function markDirty() {
     dirty = true;
     dirtyPages[current] = true;
@@ -1798,7 +1905,7 @@ function create(opts) {
       /* Still writing: come back. A page whose picture is owed is a page whose
          strokes are already safely on disk, so there is nothing to hurry. */
       if (handBusy()) return armPicture();
-      for (var k in pictureOwed) { save(false, true, Number(k)); }
+      for (var k in pictureOwed) { save(false, true, Number(k), true); }
     }, PICTURE_MS);
   }
 
@@ -1835,7 +1942,7 @@ function create(opts) {
     return null;
   }
 
-  function save(send, quiet, which) {
+  function save(send, quiet, which, picture) {
     var idx = (which === undefined || which === null) ? current : which;
     if (saving) {
       /* An autosave can simply wait its turn -- `dirtyPages` is the queue, and
@@ -1844,7 +1951,7 @@ function create(opts) {
          person pressing a button and has to actually happen, so it queues
          behind what is already going, on the page it was pressed for. */
       if (!send) return saving;
-      return saving.then(function () { return save(send, quiet, idx); });
+      return saving.then(function () { return save(send, quiet, idx, picture); });
     }
     var p = pages[idx];
     if (!p) return Promise.resolve();
@@ -1852,9 +1959,9 @@ function create(opts) {
     savedTag.classList.add("busy");
     /* A send has to carry the picture -- it is copied into `live/answers/` as
        the frozen answer, and that must be what was handed in. Leaving carries it
-       too, because there is no later moment to encode it in. Otherwise: only
-       when the hand is off the glass. */
-    var withPicture = !!send || leaving || !handBusy();
+       too, because there is no later moment to encode it in. Otherwise it waits
+       for `armPicture` to find a gap, and until then the page stays owed. */
+    var withPicture = !!send || leaving || !!picture;
     if (withPicture) delete pictureOwed[idx];
     else armPicture();
     /* Its own number, never its position. A page whose number is somehow
@@ -1908,6 +2015,11 @@ function create(opts) {
          backing off to fifteen seconds. Whatever succeeds next clears it. */
       savedTag.classList.remove("busy");
       savedTag.textContent = send ? "not sent — retrying" : "not saved — retrying";
+      /* The picture was struck off the moment it went out, and it did not land,
+         so it is owed again. Without this a failed picture save left the PNG on
+         disk behind the strokes until the next mark was made -- and the last
+         mark of an evening is exactly the one nothing follows. */
+      if (withPicture && !send) { pictureOwed[idx] = true; armPicture(); }
       retryLater(send, quiet, idx);
     });
     saving = done.then(function () {
@@ -2014,7 +2126,7 @@ function create(opts) {
          whole page re-encoded and posted for a change that is not ON the page:
          the paper is a property of this device, the file holds `w`, `h` and
          strokes, and the PNG is white whatever the screen shows. */
-      invalidate();
+      invalidateInk();
       if (opts.onPaper) opts.onPaper(tool.paper);
     };
   });
@@ -2023,7 +2135,7 @@ function create(opts) {
       tool.rule = b.dataset.rule;
       remember_(RULE_KEY, tool.rule);
       selectOne(ruleBtns, b);
-      invalidate();
+      invalidateInk();
       if (opts.onPaper) opts.onPaper(tool.paper);
     };
   });
@@ -2241,6 +2353,17 @@ function create(opts) {
      scroll the diagram out from under them. The tail is generous on purpose --
      the gap between two words of a proof is longer than it feels. */
   api.busy = function () { return handBusy(); };
+
+  /* Whether anything on this surface has not reached the disk: a page whose
+     strokes are dirty, a save on the wire, a save being retried, or a picture
+     still owed. Asked before a reload -- a reload is cheap for the code and it
+     is somebody's afternoon if there is ink in this list. */
+  api.owed = function () {
+    if (dirty || saving || retry.at) return true;
+    for (var a in dirtyPages) return true;
+    for (var b in pictureOwed) return true;
+    return false;
+  };
   /* Which tool is in hand. Reading it is for the chrome; setting it is for
      tests, which otherwise have to reach into the toolbar and click a button to
      exercise the rubber. */
@@ -2285,7 +2408,7 @@ function create(opts) {
     if (data && data.h) p.h = data.h;
     dropInk();
     clearSelection();
-    invalidate();
+    invalidateInk();
     fitPage();
     return true;
   };
@@ -2504,7 +2627,7 @@ function create(opts) {
     p.strokes = [];
     dropInk();
     clearSelection();
-    invalidate();
+    invalidateInk();
   };
   api.root = root;
   return api;

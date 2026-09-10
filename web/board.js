@@ -36,6 +36,9 @@ var els = {
   sendCancel: document.getElementById("send-cancel"),
   offline: document.getElementById("offline"),
   linkbad: document.getElementById("linkbad"),
+  newver: document.getElementById("newver"),
+  newverNow: document.getElementById("newver-now"),
+  newverLater: document.getElementById("newver-later"),
   hwbar: document.getElementById("hwbar"),
   hwSet: document.getElementById("hw-set"),
   hwCount: document.getElementById("hw-count"),
@@ -5004,15 +5007,77 @@ if ("serviceWorker" in navigator && window.isSecureContext) {
      is restored from memory and never re-executes. Without an explicit check,
      a fixed bug stays on screen until the app is force-quit, which is not
      something anyone should have to know. So: ask for an update every time the
-     app comes back to the foreground, and reload when a new worker takes over. */
+     app comes back to the foreground, and take a new worker when there is one.
+
+     BUT NEVER OUT FROM UNDER SOMEBODY WHO IS READING IT.
+
+     Reported from the iPad: "there are a few times when after I sent a response,
+     the whole screen went white, and then the page reloaded with the tutor
+     response and all prior responses collapsed (though reachable) and all prior
+     boards only yielding the frozen canvas of my work." Every part of that is
+     one `location.reload()`, fired the instant a new service worker claimed the
+     page, with no regard for what the page was in the middle of. A reload is
+     cheap for the code and expensive for the person: the scroll position goes,
+     every card folds back to how it renders on a first visit, the live surface
+     is replaced by the picture of the last thing sent, and there is a white
+     flash in the middle of a proof. And a new worker arrives at a moment nobody
+     chose -- an update is asked for on every return to the foreground, and
+     sending a response is exactly when an app comes back to the foreground.
+
+     So a new worker is now NEWS, not an event. Taken at once when the page is
+     hidden, because then it costs nothing and the app is on the new code the
+     moment it is picked up again. Offered, otherwise, in a strip that says what
+     it is -- so somebody who wants the fix now can have it, and somebody in the
+     middle of an exercise is not interrupted by one. And never while there is
+     ink the disk has not been told about, whichever way it is taken. */
   var hadController = !!navigator.serviceWorker.controller;
   var reloading = false;
+  var updateWaiting = false;
+
+  function inkOwed() {
+    try {
+      if (writer && writer.owed && writer.owed()) return true;
+    } catch (e) { /* no surface mounted; nothing owed */ }
+    return false;
+  }
+
+  /* Whether now is a moment a reload costs nothing. Hidden is the whole of it:
+     nothing is being read, nothing is being written, and the page comes back
+     rebuilt rather than torn down. */
+  function reloadIsFree() {
+    return document.hidden && !inkOwed();
+  }
+
+  function takeUpdate() {
+    if (reloading) return;
+    if (inkOwed()) return;             /* the ink first, always */
+    reloading = true;
+    location.reload();
+  }
+
+  function offerUpdate() {
+    if (!els.newver || reloading) return;
+    if (reloadIsFree()) { takeUpdate(); return; }
+    els.newver.hidden = false;
+  }
 
   navigator.serviceWorker.addEventListener("controllerchange", function () {
     if (!hadController || reloading) return;   /* not the first install */
-    reloading = true;
-    location.reload();
+    updateWaiting = true;
+    offerUpdate();
   });
+
+  /* The moment the app is put down is the moment to take it. */
+  document.addEventListener("visibilitychange", function () {
+    if (updateWaiting && document.hidden) takeUpdate();
+  });
+
+  if (els.newver) {
+    els.newverNow.onclick = takeUpdate;
+    els.newverLater.onclick = function () {
+      els.newver.hidden = true;        /* still waiting; taken when put down */
+    };
+  }
 
   window.addEventListener("load", function () {
     navigator.serviceWorker.register("/sw.js", { scope: "/" }).then(function (reg) {

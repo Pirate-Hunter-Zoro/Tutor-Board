@@ -10,7 +10,8 @@
 (function () {
 "use strict";
 
-window.Slate.create({ root: document.getElementById("slate"), compact: false });
+var writer = window.Slate.create({ root: document.getElementById("slate"),
+                                   compact: false });
 
 /* Show which question is being answered, so the full-screen view is not
    context-free. */
@@ -29,10 +30,26 @@ fetch("/board.json").then(function (r) { return r.json(); }).then(function (d) {
 
 if ("serviceWorker" in navigator && window.isSecureContext) {
   var hadController = !!navigator.serviceWorker.controller, reloading = false;
-  navigator.serviceWorker.addEventListener("controllerchange", function () {
-    if (!hadController || reloading) return;
+  var updateWaiting = false;
+
+  /* A RELOAD OF THIS PAGE IS A PAGE OF HANDWRITING AT RISK, so it waits until
+     the surface owes the disk nothing and nobody is looking at it. The board
+     has the same rule and the reason it is written up there: a reload taken
+     unasked is a white screen in the middle of a proof. Here the stakes are
+     higher, because what would be lost is ink. */
+  function take() {
+    if (reloading) return;
+    try { if (writer && writer.owed && writer.owed()) return; } catch (e) {}
     reloading = true;
     location.reload();
+  }
+  navigator.serviceWorker.addEventListener("controllerchange", function () {
+    if (!hadController || reloading) return;
+    updateWaiting = true;
+    if (document.hidden) take();
+  });
+  document.addEventListener("visibilitychange", function () {
+    if (updateWaiting && document.hidden) take();
   });
   window.addEventListener("load", function () {
     navigator.serviceWorker.register("/sw.js", { scope: "/" }).then(function (reg) {

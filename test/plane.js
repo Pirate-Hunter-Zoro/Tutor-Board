@@ -1009,6 +1009,178 @@ const heelSwipe = (id, x, y, dx, dy) => {
     : fail('an ordinary page now opens somewhere other than its first line');
 }
 
+  // ------------------------------- A PINCH SHOWS THE PAGE, NOT THE PAGE BEFORE
+  //
+  // The bitmap is stale in two different ways and they had one flag between
+  // them. `cacheValid` means "drawn at the view showing now", which a pinch
+  // breaks on every frame -- and that is fine, because stretching a bitmap that
+  // holds the right INK is a true picture of the page, softly rendered. It is
+  // not fine when the ink itself has changed: then the stretch shows the page as
+  // it was before the mark. Reported from the iPad: "zooming after writing or
+  // erasing on the board glitches out and I have to wait a second for it to work
+  // properly and to be able to scroll or erase or write again."
+  {
+    slate.tool('pen');
+    slate.clear();
+    slate.load({ w: 1130, h: 900, strokes: [
+      { c: '#eee', w: 3, pts: [[200, 200], [260, 200], [300, 240]] },
+    ] });
+    await sleep(20);
+
+    const down = (id, x, y) => {
+      const ev = new window.Event('pointerdown', { bubbles: true, cancelable: true });
+      Object.assign(ev, { pointerId: id, pointerType: 'touch', pressure: 0,
+                          clientX: x, clientY: y, isPrimary: id === 71 });
+      sheet.dispatchEvent(ev);
+    };
+    const up = (id, x, y) => {
+      const ev = new window.Event('pointerup', { bubbles: true, cancelable: true });
+      Object.assign(ev, { pointerId: id, pointerType: 'touch', pressure: 0,
+                          clientX: x, clientY: y, isPrimary: id === 71 });
+      sheet.dispatchEvent(ev);
+    };
+
+    // A mark is made, and the pinch begins before the frame that would have
+    // drawn it. This is the ordinary order of things: a line is written and the
+    // hand goes straight to two fingers to see the whole page.
+    pen('pointerdown', 500, 500, 81);
+    pen('pointermove', 560, 520, 81);
+    pen('pointerup', 560, 520, 81);
+    down(71, 200, 200);
+    down(72, 400, 400);
+    window.__paints = {};
+    await sleep(30);
+    (window.__paints.stroke || 0) > 0
+      ? ok('ink made just before a pinch is drawn, not stretched away')
+      : fail('the pinch blitted a bitmap with no such stroke in it: the mark '
+             + 'that was just written disappears for the length of the gesture');
+
+    // And having paid for it once, the rest of the gesture is free again --
+    // which is the whole point of the stretch and must not be lost.
+    window.__paints = {};
+    slate.zoom(0.5);
+    await sleep(30);
+    (window.__paints.stroke || 0) === 0 && (window.__paints.drawImage || 0) > 0
+      ? ok('and the frames after it still cost one blit, not a repaint')
+      : fail('every pinch frame is repainting the page again ('
+             + (window.__paints.stroke || 0) + ' stroke calls)');
+    up(71, 200, 200); up(72, 400, 400);
+    await sleep(30);
+  }
+
+  // ------------------------- A MEND BELONGS TO THE BITMAP, NOT TO THE VIEW NOW
+  //
+  // Erasing does not throw the cache away; it records the rectangle it emptied
+  // and paints that patch back in. A patch has to land where the rest of the
+  // bitmap thinks that part of the page is -- and the transform came from
+  // `view`, which is the same thing only until somebody starts a pinch. Then the
+  // view moves every frame and the bitmap does not follow, so the mend was
+  // painted at one scale into a picture drawn at another. That is the "glitches
+  // out": a repaired patch in the wrong place, at the wrong size, on top of ink
+  // it does not line up with.
+  {
+    slate.tool('pen');
+    slate.clear();
+    slate.load({ w: 1130, h: 900, strokes: [
+      { c: '#eee', w: 3, pts: [[200, 200], [260, 200], [300, 240]] },
+      { c: '#eee', w: 3, pts: [[200, 400], [260, 400], [300, 440]] },
+    ] });
+    await sleep(20);
+    slate.zoom(1);
+    await sleep(30);
+    const drawnAt = slate.view().k;      // the view the bitmap now holds
+
+    // Rub something out and pinch in the same breath, with no frame in between:
+    // the mend is owed and the view is already moving. This is the order a hand
+    // actually produces -- rub a word out, then two fingers to see the page.
+    // Placed through the view, not guessed: the page is wider than the glass, so
+    // a logical coordinate is not a client one and a rubber aimed at the wrong
+    // pixel removes nothing and owes no mend.
+    const vE = slate.view();
+    const onGlass = (lx, ly) => [lx * vE.k + vE.ox, ly * vE.k + vE.oy];
+    slate.tool('erase');
+    const had = slate.strokes();
+    pen('pointerdown', ...onGlass(200, 400), 91);
+    pen('pointermove', ...onGlass(260, 400), 91);
+    pen('pointerup', ...onGlass(300, 440), 91);
+    slate.strokes() < had
+      ? ok('the rubber took a mark out, so a mend is owed')
+      : fail('nothing was erased, so there is no repair to place');
+    // Driven through the wheel-pinch, which is the same two lines the two-finger
+    // pinch runs -- `zoomingNow` and then `setZoom` -- and does not have to wait
+    // out the palm suppression the pen just armed. A finger pinch here would be
+    // ignored for a moment, and that moment is a frame, and a frame is the mend.
+    const wheelPinch = (dy) => {
+      const ev = new window.Event('wheel', { bubbles: true, cancelable: true });
+      Object.assign(ev, { ctrlKey: true, deltaY: dy, clientX: 400, clientY: 300 });
+      sheet.dispatchEvent(ev);
+    };
+    window.__transforms.length = 0;
+    for (let i = 0; i < 12; i++) wheelPinch(30);   // zooming out, mid-gesture
+    await sleep(30);
+    const movedTo = slate.view().k;
+    Math.abs(movedTo - drawnAt) > 1e-6
+      ? ok('the pinch moved the view away from the bitmap it is stretching')
+      : fail('the fixture did not change the zoom, so this proves nothing');
+    window.__transforms.some((t) => Math.abs(t.k - drawnAt) < 1e-6)
+      ? ok('and the mend is painted at the geometry the bitmap was drawn at')
+      : fail('the repair used the live view, so it lands in the wrong place at '
+             + 'the wrong size — this is the glitch that was reported');
+    slate.tool('pen');
+    slate.clear();
+    await sleep(30);
+  }
+
+  // ------------------------------------ A HAND ON THE GLASS IS A HAND AT WORK
+  //
+  // Every test of whether the hand is busy is a timestamp of the last thing it
+  // did, so two fingers held still -- which is how a pinch is held at the zoom
+  // you wanted, and how it is repositioned between two pinches -- read as an
+  // idle surface after 1.2 seconds and invited a PNG encode into the middle of
+  // the gesture. What the hand is doing is not only a matter of when it last did
+  // it.
+  {
+    await sleep(2700);                   // longer than the pen's own tail
+    slate.busy() === false
+      ? ok('a surface nobody is touching is not busy')
+      : fail('the surface thinks a hand is on it when none is');
+    const ev = new window.Event('pointerdown', { bubbles: true, cancelable: true });
+    Object.assign(ev, { pointerId: 77, pointerType: 'touch', pressure: 0,
+                        clientX: 300, clientY: 300, isPrimary: true });
+    sheet.dispatchEvent(ev);
+    await sleep(1400);                   // longer than every timestamp tail
+    slate.busy() === true
+      ? ok('and a finger resting on it is, however long it has rested')
+      : fail('a contact held still reads as an idle surface, which is how a '
+             + 'PNG encode lands in the middle of a pinch');
+    const off = new window.Event('pointerup', { bubbles: true, cancelable: true });
+    Object.assign(off, { pointerId: 77, pointerType: 'touch', pressure: 0,
+                         clientX: 300, clientY: 300, isPrimary: true });
+    sheet.dispatchEvent(off);
+  }
+
+  // -------------------------------- AND THE SURFACE CAN SAY WHAT IT STILL OWES
+  //
+  // A reload is cheap for the code and it is somebody's afternoon if there is
+  // ink the disk has not been told about. The board asks this before it takes a
+  // new version of itself.
+  {
+    slate.tool('pen');
+    slate.clear();
+    await sleep(1500);
+    typeof slate.owed === 'function'
+      ? ok('the surface can be asked whether anything is outstanding')
+      : fail('nothing can ask the surface whether it owes the disk ink');
+    if (typeof slate.owed === 'function') {
+      pen('pointerdown', 300, 300, 95);
+      pen('pointermove', 360, 320, 95);
+      pen('pointerup', 360, 320, 95);
+      slate.owed() === true
+        ? ok('and a fresh mark is outstanding the moment it is made')
+        : fail('a stroke that has not reached the disk is not reported as owed');
+    }
+  }
+
   console.log(errors.length ? '\n' + errors.length + ' FAILURES'
                             : '\nthe surface is a plane, and a finger is not a pen');
   window.close();

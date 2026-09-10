@@ -148,6 +148,16 @@
   <span>Not connected — what is on the board may be out of date.</span>
   <button id="linkbad-retry" type="button">reconnect</button>
 </div>
+
+<!-- New code has arrived, and taking it means reloading the page. Which is
+     somebody's decision, not the app's: a reload landing unasked in the middle
+     of a lesson is a white screen, a scroll position gone, and every card
+     folded back to how it renders on a first visit. -->
+<div id="newver" class="newver" hidden>
+  <span>A new version of the board is ready.</span>
+  <button id="newver-now" type="button">load it now</button>
+  <button id="newver-later" type="button" class="quiet">later</button>
+</div>
 </div><!-- /#chrome -->
 
 <!-- The drawing tools, along the bottom, where the hand holding the pen is. -->
