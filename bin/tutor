@@ -1126,6 +1126,13 @@ def sync(root, quiet=False):
             print("  not synced: %s here, so the repository is left exactly as it is"
                   % busy)
         return False
+    # A pull needs the index too, so a lock a killed git left behind stops a
+    # session opening up to date just as surely as it stops a commit. Rubbish
+    # goes out here as well; a lock somebody is holding is left, and the pull
+    # below fails and says so in the usual way.
+    cleared = worktree.clear_stale_lock(root)
+    if cleared and not quiet:
+        print("  " + cleared)
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_ASKPASS="/bin/false")
     def git(*args, **kw):
         return subprocess.run(["git"] + list(args), cwd=root, env=env,
@@ -1199,6 +1206,9 @@ def tool_pull(root=None):
     if busy:
         return False, ("  the board was not updated: %s here, so it is left "
                        "exactly as it is" % busy)
+    # Same rubbish, same answer: a lock nobody holds in the TOOL's repository
+    # would stop every board on this machine from ever updating again.
+    worktree.clear_stale_lock(root)
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_ASKPASS="/bin/false")
 
     def git(*args, **kw):
@@ -1467,6 +1477,30 @@ def sync_transcript(root, log=None):
             except (OSError, ValueError):
                 pass
 
+    # THE BEAT IS WHAT HEALS A LOCK, BECAUSE IT IS THE ONLY THING THAT COMES BACK.
+    #
+    # Everything here runs git under a timeout, and a git killed at its timeout
+    # leaves `.git/index.lock` on disk. From then on nothing in this repository
+    # can commit: not this beat, not the save button, not the person's own
+    # terminal. That happened on Galois Theory on 10 September and it went
+    # unnoticed for seventy minutes, because the beat's own failure was silent
+    # -- see the `git add` below -- and a save from the iPad answered with git's
+    # advice to remove the file by hand.
+    #
+    # A lock nobody holds is rubbish, and this runs every ninety seconds whether
+    # or not anybody is looking, which makes it the right place to throw it out.
+    # A lock somebody IS holding is left alone and the beat waits, which costs
+    # one beat and is exactly what waiting is for.
+    verdict, _ = worktree.lock_reason(root)
+    if verdict == "held":
+        note("transcript: left alone this beat -- the git index is locked by a "
+             "command that is still running")
+        return
+    if verdict == "stale":
+        cleared = worktree.clear_stale_lock(root)
+        if cleared:
+            note("transcript: " + cleared)
+
     def git(*args, **kw):
         return subprocess.run(["git"] + list(args), cwd=root, env=env,
                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -1486,7 +1520,16 @@ def sync_transcript(root, log=None):
             note("transcript: not pulled (%s)" % (out[-1] if out else "pull failed"))
         else:
             keep_pulled_files(root, git, note, before)
-        git("add", "-A", "live")
+        # Checked, not fired and forgotten. An `add` that fails stages nothing,
+        # so the `diff --cached` below finds nothing to commit and this returns
+        # as though the beat had simply had a quiet ninety seconds -- which is
+        # how a locked index went seventy minutes without a word while pages
+        # piled up uncommitted. A beat that cannot do its job says so.
+        added = git("add", "-A", "live")
+        if added.returncode != 0:
+            out = added.stdout.decode("utf-8", "replace").strip().splitlines()
+            note("transcript: NOT staged (%s)" % (out[-1] if out else "git add failed"))
+            return
         # A TRANSCRIPT IS APPEND-ONLY, SO A COMMIT MUST NEVER SAY A PAGE IS GONE.
         #
         # Two clones run this on a beat over the same course, and `git add -A`

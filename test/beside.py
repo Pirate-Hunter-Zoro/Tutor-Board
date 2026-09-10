@@ -232,6 +232,100 @@ try:
           p.returncode != 0 and "rebase-merge" in (p.stdout + p.stderr))
     _, after = git(saving, "rev-parse", "HEAD")
     check("and it commits nothing either", before == after)
+
+    # --- THE LOCK A KILLED GIT LEAVES BEHIND --------------------------------
+    #
+    # Everything above runs git under a subprocess timeout. A git killed at its
+    # timeout never gets to rename `index.lock` over the index, and what it
+    # leaves closes every route to a commit in the repository: the beat, the
+    # save button, `board push`, and the person's own terminal. Galois Theory,
+    # 10 September: a zero-byte lock at 15:16:32, the last transcript commit at
+    # 15:14:59, and seventy minutes of pages sitting uncommitted while the board
+    # answered a tap on save with git's advice to remove the file by hand.
+    locked = make_repo(work, "locked")
+    lock = os.path.join(worktree.git_dir(locked), "index.lock")
+
+    open(lock, "w").close()
+    os.utime(lock, (0, 0))               # left behind long ago
+    check("a lock is found", worktree.index_lock(locked) == lock)
+    verdict, said = worktree.lock_reason(locked)
+    check("one nobody holds is rubbish, not an operation to respect",
+          verdict == "stale")
+    check("and it says so in words, for the board rather than a log",
+          bool(said) and "lock" in said)
+    check("clearing it says what was done", bool(worktree.clear_stale_lock(locked)))
+    check("and the lock is gone", worktree.index_lock(locked) is None)
+    check("clearing nothing is not an event",
+          worktree.clear_stale_lock(locked) is None
+          and worktree.lock_reason(locked) == (None, None))
+
+    # A lock somebody is genuinely holding is a different thing entirely, and it
+    # is left exactly where it is. Held open by THIS process, which is the only
+    # honest way to test it -- an age test alone cannot tell the two apart.
+    held = open(lock, "w")
+    try:
+        os.utime(lock, (0, 0))           # old AND held: held wins
+        verdict, said = worktree.lock_reason(locked)
+        check("a lock a live process holds is not cleared, however old it looks",
+              verdict == "held")
+        check("and the sentence tells somebody to come back rather than to fix it",
+              "press save again" in (said or ""))
+        check("and it is still on disk", worktree.clear_stale_lock(locked) is None
+              and worktree.index_lock(locked) == lock)
+    finally:
+        held.close()
+
+    # The beat is what comes back every ninety seconds, so the beat is what
+    # heals it -- and its own failure is no longer silent.
+    beating = make_repo(work, "beating")
+    beat_lock = os.path.join(worktree.git_dir(beating), "index.lock")
+    open(beat_lock, "w").close()
+    os.utime(beat_lock, (0, 0))
+    open(os.path.join(beating, "live", "slate", "page-02.json"), "w").write("{}\n")
+    log_path = os.path.join(work, "locked-beat.log")
+    with open(log_path, "w") as fh:
+        tutorcli.sync_transcript(beating, log=fh)
+    said = open(log_path).read()
+    check("the beat clears a stale lock instead of dying against it",
+          not os.path.exists(beat_lock))
+    check("and commits the page it came to commit",
+          "live/slate/page-02.json" in git(beating, "show", "--name-only",
+                                           "--format=", "HEAD")[1])
+    check("and says in the log that it cleared one", "lock" in said)
+
+    # And a save from the iPad rescues itself, rather than handing back git's
+    # advice to delete a file the person cannot reach.
+    tapping = make_repo(work, "tapping")
+    shutil.copytree(os.path.join(ROOT, "scripts"), os.path.join(tapping, "scripts"))
+    tap_lock = os.path.join(worktree.git_dir(tapping), "index.lock")
+    open(tap_lock, "w").close()
+    os.utime(tap_lock, (0, 0))
+    open(os.path.join(tapping, "src", "app.py"), "w").write("this evening\n")
+    rec = lesson_git.run_push(course_repo.Repo(tapping), "saved from the board")
+    check("a tap on save gets past a lock a killed git left behind",
+          rec.get("ok") is True)
+    check("and the work is actually committed",
+          "src/app.py" in git(tapping, "show", "--name-only", "--format=", "HEAD")[1])
+    check("and the board is told a lock was cleared, not left to wonder",
+          rec.get("cleared_lock") is True and "lock" in (rec.get("detail") or ""))
+
+    # The badge is the other half: an ordinary `git status` takes the lock to
+    # write back the index it refreshed, every eight seconds, in a repository
+    # whose slate pages are being rewritten under it. It must neither create a
+    # lock nor go blank because of one.
+    watching = make_repo(work, "watching")
+    watch_lock = os.path.join(worktree.git_dir(watching), "index.lock")
+    open(os.path.join(watching, "src", "app.py"), "w").write("changed\n")
+    open(watch_lock, "w").close()
+    lesson_git._DIRTY.update({"at": 0.0, "value": None})
+    n = lesson_git.repo_dirty(course_repo.Repo(watching))
+    check("the save badge still counts the work while the index is locked", n == 1)
+    check("and it did not touch the lock", os.path.exists(watch_lock))
+    os.remove(watch_lock)
+    lesson_git._DIRTY.update({"at": 0.0, "value": None})
+    lesson_git.repo_dirty(course_repo.Repo(watching))
+    check("and a poll of its own leaves no lock behind",
+          not os.path.exists(watch_lock))
 finally:
     shutil.rmtree(work, ignore_errors=True)
 

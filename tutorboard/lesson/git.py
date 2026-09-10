@@ -34,7 +34,17 @@ def repo_dirty(repo):
     value = None
     if os.path.isdir(os.path.join(repo.root, ".git")):
         try:
-            p = subprocess.run(["git", "status", "--porcelain"], cwd=repo.root,
+            # `--no-optional-locks`, because this is a BADGE. An ordinary
+            # `git status` takes `.git/index.lock` to write back the index it
+            # just refreshed -- a kindness to the next command, and the wrong
+            # trade entirely for a poll that runs every eight seconds in a
+            # repository whose slate pages are being rewritten while somebody
+            # draws on them. Killed at the timeout below, it leaves the lock
+            # behind and closes every route to a commit in here. It also means
+            # the badge keeps answering while somebody else holds the lock,
+            # instead of going blank at the moment it has most to say.
+            p = subprocess.run(["git", "--no-optional-locks", "status",
+                                "--porcelain"], cwd=repo.root,
                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                timeout=10)
             if p.returncode == 0:
@@ -182,6 +192,25 @@ def run_push(repo, message=None):
         with open(os.path.join(repo.live, "push.json"), "w", encoding="utf-8") as fh:
             json.dump(record, fh, indent=2)
         return record
+    # A lock left behind by a git that was killed is not an operation to respect;
+    # it is rubbish, and until this it closed the only door the person tapping
+    # has. Git's own answer -- "remove the file manually to continue" -- is not
+    # an instruction anybody can follow from an iPad, and it was the entire
+    # contents of a red banner on 10 September while the work sat uncommitted.
+    lock_verdict, lock_said = worktree.lock_reason(repo.root)
+    cleared = None
+    if lock_verdict == "held":
+        record = {
+            "ok": False,
+            "at": time.time(),
+            "iso": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "detail": "nothing was committed: " + lock_said,
+        }
+        with open(os.path.join(repo.live, "push.json"), "w", encoding="utf-8") as fh:
+            json.dump(record, fh, indent=2)
+        return record
+    if lock_verdict == "stale":
+        cleared = worktree.clear_stale_lock(repo.root)
     # The write-up is part of the work, so it is part of the commit. Only when it
     # is actually out of date, so an ordinary save in the middle of a lesson
     # costs nothing.
@@ -213,6 +242,9 @@ def run_push(repo, message=None):
         "iso": time.strftime("%Y-%m-%d %H:%M:%S"),
         "detail": out[-1200:],
     }
+    if cleared:
+        record["cleared_lock"] = True
+        record["detail"] = cleared + "\n" + record["detail"]
     if built:
         # Said on the board, not only in a log. A push that quietly shipped a
         # stale PDF because LaTeX failed is the exact silence this exists to end.

@@ -45,6 +45,58 @@ now: one interface, one method, whether the exercises are proofs or functions.
 >   board that is answering) but it is worth confirming: the port the HTTPS name points at should
 >   be the course they are working in.
 >
+> ### Where this is right now, 10 September 2026
+>
+> **One killed git closed every door in the repository, and nothing noticed for seventy minutes.**
+> Reported in one sentence: *"I just tried to push up some work in Galois Theory, and it failed."*
+> The board's red banner held git's own words — *Another git process seems to be running in this
+> repository … remove the file manually to continue* — which is not an instruction anybody can
+> follow from an iPad in the middle of a proof.
+>
+> **Measured, and the file was still there.** A zero-byte `.git/index.lock` in Galois-Theory,
+> written at 15:16:32, with no git process running and nobody holding it open. The last transcript
+> commit was 15:14:59. Every save after that — 15:18:57, 15:19:01, 16:24:30 — failed at `git add`,
+> and four handwritten attempts at 3.26, two slate pages and a card sat uncommitted the whole time.
+>
+> Every git call in this tool runs under a subprocess timeout, on a network filesystem, in a
+> repository whose slate pages are rewritten every two seconds while somebody draws. `git add`,
+> `git commit`, `git pull` and an ordinary `git status` all take `index.lock` before they touch the
+> index and release it by renaming it over the index at the end. A git killed at its timeout never
+> reaches the rename. What it leaves shuts the beat, the save button, `board push` and the person's
+> own terminal, permanently, out of one interrupted command.
+>
+> **A lock is not a rebase, and treating it like one was the mistake.** A rebase means a person is
+> part-way through something and the answer is to wait forever. A lock means either that git is
+> running this second, which is over in seconds, or that it is not — in which case the file is
+> rubbish and holding onto it costs somebody their afternoon. `worktree.lock_reason` tells those
+> apart by asking who has the file open (`/proc`, every open descriptor is a symlink there) and
+> falling back to age where it cannot ask, with a threshold above every timeout in this tool. A
+> lock nobody holds is thrown out; a lock somebody holds is left, and the board says *press save
+> again in a moment* instead of naming a file.
+>
+> **The beat is what heals it, because the beat is the only thing that comes back.** It runs every
+> ninety seconds whether or not anybody is looking. It now clears the rubbish before it stages, and
+> `sync` and the tool's own self-update do the same — a lock in the tool's repository would have
+> stopped every board on the machine from ever updating again.
+>
+> **And the beat's own failure was silent, which is why this took seventy minutes to surface.**
+> `git add -A live` was fired and forgotten: with the index locked it staged nothing, the
+> `diff --cached` after it found nothing to commit, and the beat returned as though it had simply
+> had a quiet ninety seconds. It says *transcript: NOT staged* now. A beat that cannot do its job
+> says so.
+>
+> **The save badge was the likeliest thing to have created that lock, and it had no business
+> taking one.** `git status --porcelain` every eight seconds, to draw **⤓ save 4**, and an ordinary
+> `git status` takes the lock to write back the index it just refreshed — a kindness to the next
+> command, and the wrong trade entirely for a poll. It is `--no-optional-locks` now, which also
+> means the badge keeps counting while somebody else holds the lock rather than going blank at the
+> moment it has most to say.
+>
+> `test/beside.py` holds all of it, against real repositories: a lock held open by a live process
+> is left alone however old it looks, a lock nobody holds is cleared and the page still gets
+> committed, a tap on save rescues itself and says it did, and the badge neither creates a lock nor
+> goes blank because of one.
+>
 > ### Where this is right now, 9 September 2026
 >
 > **A machine you cannot see is a machine you cannot switch to, and the compute node had gone

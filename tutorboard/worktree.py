@@ -27,6 +27,7 @@ keeps, so it costs nothing to ask on every beat and cannot hang on a lock.
 """
 
 import os
+import time
 
 
 def git_dir(root):
@@ -90,3 +91,145 @@ def busy_reason(root):
     if head and not head.startswith("ref:"):
         return "HEAD is detached, so a commit here would be reachable from nothing"
     return None
+
+
+# ---------------------------------------------------------------------------
+# The lock a killed git leaves behind.
+#
+# `git add`, `git commit`, `git pull` and an ordinary `git status` all take
+# `.git/index.lock` before they touch the index, and release it by renaming it
+# over the index when they are done. A git that is KILLED part-way -- and
+# everything here runs git under a subprocess timeout, on a network filesystem,
+# in a repository whose slate pages are being rewritten every two seconds --
+# never gets to that rename. What it leaves is an empty lock file, and from that
+# moment every route to a commit in this repository is closed: the transcript
+# beat, the board's save button, `board push`, and the person's own terminal.
+#
+# Measured on Galois Theory, 10 September: a zero-byte `index.lock` at 15:16:32,
+# the last transcript commit at 15:14:59, and every save from the iPad after that
+# answered with git's own advice -- "remove the file manually to continue" --
+# which is not a thing anybody can do from an iPad in the middle of a proof.
+#
+# A lock is therefore not like a rebase. A rebase means a person is part-way
+# through something and the answer is to wait forever. A lock means either that
+# git is running RIGHT NOW, which is over in seconds, or that it is not, in which
+# case the file is rubbish and holding onto it costs somebody their afternoon.
+# Telling those apart is the whole of what follows.
+# ---------------------------------------------------------------------------
+
+# How long a lock nobody can be shown to hold has to sit there before it is
+# rubbish. Every git call in this tool runs under a timeout well below this, so
+# a lock older than this cannot belong to one of ours that is still going.
+LOCK_STALE_AFTER = 300.0
+
+# A lock is created and opened in the same breath, so a holder is findable the
+# moment it exists. This grace is for the gap between the two, and for a reader
+# that arrives in the middle of it.
+LOCK_GRACE = 5.0
+
+
+def index_lock(root):
+    """This repository's `.git/index.lock`, or None if there is not one."""
+    gd = git_dir(root)
+    if not gd:
+        return None
+    path = os.path.join(gd, "index.lock")
+    return path if os.path.exists(path) else None
+
+
+def _lock_holder(path):
+    """Whether a live process holds this file open: True, False, or None.
+
+    `None` means the question could not be asked -- there is no `/proc` on a Mac
+    -- and the caller falls back to age alone. Every open file descriptor on
+    Linux is a symlink under `/proc/<pid>/fd`, so this is a scan of those and no
+    more; other people's processes are unreadable and are skipped, which is
+    correct here because a git holding this lock is one of ours.
+    """
+    if not os.path.isdir("/proc"):
+        return None
+    try:
+        want = os.path.realpath(path)
+    except OSError:
+        return None
+    seen_any = False
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        fd_dir = os.path.join("/proc", pid, "fd")
+        try:
+            names = os.listdir(fd_dir)
+        except OSError:
+            continue                     # not ours, or gone between two calls
+        seen_any = True
+        for name in names:
+            try:
+                target = os.readlink(os.path.join(fd_dir, name))
+            except OSError:
+                continue
+            if target == want or target == path:
+                return True
+    return False if seen_any else None
+
+
+def lock_reason(root):
+    """What `.git/index.lock` means here, as (verdict, sentence).
+
+    Verdict is one of:
+
+      `None`   -- there is no lock; carry on.
+      `"held"` -- git is running in here this second. Say so and come back.
+      `"stale"`-- nobody holds it and nobody is coming for it. Clear it.
+
+    The sentence is for a person reading a board, not for a log: it says what is
+    happening in words somebody holding an iPad can act on.
+    """
+    path = index_lock(root)
+    if not path:
+        return None, None
+    try:
+        age = max(0.0, time.time() - os.path.getmtime(path))
+    except OSError:
+        return None, None                # went away while we were looking
+    holder = _lock_holder(path)
+    if holder is True:
+        return "held", ("a git command is running in this repository right now, "
+                        "so the index is locked. Nothing has been lost -- press "
+                        "save again in a moment.")
+    if holder is False and age > LOCK_GRACE:
+        return "stale", ("cleared a lock file a git command left behind when it "
+                         "was interrupted %d seconds ago" % int(age))
+    if holder is None and age > LOCK_STALE_AFTER:
+        # No `/proc` to ask, so age is the only evidence there is. The threshold
+        # is above every timeout in this tool, which is what makes it safe: a
+        # lock this old cannot belong to one of ours that is still running.
+        return "stale", ("cleared a lock file left behind %d minutes ago by a git "
+                         "command that did not finish" % int(age / 60))
+    if holder is None:
+        return "held", ("the git index is locked in this repository, and this "
+                        "machine cannot tell whether the command holding it is "
+                        "still running. Nothing has been lost -- press save "
+                        "again in a few minutes and it will be cleared.")
+    return "held", ("a git command is running in this repository right now, so "
+                    "the index is locked. Nothing has been lost -- press save "
+                    "again in a moment.")
+
+
+def clear_stale_lock(root):
+    """Remove a lock nobody holds, and say what was done, or None if nothing was.
+
+    Called before anything that needs the index. It removes only a lock this
+    module has just decided is rubbish, so a git that is genuinely running is
+    never pulled out from under itself.
+    """
+    verdict, sentence = lock_reason(root)
+    if verdict != "stale":
+        return None
+    path = index_lock(root)
+    if not path:
+        return None
+    try:
+        os.remove(path)
+    except OSError:
+        return None
+    return sentence
