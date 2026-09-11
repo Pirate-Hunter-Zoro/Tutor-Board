@@ -7,8 +7,12 @@ pulls the repository. So two things have to be true and neither is negotiable:
 
 - it does NOTHING, silently, on every machine but the one it is written for --
   the gate is three conditions wide and any one of them failing is an exit;
-- on that machine it pushes committed work before it deletes the directory that
-  holds it, because a clone is not a backup and none of this is reversible;
+- on that machine everything reaches origin before anything is deleted -- on a
+  branch of its own, because a machine being retired has been teaching the same
+  courses as another one and its history does not merge: two transcript beats
+  committing the same `live/slate/page-06.png` is a conflict in a binary file and
+  a repository whose push fails for ever. A clone is not a backup and none of
+  this is reversible;
 - and it leaves nothing at all behind, not even an account of itself. A receipt
   is one more file somebody has to find and delete later.
 
@@ -170,13 +174,28 @@ try:
     home, fake, tool = sandbox()
     trash.append(home)
     root, origin = course(home, "Galois-Theory", ahead=2)
+    # A working tree nobody committed, and a merge left half-finished: both are
+    # what a machine that has been teaching alongside another one looks like.
+    with open(os.path.join(root, "HANDOFF.md"), "a", encoding="utf-8") as fh:
+        fh.write("and this was never committed\n")
+    with open(os.path.join(root, ".git", "MERGE_HEAD"), "w") as fh:
+        fh.write(git(root, "rev-parse", "HEAD").stdout.decode().strip() + "\n")
     code, out = run(home, fake, tool)
     check("it runs on the machine it is written for, and says so in its exit "
           "code, because a round that carried on would put the timer back",
           code == 9)
-    check("and pushes the commits origin has not got before deleting anything",
-          "pushed 2 commit(s)" in out
-          and b"later 1" in git(origin, "log", "-1", "--pretty=%s").stdout)
+    branches = git(origin, "branch", "--format=%(refname:short)").stdout.decode()
+    check("everything it had goes to origin, on a branch of its own rather than "
+          "into a merge that cannot be resolved",
+          "retired/" in branches and "Galois-Theory" in branches)
+    kept = git(origin, "log", "-1", "--pretty=%s",
+               [b for b in branches.split() if b.startswith("retired/")][0]
+               if any(b.startswith("retired/") for b in branches.split()) else "HEAD")
+    check("including the working tree as it stood, which is the one thing a "
+          "clone cannot get back",
+          b"as it stood" in kept.stdout)
+    check("and the half-finished merge was abandoned rather than fought with",
+          "outstanding" in out)
     check("the courses directory is gone",
           not os.path.exists(os.path.join(home, "Learning")))
     check("and so is the clone it was running out of", not os.path.exists(tool))
@@ -258,6 +277,20 @@ finally:
 _round = open(os.path.join(ROOT, "scripts", "stay-current.sh"), encoding="utf-8").read()
 check("the round that calls it stops when it retired the machine",
       'if [ "${PIPESTATUS[0]}" = "9" ]; then' in _round)
+
+# Two ways in, because an instruction that can only arrive by one route is an
+# instruction that does not arrive: the periodic round, and the periodic resume.
+# Both are things a machine nobody logs in to runs on a timer.
+_tutor = open(os.path.join(ROOT, "bin", "tutor"), encoding="utf-8").read()
+check("and `tutor resume` asks the same question, out of the same one script",
+      "def retire_host():" in _tutor
+      and '"scripts", "retire-host.sh"' in _tutor
+      and "if retire_host():" in _tutor)
+check("after the pull, so the question is asked of the code that just landed",
+      _tutor.index('tool_sync(cfg, quiet="--quiet" in rest)')
+      < _tutor.index("if retire_host():"))
+check("and it reads the exit code rather than the output",
+      "return p.returncode == 9" in _tutor)
 
 print()
 if fails:

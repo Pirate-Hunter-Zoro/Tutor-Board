@@ -95,14 +95,25 @@ now: one interface, one method, whether the exercises are proofs or functions.
 > `test/hub.js` drives the tap in a real DOM; `test/choice.py` holds the rule. Shell version
 > `board-shell-v91`.
 >
-> **`scripts/retire-host.sh` takes the board off a machine nobody can log in to**, through the one
-> channel that reaches it: the round that pulls this repository. It pushes whatever that machine has
-> committed and not pushed, stops and removes its launch agents, and then deletes the courses, the
-> clone, the config, the commands it put on the path and every log — including the one it is writing
-> into, so nothing is left with its name on it. The gate is macOS **and** a registered board host
-> **and** no Slurm, it exits 9 so the round it runs inside stops rather than putting the timer back,
-> and `test/retire.py` proves it is a silent no-op on every other machine. It and
-> `scripts/tool-pull.sh` exist only for that one errand; once it has been done, both go.
+> **`scripts/retire-host.sh` takes the board off a machine nobody can log in to**, through the two
+> channels that reach it: the round that pulls this repository, and the periodic `tutor resume`. An
+> instruction that can only arrive by one route is an instruction that does not arrive.
+>
+> Everything that machine has goes to origin first, **on a branch of its own** —
+> `retired/<machine>/<course>` — and that is not tidiness. A machine being retired has been teaching
+> the same courses as another one, both clones running the transcript beat, both committing
+> `live/slate/page-06.png`: a pull of that is a merge conflict in a binary file, and a repository
+> sitting in a half-finished merge is a repository whose push fails for ever. So nothing tries to
+> merge. A merge in progress is abandoned, the working tree is committed as it stands, the branch is
+> pushed, and which of two divergent lessons to keep is a decision somebody makes later with both in
+> front of them.
+>
+> Then it stops and removes the launch agents and deletes the courses, the clone, the config, the
+> commands it put on the path and every log — including the one it is writing into, so nothing is
+> left carrying the board's name. The gate is macOS **and** a registered board host **and** no
+> Slurm; it exits 9 so the round it runs inside stops rather than putting the timer back; and
+> `test/retire.py` proves it is a silent no-op on every other machine. It and `scripts/tool-pull.sh`
+> exist only for that one errand; once it has been done, both go.
 >
 > ### Where this was earlier on 11 September 2026
 >

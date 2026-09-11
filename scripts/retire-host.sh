@@ -93,10 +93,23 @@ say "retiring this machine as a board host"
 
 # ------------------------------------------------- the work, before the deleting
 #
-# Committed work that never reached origin is the only thing here that cannot be
-# got back, so it goes first and it is best-effort: a push that fails is
-# reported and does not stop the rest, because a machine half-retired is worse
-# than one retired with a line in the log about a branch that would not push.
+# WHATEVER IS HERE AND NOWHERE ELSE GOES TO ORIGIN FIRST, ON A BRANCH OF ITS OWN.
+#
+# Not onto `main`, and this is the whole of why: a machine being retired has been
+# teaching the same courses as another one, both clones running the transcript
+# beat, both committing `live/slate/page-06.png`. A pull of that is a merge
+# conflict in a binary file, and a repository sitting in a half-finished merge is
+# a repository whose `git push` fails for ever. Found exactly that way: a push
+# from the board reported "CONFLICT (content): Merge conflict in
+# live/slate/page-06.json ... resolve by hand" and had done so for twenty
+# minutes.
+#
+# So nothing here tries to merge, or to resolve, or to be clever about history. A
+# merge in progress is abandoned, everything in the working tree is committed as
+# it stands, and the branch is pushed under a name nobody will trip over --
+# `retired/<machine>/<course>`. Every commit this machine ever made is then on
+# origin and the directory can go. Sorting out which of two divergent lessons to
+# keep is somebody's decision, made later, with both of them in front of them.
 COURSES="$(python3 - <<'PY'
 import json, os
 p = os.path.expanduser("~/.config/tutor-board/config.json")
@@ -109,26 +122,52 @@ print(cfg.get("courses_dir") or os.path.expanduser("~/Learning"))
 PY
 )"
 say "courses: $COURSES"
+WHO="$(hostname -s 2>/dev/null || echo machine)"
+WHO="$(printf '%s' "$WHO" | tr -c 'A-Za-z0-9._-' '-')"
 for dir in "$COURSES"/*/ "$HOME"/Learning/*/; do
   root="${dir%/}"
   [ -d "$root/.git" ] || continue
   name="$(basename "$root")"
-  branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)"
-  [ -n "$branch" ] || continue
-  if ! git -C "$root" rev-parse --verify --quiet "origin/$branch" >/dev/null 2>&1; then
-    say "  $name: no origin/$branch — nothing to push to"
+  git -C "$root" remote get-url origin >/dev/null 2>&1 || {
+    say "  $name: no origin to push to — it goes with the directory"
     continue
+  }
+  keep="retired/$WHO/$name"
+
+  # A merge, rebase or cherry-pick in progress is abandoned rather than
+  # finished: it was machinery's, not a person's, and the commits underneath it
+  # are what matter.
+  for marker in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
+    if [ -e "$root/.git/$marker" ]; then
+      say "  $name: a $marker was outstanding; abandoning it and keeping the commits"
+      doing && git -C "$root" merge --abort >/dev/null 2>&1
+      doing && git -C "$root" cherry-pick --abort >/dev/null 2>&1
+      doing && git -C "$root" reset -q --merge >/dev/null 2>&1
+    fi
+  done
+  [ -d "$root/.git/rebase-merge" ] || [ -d "$root/.git/rebase-apply" ] && {
+    say "  $name: a rebase was outstanding; abandoning it"
+    doing && git -C "$root" rebase --abort >/dev/null 2>&1
+  }
+
+  # Then the working tree, as it stands, conflict markers and all. A file nobody
+  # committed is the one thing a clone cannot get back.
+  if [ -n "$(git -C "$root" status --porcelain 2>/dev/null)" ]; then
+    if doing; then
+      git -C "$root" add -A >/dev/null 2>&1
+      git -C "$root" -c user.email=board@localhost -c user.name=board \
+          -c commit.gpgsign=false commit -qm "everything as it stood on $WHO" \
+          >/dev/null 2>&1
+    fi
+    say "  $name: the working tree was committed as it stood"
   fi
-  ahead="$(git -C "$root" rev-list --count "origin/$branch..HEAD" 2>/dev/null)"
-  dirty="$(git -C "$root" status --porcelain 2>/dev/null | head -1)"
-  if [ "${ahead:-0}" = "0" ]; then
-    say "  $name: already on origin${dirty:+ (uncommitted changes are NOT kept)}"
-    continue
-  fi
-  if doing && git -C "$root" push --quiet origin "$branch" 2>/dev/null; then
-    say "  $name: pushed $ahead commit(s)"
+
+  if doing && git -C "$root" push --quiet --force origin "HEAD:refs/heads/$keep" 2>/dev/null; then
+    say "  $name: pushed to $keep"
+  elif doing; then
+    say "  $name: COULD NOT PUSH to $keep — its commits go with the directory"
   else
-    say "  $name: COULD NOT PUSH $ahead commit(s) — they go with the directory"
+    say "  $name: would push to $keep"
   fi
 done
 

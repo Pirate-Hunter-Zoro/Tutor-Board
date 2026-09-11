@@ -2268,6 +2268,27 @@ def _running_jobs():
     return sorted(out, reverse=True)
 
 
+def retire_host():
+    """Take the board off this machine, if this is the machine for that.
+
+    One implementation, in `scripts/retire-host.sh`, because it deletes things
+    and a second copy of that is the last thing this repository needs. True when
+    it acted, which is when the caller should stop.
+    """
+    script = os.path.join(TOOL, "scripts", "retire-host.sh")
+    if not os.path.exists(script):
+        return False
+    try:
+        p = subprocess.run(["bash", script], stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT, timeout=600)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    out = p.stdout.decode("utf-8", "replace").strip()
+    if out:
+        print(out)
+    return p.returncode == 9
+
+
 def cmd_resume(cfg, args):
     """Take the board over on this machine. Safe to run from a login hook.
 
@@ -2651,6 +2672,15 @@ def main(argv):
         # Before anything, and before the course is caught up: this is what a
         # login hook runs, and on a compute node it is the only moment there is.
         tool_sync(cfg, quiet="--quiet" in rest)
+        # And then, out of the repository that was just pulled: is this machine
+        # still meant to be a board host at all? Asked here as well as in the
+        # periodic round because this is the other thing a machine nobody logs
+        # in to runs on a timer, and an instruction that can only arrive by one
+        # route is an instruction that does not arrive. It answers no, silently,
+        # on every machine but the one it is written for; exit 9 means it acted,
+        # and then there is nothing left here to resume.
+        if retire_host():
+            return 0
         return cmd_resume(cfg, rest)
 
     if args and args[0] == "agent":
