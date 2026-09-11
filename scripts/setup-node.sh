@@ -2,7 +2,7 @@
 # ===========================================================================
 #  setup-node.sh -- put a compute node right, in one command.
 #
-#      bash scripts/setup-node.sh [--secret <handover_secret>] [--tailnet-name NAME]
+#      bash scripts/setup-node.sh [--tailnet-name NAME]
 #
 #  Everything a compute node needs in order to serve the iPad, in the order it
 #  needs it. Run it in a session on the node; run it again whenever you are not
@@ -10,10 +10,10 @@
 #  what it assumed.
 #
 #  Why a script and not a checklist: every item here has been forgotten at least
-#  once, and each one fails silently. A stale tailnet registration means the
-#  iPad quietly opens the wrong machine. A default agent naming a program this
-#  node has not got leaves a daemon that reads as *listening* and fails every
-#  turn into a log nobody opens.
+#  once, and each one fails silently. A stale tailnet registration means the iPad
+#  opens nothing. A default agent naming a program this node has not got leaves a
+#  daemon that reads as *listening* and fails every turn into a log nobody
+#  opens.
 #
 #  What it deliberately does NOT do:
 #    - pin the machine's name. On a cluster the name changes between allocations
@@ -29,7 +29,6 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$HERE" || { echo "cannot enter $HERE" >&2; exit 1; }
 
 CFG="${XDG_CONFIG_HOME:-$HOME/.config}/tutor-board/config.json"
-SECRET=""
 TSNAME=""
 problems=0
 
@@ -39,7 +38,6 @@ warn() { printf '  ----  %s\n' "$*"; problems=$((problems + 1)); }
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --secret)        SECRET="${2:-}"; shift 2 ;;
     --tailnet-name)  TSNAME="${2:-}"; shift 2 ;;
     -h|--help)       sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
@@ -92,67 +90,32 @@ print("  ok    node: %s (from the system, which is right on a cluster)"
 PY
 [ $? -eq 3 ] && problems=$((problems + 1))
 
-# --- 3. the handover secret ------------------------------------------------
-# What `tutor agent stop <course> --on <host>` presents when it asks another
-# machine to stand a tutor down. Two machines must carry the same value, which
-# on a shared home they do by construction; without one the endpoint answers
-# denied and a tutor on the machine you are not sitting at cannot be stopped.
-export TB_CFG="$CFG" TB_SECRET="$SECRET" TB_TSNAME="$TSNAME"
+export TB_CFG="$CFG" TB_TSNAME="$TSNAME"
 python3 - <<'PY'
 import json, os, sys
 
 path = os.environ["TB_CFG"]
-want = (os.environ.get("TB_SECRET") or "").strip()
 try:
     with open(path, encoding="utf-8") as fh:
         cfg = json.load(fh) or {}
 except (OSError, ValueError):
     cfg = {}
-
-have = (cfg.get("handover_secret") or "").strip()
 changed = False
 
-if want:
-    if have == want:
-        print("  ok    handover_secret matches the one you passed")
-    else:
-        cfg["handover_secret"] = want
-        changed = True
-        print("  ok    handover_secret written" + ("" if not have else " (replacing a different one)"))
-elif have:
-    print("  ok    handover_secret is set")
-else:
-    print("  ----  no handover_secret: /handover answers denied, so a tutor on")
-    print("        another machine cannot be stood down from here")
-    print("        set one:  bash scripts/setup-node.sh --secret <any long value>")
-
-# --- 4. which tutor this machine can actually run ---------------------------
-# `claude` is the default now. A node that has not got it must say so here, or
-# every turn fails into a log while the board shows an assistant listening.
+# --- 4. the tutor this machine runs ----------------------------------------
+# A node that has not got the command must say so here, or every turn fails into
+# a log while the board shows an assistant listening.
 import shutil
-has_claude = bool(shutil.which("claude"))
-agent = cfg.get("default_agent")
-right = "claude" if has_claude else "free"
-if agent == right:
+agent = cfg.get("default_agent") or "claude"
+if agent != cfg.get("default_agent"):
+    cfg["default_agent"] = agent
+    changed = True
+if shutil.which(agent):
     print("  ok    default_agent: %s" % agent)
 else:
-    cfg["default_agent"] = right
-    changed = True
-    if has_claude:
-        print("  ok    default_agent: %s (was %s; Claude Code is installed here)"
-              % (right, agent or "unset"))
-    else:
-        print("  ----  default_agent: free (was %s) — no `claude` on the path here."
-              % (agent or "unset"))
-        print("        install Claude Code and rerun this to teach with it")
-
-# --- 5. this node is the machine that is ALLOWED to spend --------------------
-# `free_only` says this machine may not run a billed tutor. On the node that
-# holds the allowance that is exactly backwards, and the symptom is a board that
-# answers perfectly well and teaches slightly worse for ever.
-if cfg.pop("free_only", None):
-    changed = True
-    print("  ok    free_only: removed — this node has an allowance and should use it")
+    print("  ----  default_agent: %s — not on the path here, so every turn would"
+          % agent)
+    print("        fail into a log while the board showed a tutor listening")
 
 if changed:
     os.makedirs(os.path.dirname(path), exist_ok=True)

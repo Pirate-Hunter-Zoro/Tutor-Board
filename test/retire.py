@@ -8,7 +8,9 @@ pulls the repository. So two things have to be true and neither is negotiable:
 - it does NOTHING, silently, on every machine but the one it is written for --
   the gate is three conditions wide and any one of them failing is an exit;
 - on that machine it pushes committed work before it deletes the directory that
-  holds it, because a clone is not a backup and none of this is reversible.
+  holds it, because a clone is not a backup and none of this is reversible;
+- and it leaves nothing at all behind, not even an account of itself. A receipt
+  is one more file somebody has to find and delete later.
 
 Everything below runs against a sandbox: a fake HOME, a fake `PATH` with no
 `squeue` on it and a `uname` that answers Darwin, and course repositories with a
@@ -85,6 +87,10 @@ def sandbox(marker=True, courses=None, darwin=True, slurm=False):
     # The tool's own clone, with a remote that names it.
     tool = os.path.join(home, "Tutor-Board")
     os.makedirs(os.path.join(tool, "scripts"))
+    os.makedirs(os.path.join(tool, "bin"))
+    for c in ("board", "tutor"):
+        with open(os.path.join(tool, "bin", c), "w") as fh:
+            fh.write("#!/bin/sh\n")
     shutil.copy(SCRIPT, os.path.join(tool, "scripts", "retire-host.sh"))
     subprocess.run(["git", "init", "-q", tool], stdout=subprocess.DEVNULL)
     git(tool, "remote", "add", "origin", "https://github.com/somebody/Tutor-Board.git")
@@ -94,6 +100,19 @@ def sandbox(marker=True, courses=None, darwin=True, slurm=False):
         os.makedirs(agents)
         with open(os.path.join(agents, "com.tutorboard.current.plist"), "w") as fh:
             fh.write("<plist/>\n")
+
+    # What `install.sh` leaves on the path, and what a round leaves lying about.
+    localbin = os.path.join(home, ".local", "bin")
+    os.makedirs(localbin)
+    for c in ("board", "tutor"):
+        os.symlink(os.path.join(tool, "bin", c), os.path.join(localbin, c))
+    logs = os.path.join(home, "Library", "Logs")
+    os.makedirs(logs, exist_ok=True)
+    for f in ("tutor-current.log", "tutor-follow.log"):
+        with open(os.path.join(logs, f), "w") as fh:
+            fh.write("a round\n")
+    with open(os.path.join(home, ".tutor-current.json"), "w") as fh:
+        fh.write("{}\n")
 
     cfgdir = os.path.join(home, ".config", "tutor-board")
     os.makedirs(cfgdir)
@@ -166,8 +185,19 @@ try:
     check("the launch agent is removed, not merely stopped",
           not os.path.exists(os.path.join(home, "Library", "LaunchAgents",
                                           "com.tutorboard.current.plist")))
-    check("and it leaves a receipt outside everything it deleted",
-          os.path.exists(os.path.join(home, "tutor-board-removed.log")))
+    check("the two commands it put on the path are gone with it",
+          not os.path.lexists(os.path.join(home, ".local", "bin", "board"))
+          and not os.path.lexists(os.path.join(home, ".local", "bin", "tutor")))
+    check("and the logs, including the one it was just writing into",
+          not os.path.exists(os.path.join(home, "Library", "Logs",
+                                          "tutor-current.log"))
+          and not os.path.exists(os.path.join(home, ".tutor-current.json")))
+    # No account of itself anywhere. Whatever it said went to the caller's log,
+    # and the caller's log is on the list.
+    left = sorted(n for n in os.listdir(home)
+                  if n not in ("fakebin", "tmp", "origins", "Documents"))
+    check("and it leaves NOTHING with its name on it: %s" % (left or "nothing",),
+          not [n for n in left if "tutor" in n.lower() or "board" in n.lower()])
 
     # --- every other machine ------------------------------------------------
     # This is the half that matters. It runs from a timer on every machine that

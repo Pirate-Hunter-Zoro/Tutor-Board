@@ -210,14 +210,14 @@ check("the setup script has a config block to test", len(blocks) >= 3)
 config_block = blocks[2].split("\nPY\n")[0]
 
 
-def run_setup(start, secret):
+def run_setup(start):
     """Run the script's own config block against a throwaway config."""
     box = tempfile.mkdtemp(prefix="tutor-setup-")
     path = os.path.join(box, "config.json")
     if start is not None:
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(start, fh)
-    env = dict(os.environ, TB_CFG=path, TB_SECRET=secret or "", TB_TSNAME="")
+    env = dict(os.environ, TB_CFG=path, TB_TSNAME="")
     p = subprocess.run([sys.executable, "-c", config_block], env=env,
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60)
     out = p.stdout.decode("utf-8", "replace")
@@ -233,30 +233,19 @@ def run_setup(start, secret):
 import json  # noqa: E402
 import subprocess  # noqa: E402
 
-# Which tutor is right here is a property of this machine, not of the test.
-expected_agent = "claude" if shutil.which("claude") else "free"
+got, out = run_setup(None)
+check("a node with no config at all comes out with one naming a tutor",
+      got and got.get("default_agent") == "claude")
 
-got, out = run_setup(None, "s3cret")
-check("a node with no config at all comes out with one",
-      got and got.get("handover_secret") == "s3cret")
-check("and with the tutor this machine can actually run",
-      got and got.get("default_agent") == expected_agent)
+got, out = run_setup({"default_agent": "opencode"})
+check("and a tutor somebody chose is left exactly as it was",
+      got and got.get("default_agent") == "opencode")
 
-got, out = run_setup({"handover_secret": "s3cret", "default_agent": expected_agent}, "s3cret")
-check("a matching secret is left exactly as it was",
-      got and got.get("handover_secret") == "s3cret")
-
-got, out = run_setup({"handover_secret": "stale-and-wrong"}, "s3cret")
-check("a secret that does not match the one passed is replaced, since denied "
-      "is silent", got and got.get("handover_secret") == "s3cret")
-
-got, out = run_setup({"handover_secret": "already-here"}, None)
-check("with nothing passed to check against, an existing secret is not clobbered",
-      got and got.get("handover_secret") == "already-here")
-
-got, out = run_setup(None, None)
-check("and a node with no secret at all is told what that costs",
-      "cannot be stood down" in out)
+got, out = run_setup({"default_agent": "a-command-no-machine-has"})
+check("a tutor this machine has not got is reported rather than corrected -- "
+      "the fix is installing it, and a silent swap teaches the wrong lesson",
+      got and got.get("default_agent") == "a-command-no-machine-has"
+      and "not on the path here" in out)
 
 shutil.rmtree(sandbox, ignore_errors=True)
 print()

@@ -272,42 +272,6 @@ print("   the installed app's address serves the course that was last chosen on"
 print("   this machine. The URLs above reach one board each, directly.")
 PY
 
-say "what the hub will offer"
-python3 - "$COURSES" "$HERE" <<'PY'
-import json, os, sys
-sys.path.insert(0, sys.argv[2])
-from tutorboard import processes
-from tutorboard.net import boards
-
-courses, tool = sys.argv[1], sys.argv[2]
-# Any board here will answer for the whole machine and for its neighbours.
-port = None
-for name in sorted(os.listdir(courses)):
-    rec = os.path.join(courses, name, "live", ".board.json")
-    try:
-        with open(rec, encoding="utf-8") as fh:
-            info = json.load(fh)
-    except (OSError, ValueError):
-        continue
-    if processes.board_is_running(info.get("pid"), os.path.join(courses, name)):
-        port = info.get("port")
-        break
-if not port:
-    print("   no board is running here, so there is nothing to ask")
-    raise SystemExit(0)
-doc = boards.board_json("127.0.0.1", port, "/hosts.json", timeout=30) or {}
-hosts = doc.get("hosts") or []
-if len(hosts) < 2:
-    print("   only this machine is answering; the other one is off, asleep, or")
-    print("   has not been caught up yet. Run this script there too.")
-for h in hosts:
-    live = [c["repo"] for c in (h.get("courses") or []) if c.get("running")]
-    print("   %-32s %d course(s)%s"
-          % ((h.get("name") or "this machine").split(".")[0],
-             len(h.get("courses") or []),
-             ("  live: " + ", ".join(live)) if live else ""))
-PY
-
 printf '\n'
 say "if the app still opens the wrong course"
 line "The address opens whichever board holds the tailnet name. A tap in the hub"

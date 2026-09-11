@@ -47,13 +47,17 @@ now: one interface, one method, whether the exercises are proofs or functions.
 >
 > ### Where this is right now, 11 September 2026 (later)
 >
-> **One machine serves the board.** Its tailnet name is the one origin the iPad app is installed
-> against, and it opens whichever course was last chosen on it — `board net` prints the address.
-> `tailscale serve` only ever proxies to a port on the machine running it, so there is no
-> arrangement in which one origin serves two machines; a second machine that teaches gets a name and
-> an icon of its own. Everything under
+> **One machine, one tutor, one address.** The machine is the compute node: its tailnet name is the
+> origin the iPad app is installed against, and it opens whichever course was last chosen on it —
+> `board net` prints it. `tailscale serve` only ever proxies to a port on the machine running it, so
+> there is no arrangement in which one origin serves two machines: everything under
 > [One address, and the machine holding it](#one-address-and-the-machine-holding-it) follows from
-> that one sentence.
+> that. The hub is a directory listing of this machine's courses, with nothing to pick between.
+>
+> The tutor is Claude Code. There is no second tutor to fall through to when an allowance runs out,
+> and that is a decision rather than an omission: a lesson answered worse, by something else,
+> without the student being told, is worse than a board that reports the failure and names the hour
+> the allowance comes back. `board limit` says when.
 >
 > **Three things reported from the iPad, all of them somebody unable to get where they were going.**
 >
@@ -89,11 +93,16 @@ now: one interface, one method, whether the exercises are proofs or functions.
 > a name *for* rather than against. The overlay asks nothing now — a tap dismisses it — and a course
 > on another machine says where it is instead of waiting for an address that will never serve it.
 > `test/hub.js` drives the tap in a real DOM; `test/choice.py` holds the rule. Shell version
-> `board-shell-v90`.
+> `board-shell-v91`.
 >
-> **Still to do, and it is one line:** `scripts/retire-host.sh` and `scripts/tool-pull.sh` exist only
-> to reach a machine nobody can log in to, through the round that pulls this repository. Once the
-> machine they are aimed at has answered, both go.
+> **`scripts/retire-host.sh` takes the board off a machine nobody can log in to**, through the one
+> channel that reaches it: the round that pulls this repository. It pushes whatever that machine has
+> committed and not pushed, stops and removes its launch agents, and then deletes the courses, the
+> clone, the config, the commands it put on the path and every log — including the one it is writing
+> into, so nothing is left with its name on it. The gate is macOS **and** a registered board host
+> **and** no Slurm, it exits 9 so the round it runs inside stops rather than putting the timer back,
+> and `test/retire.py` proves it is a silent no-op on every other machine. It and
+> `scripts/tool-pull.sh` exist only for that one errand; once it has been done, both go.
 >
 > ### Where this was earlier on 11 September 2026
 >
@@ -2434,7 +2443,6 @@ these tests fail, the test is right.
 | A bootstrap test renamed the live machine on the tailnet, moving the address the iPad app used | `BOARD_STATE_DIR`, and a guard in `bootstrap.sh` |
 | A headless tutor was refused the card write it was woken to make, and exited 0 — the board showed silence | `test/agents.py`, and `board start` writes the course's permissions |
 | The machine renamed itself from the network mid-session, so a running board became another node's and could not be restarted | `test/node.py` |
-| A whole machine vanished from the hub, because it was looked for at the ports of the courses cloned on the machine doing the looking — and the row of machines hid itself when it was left with one | `test/peers.py`, `test/hub.js` |
 | A board was asked to stand its tutor down while somebody was being taught on it, and the daemon answered the turn in flight, wrote its handoff and left — mid-exercise | `in_use` in the machines route; `test/keeping.py` |
 | A restart brought back the tutor that was running rather than the one the config named, so a changed default never reached a course | `test/agents.py` |
 | The default agent's command was not installed, so the daemon read as *listening* and failed every turn into a log | `test/agents.py` |
@@ -2511,7 +2519,7 @@ these tests fail, the test is right.
 | Only one board per question ever existed, so within an exercise the earlier attempts did not persist: you write, hand it in, the tutor replies, and the board that "appeared" under the reply was the same board slid down the run. Reported as "the previous board for this same question that I have not yet completed doesn't persist... I want ALL boards to persist and to operate independently of each other" | a question is a chain, one board per attempt: frozen where it was written as soon as what it holds has been handed in AND the tutor has answered since — both halves, or Send forks the page under your hand and a second hint cuts a board about nothing — and the next attempt opens on a COPY, which is the only way the working carries forward and the two are still independent; `test/chain.js` |
 | The write-up compiled and then could not be reached: *"it compiles the homework, but it's not letting me view the compiled .pdf or save it anywhere locally on the iPad."* `doExportHomework` painted the banner from a record it had invented itself — the reply to `/hw/build` — in the argument slot that belongs to `push.json`, so the next payload a second later repainted from the real push record and took `save a copy` with it, along with the URL behind it. And there was no way to READ either document at all: the one control was the share sheet, which is somewhere to put a document rather than somewhere to read one | whether a document exists is a question the payload answers off the files (`papers`) on every change, and the write-up's own record reaches the banner from `live/hw.json`; **read it** draws the pages as PNGs rendered by the machine holding the PDF, in a panel the board owns — never an `<iframe>`, which iOS gives one unscrollable page, and never a navigation; and **⋯ → documents · view or save** reaches both at any moment rather than only in the banner of the build that made them. The service worker stopped caching `/download/` while it was there; `test/paper.py`, `test/link.js` |
 | `board export` wrote the tutor's cards and nothing else, named with the second it happened, into `live/export/` -- which a course's `.gitignore` throws away. Half a conversation, unfindable, unkept. Asked for instead: the whole thing as one PDF to show a professor | `document.py` interleaves every card and every page handed in, in the board's own reading order and labelled by attempt; it lands in `transcripts/<lesson>-vN.pdf`, is staged in git, and `--all` makes one document of the whole course; `test/document.py` |
-| A card arrived that was the model thinking out loud, with no tag anywhere in it -- the whole reply was the thought, so every strip in `tutorboard.reasoning` passed it through and `bin/free` wrote it after two attempts came back the same way. Eight hundred tokens of deliberation, cut off mid-sentence, as the lesson | `reads_as_reasoning` judges voice rather than syntax -- a card is addressed to somebody, deliberation is about them -- and every caller refuses rather than edits: the chain tries the next model, `board write` writes nothing, and the board, the recap and the export show a notice in place of a card that got to disk another way; `test/reasoning.py` |
+| A card arrived that was the model thinking out loud, with no tag anywhere in it -- the whole reply was the thought, so every strip in `tutorboard.reasoning` passed it through. Eight hundred tokens of deliberation, cut off mid-sentence, as the lesson | `reads_as_reasoning` judges voice rather than syntax -- a card is addressed to somebody, deliberation is about them -- and every caller refuses rather than edits: `board write` writes nothing, and the board, the recap and the export show a notice in place of a card that got to disk another way; `test/reasoning.py` |
 | A save was addressed to "the current page", not to a page. A queued save therefore carried whichever page was in hand when the wire freed up — so switching page while one was in flight left the page being LEFT with an older version of itself on disk. Invisible until the board began switching pages on its own, and then it was ink lost | saves carry a page number, `dirtyPages` remembers which pages are owed, and a page is cleaned only if it did not change while its save was in the air; `test/plane.js` holds a save open on the wire and checks what the queue does with it |
 | A follow-up question landed on a blank board while the working it was asking about sat on the board above. Not a defect -- a question card is a new question and a new question gets a blank sheet -- but wrong in the middle of an exercise, and unguessable from a card kind | a blank board with working behind it offers to carry it over, one tap, as a copy; the person decides, because a new exercise opened on the last one's proof is worse than a blank sheet; `test/chain.js` |
 | A skipped homework problem was dropped. One sentence told the tutor what a skip meant — "do not re-ask it, carry on" — which is right for a concept check and expensive for an assigned problem, where a skip is a lost mark and the student means *not now* | `skip_sense` reads the sitting: in homework the skip defers and names what is still owed, off the document rather than off anyone's memory; `homework.outstanding`, `board hw`, `test/begin.py`, `test/homework.py` |
@@ -3135,8 +3143,7 @@ request with a 502 if you ask it to.
                                      "--permission-mode", "acceptEdits",
                                      "--allowedTools", "Bash(board *)"] },
     "opencode": { "cmd": ["opencode"], "prompt": "argv" },
-    "aider":    { "cmd": ["aider"],    "prompt": "none" },
-    "free":     { "cmd": ["opencode"], "prompt": "argv", "raw_prompt": true }
+    "aider":    { "cmd": ["aider"],    "prompt": "none" }
   }
 }
 ```
@@ -3145,10 +3152,10 @@ request with a 502 if you ask it to.
 `prompt: "none"` launches it bare and prints the one line to paste. Add an entry for anything that
 runs in a terminal — nothing in the launcher knows which assistant it is starting.
 
-**`claude` is the default.** Claude Code arrives with the course repository already in front of it,
-which is most of a tutor: it reads the slate PNG itself rather than through a transcription model,
-writes the card, and edits the course's own `.tex` when a homework sitting needs it. What it costs
-is the ~38k-token tool prompt on every turn, which is the whole reason the next entry exists.
+**`claude` is the default**, and it is the only one this has been taught with at length. Claude
+Code arrives with the course repository already in front of it, which is most of a tutor: it reads
+the slate PNG itself rather than through a transcription model, writes the card, and edits the
+course's own `.tex` when a homework sitting needs it.
 
 #### What a headless tutor is allowed to do, and where that is written
 
@@ -3166,84 +3173,6 @@ read and change.
 It deliberately does **not** also appear as a flag on the agent's command. One policy written in two
 places is one policy that drifts the first time either moves, and of the two the committed file is
 the half anybody can actually see. `test/agents.py` holds both halves of that.
-
-One entry is not a terminal agent at all: **`free`** is the built-in lightweight tutor. Its
-headless turn is `bin/free`, a stdlib script that runs the lesson through `board recap`, reads the
-student's handwriting with a free vision model, and writes one card as a plain completion over the
-free-model chain. It exists because a general coding agent carries a ~38k-token tool prompt every
-turn, which exhausts the free tiers; a tutoring turn is three small steps and this does exactly
-those. `raw_prompt` hands the script the raw inbox instead of the instruction prompt, and its
-interactive `cmd` is opencode, so a person asking for a terminal session still gets one.
-
-It is the floor: when the paid tutor's allowance runs out, this is what answers — see [when the
-allowance runs out](#when-the-allowance-runs-out).
-
-#### The chain finds its own models
-
-`bin/free` used to name five OpenRouter models in a tuple at the top of the file. On 7 September
-2026 two of them answered *"this model is unavailable for free; the paid version is available
-now"* — retired from the free tier some days earlier — and nothing anywhere said so. The chain was
-quietly three models deep, then two, and the only symptom at the board was cards arriving more
-slowly and then not at all. **A free tier's catalogue moves every few weeks. Anything that writes
-one down goes stale, and a stale chain is a board that stops teaching for a reason nobody at the
-board can see.**
-
-So the chain is discovered. `tutorboard/freechain.py` asks both providers what they actually serve,
-keeps what is free, and puts it in an order. Three things hold it together and the middle one is
-the one worth reading twice:
-
-- **A preference list, not a permission list.** Models we have seen teach well lead, in an order.
-  Everything else the provider offers *follows* rather than being excluded — so a model published
-  tomorrow is in the chain tomorrow, at the back, and the chain never empties because a favourite
-  was retired. Delete the preference list entirely and the tutor still works, slightly worse and
-  entirely by itself. That is the property being bought.
-- **A refusal list that is about shape, not quality.** A safety classifier, a transcription model
-  and an embedding model are all "free chat completions" to a catalogue, and none of them can write
-  a card. Handed a tutoring prompt they produce *something*, and that something reaches the board.
-- **A memory of what has died.** A model that answers "no such model" is written down and skipped
-  for a week, so the same dead name is not retried on every turn of every lesson. A 429 is *not*
-  that: a rate-limited model is fine and will answer in a minute, and retiring models over a busy
-  evening would empty the chain.
-
-Underneath all of it is a short pinned list, for a machine that cannot reach a catalogue at the
-moment it needs to teach. It is a floor, never the plan, and discovery replaces it entirely the
-moment it succeeds.
-
-Two smaller things came out of the same evening. The handwriting was being read by
-`qwen/qwen2.5-vl-72b-instruct`, which is a fine model and **is not free** — so the tutor that exists
-in order to cost nothing was putting every handed-in page on a credit balance, and would have begun
-answering "insufficient credits" to handwriting on the day it ran out, with nothing on the board to
-say why. Several free models take images now, and the vision chain is picked the same way the text
-chain is. And every model here *thinks before it answers*, out of the same `max_tokens` budget: an
-800-token cap on a 550B reasoner is a cap the model can spend entirely on deliberation, returning an
-empty reply that reads from here as "the model returned nothing". The budgets are generous now,
-because they cost nothing — what keeps a card short is the instruction to write one card, which is
-where a length limit belongs.
-
-#### Asking it, rather than assuming
-
-```
-board free              walk the chain, ask it to answer, say whether it did
-board free --deep       and ask it to read a page, which is how most answers arrive
-board free --list       the whole chain, without asking it anything
-board free --refresh    re-read both catalogues rather than the cache
-board free --forget     un-bury the models recorded as retired
-```
-
-This is the command for the state `board status` cannot describe: the board is up, a tutor is
-attached, the log is empty, and nothing is arriving. Everything above the model is fine in that
-state *and looks fine*, which is why it took an outside session to work out that the fault was two
-model names having been retired three days earlier. `board doctor` now ends with the same picture
-read off the cache — who teaches here, for how much, on what — and points at this for the real ask.
-
-An agent is a command, and two machines do not have the same commands installed. Naming a
-particular program as the default made that worth checking, so a start whose command is missing now
-refuses and says which one, instead of leaving a daemon that reads as *listening* and fails every
-turn into a log. `tutor --agents` marks what this machine cannot actually run.
-
-The brief itself is written to `live/BRIEF.md` every time, so an assistant that takes no argument
-can still be told to read it. It names the course, its stance, the session kind, and the board's
-addresses, and says plainly that the board is already running.
 
 ### Which one, for this course, on this machine
 
@@ -3274,63 +3203,9 @@ particular assistant regardless of where it runs. Four layers settle it, most sp
 second model is a second entry whose `cmd` carries the flag — which is why "opencode with DeepSeek"
 and "opencode with something else" are two names in this file and nothing in the code changes.
 
-**`fallback_agent` is not a fifth layer either.** The four above answer *which assistant this course
-wants*; the fallback answers *what to do when the one it wants has nothing left to spend*. It is one
-name — `free` by default, `null` to turn the whole thing off — and it is used only after a turn has
-failed on a usage limit. Nothing falls back from it, which is the point of it being the free one.
-
-### The machine that may not spend
-
-A machine can be told it may not run a billed tutor at all. That is one line of configuration and it
-is deliberately **outside** the four-layer order above rather than another entry in it:
-
-```json
-{ "free_only": true, "fallback_agent": "free" }
-```
-
-Three of those four layers can reach a machine from somewhere else. A course repository is a clone,
-so `"agent": "claude"` written in one is a sentence about the machine it was written on, and it
-arrives everywhere else with the next `git pull` and takes effect there silently. A `hosts` table is
-written once and copied. A `--agent claude` is the same mistake made in person, on the wrong
-machine. **None of those
-is a reason for this machine to start billing**, so none of them wins: the resolved agent is checked
-against what it costs, and a paid one is replaced by whatever this machine runs for nothing.
-
-What it costs is written on the recipe, not inferred from its name:
-
-```json
-"claude": { "cmd": ["claude"], "cost": "paid",  … },
-"free":   { "cmd": ["opencode"], "cost": "free", "cmd_cost": "paid", … }
-```
-
-An entry with no `cost` is **assumed to cost**. That is the only safe default: somebody adding their
-own agent gets a machine that refuses to run it for free, rather than a machine that quietly bills
-for it. Saying `"cost": "free"` is one word, and it is the person adding it who knows.
-
-`cmd_cost` exists because `free` is two programs. Its headless turns run `bin/free`, which costs
-nothing; its interactive `cmd` is opencode, whose cost depends entirely on what *that* machine's
-opencode is pointed at — which is configuration this repository cannot see. So the shipped recipe
-assumes it is billed, and a free-only machine that has not said otherwise runs every turn and
-**declines to open a terminal session**, saying which half still works. A machine whose opencode is
-demonstrably on free models says so, and gets both halves:
-
-```json
-"agents": { "free": { "cmd_cost": "free" } }
-```
-
-**That override merges into the built-in recipe rather than replacing it**, and the distinction is
-not cosmetic. A plain replace would take the command, the headless turn and the handoff with it —
-leaving an agent called `free` that cannot run anything and, on a free-only machine, no tutor at
-all, from adding one key. Replacing a recipe outright is still possible and is now something you
-have to mean: `"replace": true`.
-
-A refusal is never silent and never leaves the board empty. The swap is reported, and the lesson
-goes to `fallback_agent` — which is itself verified free, because a config naming a paid fallback on
-a free-only machine is a mistake worth refusing rather than obeying.
-
-A compute node is the machine that holds the allowance, and `scripts/setup-node.sh` asserts exactly
-that: it takes `free_only` off, because a node that will not spend is a node whose allowance nothing
-ever uses. `test/free.py` holds the arrangement.
+**And there is no fifth layer for "what if it has nothing left to spend".** There is one tutor, and
+a turn it cannot take is a turn the board reports rather than answering worse — see [when the
+allowance runs out](#when-the-allowance-runs-out).
 
 ### The assistant belongs to the course, not to the terminal
 
@@ -3463,8 +3338,7 @@ unrestartable while still answering perfectly.
 > ```
 >
 > It pulls, checks the machine's name is not pinned, picks the tutor this machine can actually run,
-> takes `free_only` off so the allowance is used, and restarts the boards and tutors so they are on
-> the code it just pulled. Every step is idempotent and reports what it found, so running it again
+> and restarts the boards and tutors so they are on the code it just pulled. Every step is idempotent and reports what it found, so running it again
 > when you are unsure costs nothing.
 >
 > The one thing it will not do for you is `board vpn up --hostname <node-name>`, for the reason
@@ -3496,10 +3370,11 @@ demotes a machine for days.
 machine that hit the limit can know about it. A board too old to publish the field is not assumed to
 be exhausted — silence is an allowance.
 
-**2. Then teach with what is free.** The tutor pushes the transcript first — the message it has just
-failed to answer is in there, and the beat that would have carried it is the beat there is no time
-for — and then falls back to `fallback_agent`, `free` by default, and answers the message it was
-holding. A free-model answer beats a board where nobody is home.
+**2. Then stop, and say so.** The tutor pushes the transcript first — the message it has just failed
+to answer is in there, and the beat that would have carried it is the beat there is no time for —
+and then the turn is reported as the failure it is. There is one tutor and it has nothing left to
+spend; a board that says *the allowance is gone until 4pm* is worth more than one that answers the
+question badly with something else.
 
 Coming back up is the same two steps in reverse and nobody types anything. The limit expires, or a
 turn goes through and proves the allowance is back before the clock said it would; the tutor climbs
@@ -3510,9 +3385,9 @@ board limit              has the allowance here run out, and until when
 board limit --clear      it came back early; stop waiting out the guess
 ```
 
-`board doctor` names it too. The handoff is the one turn that must not be skipped, and a tutor with
-no allowance cannot write it — so whatever the machine can run for nothing writes it instead. A
-handoff in the free tutor's words is worth incomparably more than no handoff at all.
+`board doctor` names it too. The handoff is the one turn that must not be skipped and a tutor with
+no allowance cannot write it: it is attempted anyway, and a session that ends without one is a
+session the next has to reconstruct from the cards.
 
 #### Exit nodes, which are invisible until they are not
 
@@ -3598,17 +3473,15 @@ repositories live somewhere else.
 ## Which subjects the app offers
 
 **Whatever the machine that is serving has on disk, and nothing else.** The hub's list is a
-directory listing of the serving host's `courses_dir`, built when the app asks for it — never
-cached, never baked into the installed app, never written down anywhere. So the answer changes with
-the machine, by itself:
+directory listing of this machine's `courses_dir`, built when the app asks for it — never cached,
+never baked into the installed app, never written down anywhere. A compute node with every
+repository cloned into the shared home offers every subject; a laptop with four of them cloned
+offers four.
 
-- serving from a compute node with every repository cloned into the shared home, the app offers
-  every subject;
-- serving from a laptop with four of them cloned, the app offers four.
-
-There is no list to edit and nothing that can disagree with reality. To put a subset on a second
-machine, clone a subset: `~/.config/tutor-board/courses.txt` is what `bootstrap.sh` reads, and it
-is per-machine and not in this repository.
+There is no list to edit and nothing that can disagree with reality, and nothing to pick between:
+the hub offers this machine's courses because this machine is the one serving the address. To put a
+subset on another machine, clone a subset — `~/.config/tutor-board/courses.txt` is what
+`bootstrap.sh` reads, and it is per-machine and not in this repository.
 
 **A course that is not running is still offered**, because opening it is what starts it. What the
 hub must never do is claim one is running when it is not. That was a real defect: a board that died
@@ -4264,7 +4137,6 @@ board review list                # everything this repository can be reviewed ov
 board review over ch01 ch07      # what a test review covers
 board vpn up|status|serve|down   # the Tailscale link
 board doctor                     # is this machine equipped, and who teaches on it
-board free                       # can it teach for nothing, and on which models
 board limit                      # has the tutor's allowance here run out
 board stop
 ```
@@ -4510,7 +4382,7 @@ wrapper.
 ## Layout
 
 ```
-bin/board          the command line (also: tutor, free)
+bin/board          the command line (also: tutor)
 serve.py           the entry point, and nothing else
 TEACHING.md        how to teach on this board -- copied into every course's live/
 tutorboard/        the board itself, organised by what a thing is about:
@@ -4886,7 +4758,9 @@ python3 test/paper.py    that both documents can be READ on the board and SAVED 
                          banner from the payload rather than being invented for one frame
 python3 test/teaching.py that the teaching method reaches every course
 python3 test/choice.py   that the address opens the course a person chose
-python3 test/limit.py    that a lesson moves to a machine with an allowance to teach it
+python3 test/limit.py    that an allowance running out is reported rather than hidden
+python3 test/retire.py   that the one command that deletes anything deletes it on one
+                         machine and is a silent no-op on every other
 python3 test/tokens.py   what a turn is allowed to read, what it must not run, and that
                          what it cost is measured rather than argued about
 

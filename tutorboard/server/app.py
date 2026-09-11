@@ -15,7 +15,7 @@ import threading
 import time
 from http.server import ThreadingHTTPServer
 
-from .. import machine, machines, paths
+from .. import machine, paths
 from ..course import repo as course_repo
 from ..net import tailscale
 from .handler import Handler
@@ -128,17 +128,6 @@ def main(argv):
         json.dump(info, fh, indent=2)
     sys.stderr.write("board listening on %s\n" % ", ".join(info["urls"]))
     sys.stderr.flush()
-    # And tell the other machines that this one is here. A machine is found by
-    # knocking on ports derived from COURSE names, so a board serving a course
-    # the other machine has no clone of is on a number it will never try -- which
-    # is how a whole machine disappears out of the hub. Announcing costs one POST
-    # and is the only half of the discovery that cannot be guessed.
-    #
-    # On a heartbeat, not once: the first announcement of the evening went to a
-    # machine still running code that had never heard of `/hello`, and one 404
-    # was the end of it. A walk is no fallback, because a walk happens when
-    # somebody asks and this board may be the one nobody has open.
-    machines.announce_self_forever(repo, port)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

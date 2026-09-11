@@ -14,9 +14,6 @@
 
 var els = {
   dot: document.getElementById("dot"),
-  hosts: document.getElementById("hosts"),
-  hostsWrap: document.getElementById("hosts-wrap"),
-  hostsHint: document.querySelector("#hosts-wrap .hint"),
   eyebrow: document.getElementById("hero-eyebrow"),
   course: document.getElementById("hero-course"),
   chapter: document.getElementById("hero-chapter"),
@@ -101,85 +98,8 @@ function paintBoard(d) {
     : "the slate";
 }
 
-/* -------------------------------------------------------------- the hosts */
-/* Which machine's courses the list below is showing.
- 
-   Which courses exist is a property of a MACHINE: they are whatever is cloned
-   next to the board. So a course list has always been "the courses of whichever
-   machine happens to be serving you", and the other machine's were not merely
-   hard to reach, they were invisible. Asked for from the device: "I want to be
-   able to control this at all times on the iPad - whatever hosts are available".
- 
-   The selection is local to this page. It picks which list you are looking at;
-   tapping a course is still what moves anything. */
-var hosts = [];
-var onHost = null;          /* null = the machine serving this page */
-
-function hostKey(h) { return h && h.host ? h.host : ""; }
-
-function paintHosts(doc) {
-  hosts = (doc && doc.hosts) || [];
-  els.hosts.innerHTML = "";
-  /* Always drawn, whatever is in it. Hiding a row of one machine was meant as
-     tidiness and read as "there is no other machine": on 9 September the only
-     board on another machine was a course this one has no clone of, so it could
-     not be found, the row hid itself, and the report was "I don't see any
-     options to go to the compute node". A machine that is quiet is now drawn as
-     a machine that is quiet, and the row is somewhere you can always look. */
-  els.hostsWrap.hidden = !hosts.length;
-  if (onHost !== null && !hosts.some(function (h) { return hostKey(h) === onHost; })) {
-    onHost = null;          /* it went away while we were looking at it */
-  }
-  hosts.forEach(function (h) {
-    var b = document.createElement("button");
-    b.type = "button";
-    var key = hostKey(h);
-    var here = !!h.here;
-    b.className = (key === (onHost || "") ? "on" : "") + (h.reachable ? "" : " off");
-    var name = document.createElement("span");
-    name.textContent = (h.name || key || "this machine").split(".")[0];
-    var sub = document.createElement("span");
-    sub.className = "n";
-    var n = (h.courses || []).length;
-    var courses = n + (n === 1 ? " course" : " courses");
-    /* Three states, and the third one is the point: a machine seen before that
-       is not answering now. Its courses are the last list it gave, which is
-       still worth showing -- tapping one says where you want to be. */
-    sub.textContent = here ? "serving you · " + courses
-      : h.reachable ? courses
-      : n ? "not answering · " + courses
-      : "not answering";
-    b.appendChild(name);
-    b.appendChild(sub);
-    b.onclick = function () {
-      onHost = key;
-      paintHosts({ hosts: hosts });
-      paintCourses(coursesOf(onHost), onHost);
-    };
-    els.hosts.appendChild(b);
-  });
-  /* And say what a quiet machine means, where somebody is already looking. A
-     greyed button with no explanation is the same dead end as no button. */
-  var picked = null;
-  hosts.forEach(function (h) { if (hostKey(h) === (onHost || "")) picked = h; });
-  if (picked && !picked.reachable) {
-    els.hostsHint.textContent = (picked.name || picked.host).split(".")[0]
-      + " has no board answering. Start one on that machine once — its courses "
-      + "cannot be opened from here until then.";
-  } else {
-    els.hostsHint.textContent = "Each machine teaches the courses it has a copy of.";
-  }
-}
-
-function coursesOf(key) {
-  for (var i = 0; i < hosts.length; i++) {
-    if (hostKey(hosts[i]) === (key || "")) return hosts[i].courses || [];
-  }
-  return [];
-}
-
 /* ------------------------------------------------------------ the others */
-function paintCourses(list, host) {
+function paintCourses(list) {
   var others = [];
   var past = [];
   (list || []).forEach(function (c) {
@@ -218,7 +138,7 @@ function paintCourses(list, host) {
     /* A course nobody has opened yet has nothing to say on the second line, and
        an empty one only spends the gap above it. */
     if (meta.childNodes.length) b.appendChild(meta);
-    b.onclick = function () { switchTo(c.repo, host); };
+    b.onclick = function () { switchTo(c.repo); };
     li.appendChild(b);
     into.appendChild(li);
   }
@@ -231,54 +151,37 @@ function paintCourses(list, host) {
   els.pastWrap.hidden = !past.length;
 }
 
-function switchTo(repo, host) {
+function switchTo(repo) {
   if (moving) return;                 /* one at a time; a second tap is a queue */
-  moving = { repo: repo, host: host || "" };
+  moving = { repo: repo };
   showBusy("opening " + repo + "…", "asking");
   fetch("/switch", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    /* The machine as well as the course, when the person picked one. A course
-       name can mean two clones and the board must not have to guess which. */
-    body: JSON.stringify({ repo: repo, host: host || "" })
+    body: JSON.stringify({ repo: repo })
   }).then(function (r) { return r.json(); }).then(function (res) {
     if (!res.ok) throw new Error(res.error || "switch failed");
-    /* A course on ANOTHER machine is not something this address can open: an
-       address only ever serves a board on the machine holding it. Waiting for
-       it to would be waiting for ever, so say where the lesson is instead. */
-    if (res.address === false) {
-      showBusy(repo + " is on " + String(host || "").split(".")[0],
-               res.detail || "open that machine's own address to use it");
-      moving = null;
-      return null;
-    }
-    return waitForAddress(repo, host || "", Date.now());
-  }).then(function (landed) {
-    if (landed === null) return;      /* nothing to wait for; already said so */
-    /* Landed or not, this goes to the lesson. The board serving this address
-       re-pointed it at the course before it answered, so by here the switch has
-       happened; the poll is only how we know not to reload too early. There is
-       nothing to ask a person about, and asking was worse than useless -- from
-       the iPad it read as a switch that could not be made. */
+    return waitForAddress(repo, Date.now());
+  }).then(function () {
+    /* Landed or not, this goes to the lesson. The board re-pointed the address
+       at the course before it answered, so by here the switch has happened; the
+       poll is only how we know not to reload too early. There is nothing to ask
+       a person about, and asking was worse than useless -- from the iPad it read
+       as a switch that could not be made. */
     location.href = "/";
   }).catch(function (e) {
-    showBusy("could not move the board", e.message || String(e));
+    showBusy("could not open " + repo, e.message || String(e));
     moving = null;
   });
 }
 
-/* Which course, and which machine, is answering at this address RIGHT NOW.
-   Asking is the only honest way to know a switch has landed: the name is
-   re-pointed by the machine serving it, and the page cannot see that happen. */
+/* Which course is answering at this address RIGHT NOW. Asking is the only
+   honest way to know a switch has landed: the name is re-pointed by the board
+   that took it, and the page cannot see that happen. */
 function serving() {
   return fetch("/health?t=" + Date.now(), { cache: "no-store" })
     .then(function (r) { return r.json(); })
     .catch(function () { return null; });   /* mid-move the socket is closed */
-}
-
-function sameHost(a, b) {
-  if (!a || !b) return true;         /* nobody said, or an older board */
-  return String(a).split(".")[0] === String(b).split(".")[0];
 }
 
 /* Poll until the address actually serves what was asked for.
@@ -289,15 +192,15 @@ function sameHost(a, b) {
    of those taps was working. A board that has just taken the name answers this
    within a second or two; the ceiling is only there so a reload eventually
    happens whatever the network did. */
-function waitForAddress(repo, host, began) {
+function waitForAddress(repo, began) {
   return serving().then(function (h) {
-    if (h && h.dir === repo && sameHost(h.host, host)) return true;
+    if (h && h.dir === repo) return true;
     var waited = Math.round((Date.now() - began) / 1000);
     if (waited >= SWITCH_PATIENCE) return false;
     showBusy("opening " + repo + "…", waited > 2 ? "starting the board · "
              + waited + "s" : "starting the board");
     return new Promise(function (go) { setTimeout(go, 600); })
-      .then(function () { return waitForAddress(repo, host, began); });
+      .then(function () { return waitForAddress(repo, began); });
   });
 }
 
@@ -325,15 +228,11 @@ function refresh() {
   if (moving) return Promise.resolve();   /* not while the address is in flight */
   return Promise.all([
     fetch("/board.json").then(function (r) { return r.json(); }),
-    fetch("/courses.json").then(function (r) { return r.json(); }).catch(function () { return {}; }),
-    fetch("/hosts.json").then(function (r) { return r.json(); }).catch(function () { return {}; })
+    fetch("/courses.json").then(function (r) { return r.json(); }).catch(function () { return {}; })
   ]).then(function (all) {
     els.dot.className = "dot live";
     paintBoard(all[0] || {});
-    paintHosts(all[2] || {});
-    /* The machine serving this page answers for itself; another machine's list
-       came back with its own board. */
-    paintCourses(onHost ? coursesOf(onHost) : ((all[1] || {}).courses), onHost);
+    paintCourses((all[1] || {}).courses);
     var w = (all[1] || {}).where;
     els.where.textContent = w || "";
   }).catch(function () {

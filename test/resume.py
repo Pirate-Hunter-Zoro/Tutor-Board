@@ -776,9 +776,9 @@ check("and only the board's own scratch is cleaned, never a person's untracked "
       "clean -fdq -- live" in src_c)
 check("it restarts the boards and the tutors",
       'restart --tutors' in src_c)
-check("and then says what is actually true: what is running, how to reach each "
-      "board directly, and what the hub will offer",
-      "/hosts.json" in src_c and "how to reach each of them" in src_c)
+check("and then says what is actually true: what is running, and how to reach "
+      "each board directly",
+      "how to reach each of them" in src_c)
 check("with a --report mode that changes nothing",
       "--report) REPORT=1" in src_c)
 

@@ -169,25 +169,18 @@ try:
 finally:
     shutil.rmtree(perm_tmp, ignore_errors=True)
 
-# The free tutor is not the default any more and is not gone: it is what a
-# machine that pays for no model runs, and removing it would leave that machine
-# with nothing.
-free = D["agents"]["free"]
-check("the free tutor is still configured", bool(free.get("headless")))
-check("and still runs the free-model script",
-      any(a.endswith(os.path.join("bin", "free")) for a in free["headless"]))
-check("and still builds its own context from the raw inbox",
-      free.get("raw_prompt") is True)
-check("and still has its own way to write the handoff", bool(free.get("handoff")))
-
-# An agent is a command, and two machines do not have the same commands. A
+# Every agent is a command, and no two machines have the same commands. A
 # missing one used to start a daemon that showed as listening and then failed
 # every turn into a log nobody opens.
 check("a command that is not on the path is reported",
       tutor.missing_command(["a-command-no-machine-has"]) == "a-command-no-machine-has")
 check("one that is, is not", tutor.missing_command(["sh"]) is None)
 check("and a script agent runs under this interpreter, which is always here",
-      tutor.missing_command(free["headless"]) is None)
+      tutor.missing_command([sys.executable, "anything.py"]) is None)
+check("there is one tutor and it is the one the config names",
+      D["default_agent"] == "claude" and "claude" in D["agents"])
+check("and nothing in the table claims to teach for nothing",
+      not any("cost" in spec for spec in D["agents"].values()))
 
 # --- the shared filesystem ---------------------------------------------------
 tmp = tempfile.mkdtemp(prefix="tutor-agents-")

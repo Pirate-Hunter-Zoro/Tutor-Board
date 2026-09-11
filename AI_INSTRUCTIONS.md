@@ -16,7 +16,7 @@ them by git, never by hand. The first act of any session here is:
 git pull --ff-only
 ```
 
-A fix shipped from the other machine has to be in front of you before you build on
+A fix shipped from somewhere else has to be in front of you before you build on
 it, or you will be fixing a board that is not the one running. It is deliberately
 never fatal: no remote, no network, or a diverged branch say so in one line and you
 carry on. `tutor` and `tutor resume` now do this for the machine — pull, re-exec,
@@ -25,7 +25,7 @@ since before the last one of those ran, so pull anyway. But start from what is o
 opened it. The same rule applies to a course repository — its lesson transcript
 (cards, turns, ink, answers) is versioned too, so a lecture picked up here is the
 same one taught there. The headless tutor pushes that transcript on a beat and the
-session start pulls it; do not re-commit a card the other machine already wrote.
+session start pulls it; do not re-commit a card another session already wrote.
 
 **Then check the machine you are standing on.** The one iPad address belongs to the machine holding
 the tailnet name, and a node whose name was changed in the admin console still has the old one in
@@ -71,8 +71,8 @@ tutorboard/
   brief carry           what a turn reads before it teaches, and what it tells
                         the next one -- a turn is its own session, so both are
                         files rather than conversation
-  machines.py           the other machines, and what each can teach
-  net/                  reaching them: tailscale, socks, boards, egress
+  machines.py           what this machine can teach, and what was chosen on it
+  net/                  the tailnet it is reached on, and getting out to a model
   course/               a course on disk: repo, config, document, homework,
                         review, syllabus, screenshot
   lesson/               what is on the board now: cards, turns, notes, slate,
@@ -332,31 +332,21 @@ tutorboard/
 - **The service worker caches the shell and nothing live.** SSE, the board payload, uploads,
   slate saves, and figures go to the network every time. A cached lesson is a stale lesson, which
   is worse than a blank screen. Bump `VERSION` in `sw.js` whenever a shell file changes.
-- **One address serves one machine.** `tailscale serve` proxies the tailnet HTTPS name to a port on
-  the machine running it, and answers every request with a 502 if its config names a remote tailnet
-  backend. The identity moves between cluster nodes, which works because they share one home
-  directory and one ownership record; it does not move to a machine that shares neither, and such a
-  machine keeps a name of its own instead. Two names, two icons on the iPad, no ambiguity.
-- **A board must be reachable from another machine.** It binds its tailscale address as well as
-  loopback — the tailnet, not the LAN. Without that, asking where a course is served is refused by a
-  loopback socket and a course can only ever be found on the machine doing the asking, which is
-  switching that cannot work however correct everything above it is. It went unseen for a week
-  because every test above it passed. And never look for another machine at a hostname out of the
-  config alone: a compute node's name is an allocation. `tutorboard.net.boards.locate_course` asks
-  the tailnet.
-- **The machine is the person's choice, not an inference.** Which courses exist is a property of a
-  machine — they are whatever is cloned beside the board — so a course name can mean two clones and
-  the hub must be able to say which. `/hosts.json` lists every machine on the tailnet running a
-  board and what each has, and the record carries the host beside the course. A machine is a
-  qualifier on the lesson, never a reason to take the address off one. `test/hub.js`,
-  `test/choice.py`.
-- **A course runs in ONE place.** A tap on a course that another machine is already serving records
-  the choice — that record is the only thing two machines can both read — and asks that machine to
-  bring it up. It must never start a second board, or a tutor, for a course being served elsewhere:
-  that is two boards for one course and **two tutors on one inbox** writing contradictory cards into
-  one lesson. Both happened in one evening, 1 September 2026. Whether anybody else is serving it is
-  asked over the tailnet, never assumed from the machine's role — a machine that cannot be reached
-  would otherwise leave a course that opens nowhere. `test/choice.py`.
+- **One machine teaches, and one address opens one of its courses.** `tailscale serve` proxies the
+  tailnet HTTPS name to a port on the machine running it, and answers every request with a 502 if
+  its config names a remote tailnet backend — so there is no arrangement in which one origin serves
+  two machines, and nothing here may be built as though there were. The identity moves between
+  cluster nodes, which works because they share one home directory and one ownership record. The hub
+  is a directory listing of this machine's courses; there is no machine to pick and no second list
+  to reconcile. `test/choice.py`, `test/hub.js`.
+- **A tap in the hub moves the address, in the request that serves it.** A course has its own port,
+  so opening one means re-pointing the one name the app is installed against; nothing else is going
+  to. A *start* is the opposite case and must not take a name a live board is holding, because
+  `tutor restart` walks every course on the machine and would leave the address wherever the alphabet
+  finished. `test/address.py`.
+- **A board binds its tailscale address as well as loopback** — the tailnet, not the LAN. That is
+  what makes `http://<machine>:<port>/` reach a board directly, which is the way in when the HTTPS
+  name is pointing at another course.
 - **The tailnet address must never depend on which node you were given.** A cluster node registers
   under the service name rather than the compute host's, and its state lives in the shared home so
   the identity follows the user from node to node. The installed iPad app has one origin baked into
@@ -658,45 +648,24 @@ tutorboard/
   `tutorboard.json`, then the machine by hostname, then `default_agent`. Switching course on the
   hub moves it. Never tie an assistant's lifetime to a terminal session, and never make the student
   start one.
-- **What a machine SPENDS is the machine's own business, and it is decided outside that order.**
-  A machine can be told it may not run a billed tutor at all; a compute node holding the allowance
-  is the opposite and must not be.
-  Three of the four layers above arrive from somewhere else -- a course repository is a clone, so a
-  line in its `tutorboard.json` is a sentence about another machine that lands here in a `git
-  pull`; a `hosts` table is copied; a `--agent` is typed wherever somebody is sitting. So
-  `free_only` is checked AFTER the winner is resolved and overrides all four, and what a recipe
-  costs is written on the recipe. An entry that does not say what it costs is assumed to cost:
-  the other default bills somebody who never asked. Never make `free_only` a fifth layer, and never
-  let a paid agent through it because the config "clearly meant" it. `test/free.py`.
-- **A model name is not a fact, and nothing here may write one down.** `bin/free` once named five
-  free models in a tuple; two were retired from the free tier and the file went on naming them,
-  the chain silently went three deep, and the only symptom was a board that gradually stopped
-  answering. `tutorboard.freechain` asks both providers what they actually serve. What makes it
-  hold is that the ordering is a PREFERENCE and not a permission: a model nobody here has heard of
-  is still in the chain, behind the known ones, so the chain never empties because a favourite was
-  retired. Exclusions are about SHAPE -- a safety classifier and a transcription model cannot write
-  a card whatever a catalogue calls them -- never about quality. A 404 naming the model is a
-  retirement and is remembered for a week; a 429 is a model having a busy evening and is not.
-- **Anything the tutor reaches for must be free on this machine, including its eyes.** The
-  handwriting was being read by a paid vision model on the tutor that exists in order to cost
-  nothing -- one credit balance away from answering "insufficient credits" to every page handed in,
-  with nothing on the board to say why. Vision is picked off the same discovered chain as text.
-- **`max_tokens` on these models is not a length limit.** Every one of them thinks before it
-  answers and the thinking is spent out of the same budget, so an 800-token cap on a 550B reasoner
-  is a cap it can spend entirely on deliberation, returning empty -- which reads from here as "the
-  model returned nothing" and writes the turn off. Budgets are generous because they are free; what
-  keeps a card short is the instruction to write one card.
+- **There is one tutor, and when it has nothing left to spend the board says so.** An allowance
+  that has run out is the strangest kind of broken -- the board answers, the machine is healthy, and
+  no lesson can be taught -- so it is detected from what a failed turn SAID, recorded per machine
+  with an expiry rather than a flag, and published in `/health`. What must never be added back is a
+  second tutor to fall through to: a lesson answered worse, by something else, without the student
+  being told, is a worse outcome than a board that reports the failure and names the hour the
+  allowance returns. `board limit` says when; `test/limit.py` holds it.
 - **A fault the person at the board cannot see must have a command that shows it.** The board up, a
-  tutor attached, an empty log and nothing arriving is a state in which everything above the model
-  is fine and looks fine, and working out that two model names had been retired took a session from
-  outside. `board free` walks the chain and ASKS it; `board free --deep` asks it to read a page;
-  `board doctor` ends with the same picture off the cache. When something can only be diagnosed by
-  reading a provider's catalogue by hand, that is the bug, not the catalogue.
+  tutor attached, an empty log and nothing arriving is a state in which everything is fine and looks
+  fine. `board doctor` says whether this machine can teach and whether the tutor it names is even
+  installed; `board limit` says whether there is anything left to spend; `board egress` says whether
+  a turn can get out. When something can only be diagnosed by reading a provider's dashboard by
+  hand, that is the bug.
 - **A config override adjusts a recipe; it does not silently delete one.** `agents` merges one
-  level deeper than every other key, because a machine adding a single field -- `{"free":
-  {"cmd_cost": "free"}}` -- would otherwise replace the whole recipe and be left with an agent that
-  cannot run anything, and on a free-only machine with no tutor at all. Nothing in what they wrote
-  says that. Outright replacement is still available and has to be meant: `"replace": true`.
+  level deeper than every other key, because a machine adding a single field -- `{"claude":
+  {"prompt": "none"}}` -- would otherwise replace the whole recipe and be left with an agent that
+  cannot run anything. Nothing in what they wrote says that. Outright replacement is still available
+  and has to be meant: `"replace": true`.
 - **A failed turn is reported by what it SAID, never by what it exited with.** `exit 1` reached the
   iPad for every cause there is: a retired model, a missing key, a monologue refused, a timeout.
   The turn had already written a usable sentence one line above the number. `failure_reason` in

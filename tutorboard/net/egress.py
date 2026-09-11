@@ -46,14 +46,10 @@ def egress_probe_urls():
     `egress_probe` in the config wins, always -- the board is not allowed to know
     which assistant is driving it, and a list of URLs is how that stays true.
 
-    With nothing in the config, the default follows what THIS machine teaches
-    with, which is the part that was quietly wrong. The probe was pinned to the
-    Anthropic endpoint below because the default agent was Claude Code. On a machine
-    that has been told to teach for nothing, that asks after a host the tutor
-    will never open a connection to: Anthropic answering proves nothing when the
-    free providers are the ones being challenged by the exit node, and Anthropic
-    being blocked would report a broken machine that can teach perfectly well.
-    Either way the answer is about somebody else's server.
+    With nothing in the config, it is the endpoint below, which is the one the
+    default agent opens a connection to. Point it somewhere else the moment the
+    tutor does: a probe asking after a host the tutor never talks to answers a
+    question about somebody else's server.
     """
     try:
         with open(paths.CONFIG, "r", encoding="utf-8") as fh:
@@ -65,9 +61,6 @@ def egress_probe_urls():
         urls = [urls]
     if urls:
         return tuple(urls)
-    if cfg.get("free_only") or cfg.get("default_agent") == "free":
-        from .. import freechain
-        return tuple(p["url"] for p in freechain.PROVIDERS) or DEFAULT_EGRESS_PROBE
     return DEFAULT_EGRESS_PROBE
 
 

@@ -54,7 +54,7 @@ def check(m, cond):
 os.environ["BOARD_NO_TAILNET"] = "1"
 
 from tutorboard import choice, paths, ports
-from tutorboard.net import boards, tailscale
+from tutorboard.net import tailscale
 import tempfile as _tf                                       # noqa: E402
 
 # And it must not read THIS machine's own record either. Every check below about
@@ -245,96 +245,21 @@ print("\n-- a tap does not start a second board, or a second tutor --")
 
 check("the choice is recorded whatever else the tap does",
       'choice.remember_chosen(match["repo"], target,' in serve_src)
-check("but a second board is only started when nothing else is serving that "
-      "course -- asked over the tailnet, not assumed from the machine's role",
-      "elsewhere = None if mine else boards.locate_course(" in serve_src
-      and "if mine or not elsewhere:" in serve_src)
 check("the machine that starts the board takes the tailnet name for it, in the "
       "same request -- the tap is a person naming the course they want, and "
       "nothing else is going to move the address for them",
       'spawn.board_cli(target, ["vpn", "serve"])' in serve_src
-      and '"address": moved' in serve_src)
-check("and a tutor is started only where the course is actually served, so one "
-      "lesson never gets two",
-      serve_src.count('tutor_cli(["agent", "start", match["repo"]])') == 2
-      and "is serving this course, at its own address" in serve_src)
+      and '"address": vcode == 0' in serve_src)
+check("and the tutor follows the course, so one lesson never gets two",
+      serve_src.count('tutor_cli(["agent", "start", match["repo"]])') == 1)
 
-check("a board listens on the tailnet as well as loopback, or the other machine "
-      "can never see it and the address can only ever point at home",
+check("a board listens on the tailnet as well as loopback, or the app can only "
+      "reach it from the machine it is running on",
       "tailscale.tailnet_addresses()" in serve_src
       and "second.serve_forever" in serve_src)
-check("and phones are not knocked on at all",
-      '"ios", "android"' in open(os.path.join(ROOT, "tutorboard", "net", "tailscale.py"), encoding="utf-8").read())
-
-# The host is a choice, and it is the person's.
-#
-# Which courses exist is a property of a MACHINE -- they are whatever is cloned
-# next to the board -- so a course name can mean two different clones and the
-# hub was only ever showing one machine's list. Measured across two: five
-# course repositories on one, nine on the other. "Galois Theory is the only
-# option" was that, exactly.
-check("the hub can ask what machines are up and what each of them has",
-      'if path == "/hosts.json":' in serve_src and "def peer_hosts(" in serve_src)
-check("a machine's list comes from a board on that machine, which is the only "
-      "thing that knows what is cloned there",
-      '"/courses.json", timeout=2.0' in serve_src)
-check("the walk happens off the request, so the hub opens now and fills in",
-      "_HOSTS" in serve_src and "threading.Thread(target=refresh, daemon=True)" in serve_src)
-check("a course can be started on the machine that has it, from a hub on the "
-      "other one",
-      'if path == "/start":' in serve_src)
-check("and choosing a course on a named machine records both",
-      'choice.remember_chosen(want, "", host=on_host, at=rec_at)' in serve_src)
-check("the record carries the host",
-      "def remember_chosen(name, root, host=None, at=None):"
-      in open(os.path.join(ROOT, "tutorboard", "choice.py"), encoding="utf-8").read())
-# And the host is PUBLISHED, or a choice of machine never leaves the machine it
-# was made on: a board published the course, the port and the time and not the
-# host, so a choice made on one machine arrived everywhere else with the host
-# silently blank and the machine the person actually picked could not be
-# honoured.
-check("and a board publishes the host, or a choice of machine never leaves it",
-      '"at": rec.get("at") or 0, "host": rec.get("host") or ""' in serve_src)
 
 check("a board publishes whether it has a tutor at all",
       '"tutor": agent.get("state") or None' in serve_src)
-
-# ---- one tap, one record, on every machine at once --------------------------
-#
-# Reported in these words: "I just had to type Galois Theory ten fucking times
-# to switch to it from Probability, and then it just switched back."
-#
-# Three separate things were behind it and each one is guarded below. The first:
-# the record a tap writes is the only thing two machines can both read, and each
-# one wrote only its own copy. The other side found out by being ASKED, up to
-# half a minute later. A tap is an event and can simply be sent.
-check("a tap is relayed to every machine that can hear it, not waited for",
-      "def announce_choice(" in serve_src and "def announce_later(" in serve_src)
-check("and a board has somewhere to receive one",
-      'if path == "/chose":' in serve_src)
-check("which records and nothing else -- no board, no tutor, no address",
-      "choice.remember_chosen(want, root if os.path.isdir(root) else \"\","
-      in serve_src)
-check("every path that records a choice relays it: the hub's own machine,",
-      serve_src.count("announce_later(") >= 3)
-check("and the relay keeps the original time, so two clocks cannot disagree "
-      "about one tap",
-      "at=rec_at" in serve_src and "def remember_chosen(name, root, host=None, at=None):"
-      in open(os.path.join(ROOT, "tutorboard", "choice.py"), encoding="utf-8").read())
-check("a relay that says what is already recorded rewrites nothing, because "
-      "the file's own mtime is a signal in its own right",
-      'if have.get("dir") == want and mine_at >= at:' in serve_src)
-check("and a genuinely ancient relay is junk rather than a decision",
-      "at < time.time() - machines.RELAY_STALE" in serve_src)
-# What is deliberately NOT there: deciding which of two records is newer by
-# comparing timestamps that came off two different machines' clocks. A relay is
-# sent the instant somebody taps, so arriving at all is the evidence -- and
-# rejecting a person's tap because the other machine's clock reads earlier is a
-# failure that would be invisible from an iPad.
-check("and a tap is never refused for what another machine's clock says",
-      "if mine_at > at:" not in serve_src)
-check("and a relayed name is a name, never a path",
-      "want != multipart.safe_filename(want)" in serve_src)
 
 # ---- and the hub waits for the address to actually move ---------------------
 #
@@ -347,10 +272,8 @@ check("the hub no longer reloads on a timer and hopes",
       "setTimeout(function () { location.href" not in home_src)
 check("it waits until the address serves what was asked for",
       "function waitForAddress(" in home_src and "h.dir === repo" in home_src)
-check("on the machine that was asked for, when one was named",
-      "sameHost(h.host, host)" in home_src)
-check("and a board says which machine it is, so that can be checked",
-      '"host": tailscale.tailnet_self() or ""' in serve_src)
+check("and a board says which machine it is, so a client can tell what it "
+      "reached", '"host": tailscale.tailnet_self() or ""' in serve_src)
 check("a second tap while one is in flight is not a second switch",
       "if (moving) return;" in home_src)
 # And it asks the person nothing. "ask again" / "stay here" was a dead end
@@ -359,49 +282,14 @@ check("a second tap while one is in flight is not a second switch",
 check("and it never ends in a question, because the switch has already happened",
       "busy-again" not in home_src and "busy-stay" not in home_src
       and "still on the old board" not in home_src)
-check("a course on a machine this address cannot serve says so instead of "
-      "waiting for something that will never happen",
-      "res.address === false" in home_src)
-# And a machine, once found, is not lost again. The walk that finds a peer's
-# board knocks on ports DERIVED FROM COURSE NAMES, and the two machines are not
-# the same list -- five course repositories on one machine and twelve on another
-# -- so a peer whose only board is a course this machine has not got is on a
-# number that will never be tried. Reported as "I don't see any options to go to
-# the compute node": the node was up, serving PSYCH-ASR on 9171, which the other
-# machine had no clone of.
-check("a machine that answered once is asked at that port first, and the note "
-      "outlives the process that made it",
-      "def known_peers(" in serve_src and 'add(was.get("port"))' in serve_src)
-check("and the ports of the courses THAT machine said it had are knocked on too",
-      'ports.default_port(c["repo"])' in serve_src)
-check("a board says where it is rather than waiting to be guessed at",
-      "def announce_self(" in serve_src and 'if path == "/hello":' in serve_src)
-check("and it does that as soon as it is listening, and keeps saying so -- one "
-      "announcement to a machine that has not been updated yet is a 404 and the "
-      "end of it, and a board nobody has the hub open against never walks",
-      "machines.announce_self_forever(repo, port)"
-      in source("tutorboard", "server", "app.py")
-      and "def announce_self_forever(" in serve_src
-      and "time.sleep(ANNOUNCE_EVERY)" in serve_src)
-check("and again whenever it finds a machine, because the one with the news is "
-      "usually the one that just came up",
-      "def introduce_later(" in serve_src
-      and "introduce_later(repo, host, found)" in serve_src)
-check("a machine only ever learns of a peer the tailnet agrees is there",
-      "for peer in tailscale.tailnet_peers():"
-      in source("tutorboard", "server", "routes", "machines.py").split('"/hello"')[1])
-check("a machine seen before is still offered when it is not answering, because "
-      "a hub that hides a machine is a machine nobody can reach",
-      "def quiet_hosts(" in serve_src and '"reachable": False' in serve_src)
-check("and the hub asks for one on a machine with no board and is told so, "
-      "rather than recording a choice nothing can act on",
-      "has no board answering" in serve_src)
-check("the row of machines is never hidden",
-      "els.hostsWrap.hidden = !hosts.length;" in home_src
-      and "hosts.length < 2" not in home_src)
-check("and a quiet machine says it is quiet",
-      '"not answering"' in home_src)
-
+# There is one machine, and the hub is a list of what it has. A row of machines
+# to choose between was a choice about where a lesson lives, and there is
+# nowhere else for one to live.
+check("the hub offers no machine to pick, because there is one",
+      "hosts" not in home_src
+      and not any("hosts" in ln for ln in
+                  open(os.path.join(ROOT, "web", "home.html"),
+                       encoding="utf-8").read().splitlines()))
 sw_src = open(os.path.join(ROOT, "web", "sw.js"), encoding="utf-8").read()
 check("the health check is never answered out of the cache",
       "health" in sw_src.split("var LIVE")[1].split("\n")[0])

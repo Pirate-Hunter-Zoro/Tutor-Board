@@ -65,11 +65,6 @@ def set_tailnet_hostname(name):
         fh.write(name.strip() + "\n")
 
 
-# How many other machines one walk of the tailnet may knock on. A person teaches
-# on a handful of machines; anything past this is a fleet that arrived in the
-# netmap by itself, and the walk costs four ports and a socket timeout each. See
-# `tailnet_peers` for the evening this ceiling is here to prevent.
-PEER_WALK_LIMIT = 12
 
 _TS_CACHE = [0.0, None]
 TS_CACHE_TTL = 3.0
@@ -78,9 +73,9 @@ TS_CACHE_TTL = 3.0
 def _ts_status():
     """The netmap, as `tailscale status --json` gives it.
 
-    Cached for a few seconds. Finding out where a course is served asks who is
-    up, who the node is, and what this machine is called; that was three
-    subprocesses for one answer that cannot meaningfully change in between.
+    Cached for a few seconds: who this machine is and what it is called are
+    asked more than once in a breath, and neither can meaningfully change in
+    between.
     """
     now = time.time()
     if _TS_CACHE[1] is not None and now - _TS_CACHE[0] < TS_CACHE_TTL:
@@ -97,37 +92,6 @@ def _ts_status():
         return {}
     _TS_CACHE[0], _TS_CACHE[1] = now, st
     return st
-
-
-def peer_is_down(name, status=None):
-    """Does the tailnet say this machine is off? True, False, or None for "no idea".
-
-    Asked before knocking, because knocking on a machine that is not there is
-    the most expensive way to learn nothing: four ports, a socket timeout each,
-    and again through the SOCKS proxy -- 6.1s measured against this tailnet's
-    compute node while it was asleep. Finding a course walks that three times
-    over, so a machine that had gone home turned every such question into twenty
-    seconds, and a tap on the iPad waited all of it.
-
-    Tailscale already knows. It is the one question it can answer instantly.
-
-    None rather than True when the answer is not known -- an empty netmap, no
-    tailscale, a name that is not a peer -- because "I cannot tell" must mean
-    "knock anyway". A machine wrongly assumed down is a lesson that cannot be
-    reached, which is far worse than a slow tick.
-    """
-    if not name:
-        return None
-    st = status if status is not None else _ts_status()
-    peers = st.get("Peer") or {}
-    if not peers:
-        return None
-    want = str(name).split(".")[0].lower()
-    for peer in peers.values():
-        label = (peer.get("DNSName") or "").rstrip(".").split(".")[0].lower()
-        if label == want or str(name) in (peer.get("TailscaleIPs") or []):
-            return not peer.get("Online")
-    return None
 
 
 def tailnet_addresses():
@@ -206,63 +170,6 @@ def unpublish_board(port, timeout=20):
         return p.returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
-
-
-def tailnet_peers(status=None):
-    """Every machine on this tailnet that is online, as something to knock on.
-
-    A compute node used to be looked for at ONE hostname, out of the config. A
-    compute node's hostname is an allocation -- it was `compute302` today and
-    something else last week -- so that name goes stale, and when it does no
-    board can be seen anywhere but this machine's own. From the iPad that is:
-    "Galois Theory is the only option, and when I tap Probability I can't
-    switch", for ever, because the only machine it can find is the one it is on.
-
-    So the configured name is a hint, not the answer. If it does not lead
-    anywhere, ask the tailnet who is up and knock on all of them; a course's
-    ports are derived from its name, so nothing needs to be published for this to
-    work.
-    """
-    # A suite that is reasoning about which board wins must not reach the real
-    # tailnet, where the answer depends on what is running tonight.
-    if os.environ.get("BOARD_NO_TAILNET"):
-        return []
-    st = status if status is not None else _ts_status()
-    out = []
-    for peer in (st.get("Peer") or {}).values():
-        if not peer.get("Online"):
-            continue
-        # A phone is not a machine that runs boards, and knocking on one costs a
-        # timeout per port: three iPads on this tailnet turned one walk into a
-        # minute of waiting. Ask the ones that could plausibly answer.
-        if (peer.get("OS") or "").lower() in ("ios", "android", "tvos", "watchos"):
-            continue
-        # Nor is a tagged device. That is the same lesson as the iPads, at a
-        # scale that stops being a slow walk and becomes a question that is never
-        # answered: a Mullvad exit-node subscription puts its whole fleet in the
-        # netmap as online peers -- 544 of them here -- and they carry no `OS`,
-        # so the filter above waved every one of them through. Measured on this
-        # machine: 6.1s to knock on one exit node across the four ports, so 55
-        # minutes for one walk. Not one of them ever finished, a tap in the hub
-        # could not move anything, and the board looked healthy throughout --
-        # because it was. Only the deciding was dead.
-        #
-        # Tags are the right test rather than `ExitNodeOption`: a person's own
-        # machine may advertise itself as an exit node and still be the machine
-        # the lesson is on, whereas a tagged node belongs to infrastructure and
-        # nobody teaches on it.
-        if peer.get("Tags"):
-            continue
-        name = (peer.get("DNSName") or "").rstrip(".")
-        if not name:
-            ips = peer.get("TailscaleIPs") or []
-            name = ips[0] if ips else ""
-        if name:
-            out.append(name)
-    # And a ceiling, because the filters above are a list of surprises that have
-    # already happened and the next one should cost a slow walk rather than a
-    # question that is never answered.
-    return out[:PEER_WALK_LIMIT]
 
 
 def tailscale_cli():

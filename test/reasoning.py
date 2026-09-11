@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """A model's thinking never reaches the board.
 
-Every model on the free chain deliberates before it answers, and the deliberation
-is written in the first person about the student: "they are confusing the fixed
-field with the subgroup, so I should probably...". Providers are supposed to keep
-that out of `message.content`. Several of the free ones do not -- some wrap it in
-`<think>` tags, some emit the harmony channel markers, some just forward whatever
-the model produced.
+Every model worth teaching with deliberates before it answers, and the
+deliberation is written in the first person about the student: "they are
+confusing the fixed field with the subgroup, so I should probably...". Providers
+are supposed to keep that out of the content they return. Not all of them do --
+some wrap it in `<think>` tags, some emit the harmony channel markers, some just
+forward whatever the model produced.
 
 On this board that is the worst leak there is, because the card IS the lesson,
 and there is no undo: it is written to disk, pushed to every device the student
@@ -25,14 +25,13 @@ It happened AGAIN five days later, in the same course, and the second time there
 was nothing to strip: the reply carried no tag, no channel and no bracket -- just
 eight hundred tokens of "I need to read the student's response... Hmm, wait. Let
 me re-read the question... Actually, I think", cut off mid-sentence at the token
-ceiling, written to the board as the lesson. Every tag-shaped gate looked through
-it, `bin/free`'s two attempts both came back the same way, and the loop wrote
-whatever it had at the end.
+ceiling, written to the board as the lesson. Every tag-shaped gate looked
+through it.
 
 So there is a second question, asked of voice rather than syntax: is this text
-addressed TO the student or about them? `reasoning.reads_as_reasoning` answers it,
-the chain passes over a model that deliberates, and both gates REFUSE rather than
-edit -- there is nothing to remove when the whole reply is the thought.
+addressed TO the student or about them? `reasoning.reads_as_reasoning` answers
+it, and the gate REFUSES rather than edits -- there is nothing to remove when the
+whole reply is the thought.
 
 And the last rule, which is the one a later change is most likely to break: a
 lesson that is ABOUT reasoning models may say the word in earnest, and a tutor
@@ -83,9 +82,6 @@ def load(name, path):
     mod = importlib.util.module_from_spec(spec)
     loader.exec_module(mod)
     return mod
-
-
-free = load("free_tutor", os.path.join(ROOT, "bin", "free"))
 
 
 # --- what thinking looks like, in every dialect the chain speaks -------------
@@ -139,27 +135,6 @@ check("leading_only still strips a block the card opens with",
 
 check("the thorough pass is the one that edits mid-text, and only the wire uses it",
       reasoning.strip_reasoning(PROSE) != PROSE)
-
-
-# --- the parser that turned a preamble into the card ------------------------
-print("\n-- front matter is found wherever it starts --")
-
-kind, title, body = free.card_markdown(
-    "Here is the card:\n\n---\nkind: question\ntitle: Which subfield?\n---\n\n"
-    "Take $L = \\QQ(\\omega)$.")
-check("front matter after a preamble is still front matter", kind == "question")
-check("and the preamble is not the body", "Here is the card" not in body)
-check("the body is the card", body == "Take $L = \\QQ(\\omega)$.")
-
-kind, title, body = free.card_markdown(
-    "---\nkind: wrong\ntitle: Not the fixed field\n---\n\nThe break is here.\n\n"
-    "---\n\nAnd a rule under it.")
-check("a horizontal rule in the body is not read as a second front matter",
-      title == "Not the fixed field" and "And a rule under it." in body)
-
-kind, title, body = free.card_markdown("No front matter at all, just prose.")
-check("a reply with no front matter is still a lesson card",
-      kind == "lesson" and body == "No front matter at all, just prose.")
 
 
 # --- the gate at the board itself -------------------------------------------

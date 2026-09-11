@@ -32,6 +32,12 @@
 #  the timer that pulls this repository every few minutes, so the instruction
 #  has to arrive the same way a fix does. It pushes its committed work first,
 #  because a clone is not a backup and this is not reversible.
+#
+#  It leaves NOTHING behind, including no account of itself. Everything it says
+#  goes to the caller's log, and that log is one of the things it deletes -- so
+#  the last thing to go is the evidence that any of this was ever here. A
+#  receipt would be a file somebody has to find and delete later, which is the
+#  thing being abolished.
 # ===========================================================================
 set -uo pipefail
 
@@ -39,7 +45,6 @@ REPORT=0
 [ "${1:-}" = "--report" ] && REPORT=1
 
 HERE="${TUTOR_RETIRE_TOOL:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-RECEIPT="$HOME/tutor-board-removed.log"
 LABELS="com.tutorboard.current com.tutorboard.follow com.tutorboard.resume
         com.tutorboard.pull com.tutorboard.headless"
 AGENTS="$HOME/Library/LaunchAgents"
@@ -78,11 +83,9 @@ if [ -z "${TUTOR_RETIRE_DETACHED:-}" ] && [ "$REPORT" -eq 0 ]; then
     exec bash "$tmp/retire.sh"
 fi
 
-say() {
-  printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
-  [ "$REPORT" -eq 1 ] || printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" \
-    >> "$RECEIPT" 2>/dev/null
-}
+# Said to the caller and nowhere else. Whatever is reading this is reading a log
+# that is itself on the list below.
+say() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 doing() { [ "$REPORT" -eq 0 ]; }
 
 say "retiring this machine as a board host"
@@ -159,6 +162,19 @@ if command -v tailscale >/dev/null 2>&1; then
   doing && tailscale serve --https=443 off >/dev/null 2>&1
 fi
 
+# The two commands `install.sh` put on the path. `-ef` rather than a name match:
+# the question is whether the link points at THIS clone's command, and it has to
+# be asked while the clone is still there for it to point at. Something else
+# called `board` on somebody's path is not ours to remove.
+say "the commands"
+for c in board tutor; do
+  link="$HOME/.local/bin/$c"
+  if [ -L "$link" ] && [ "$link" -ef "$HERE/bin/$c" ]; then
+    say "  $link"
+    doing && rm -f "$link"
+  fi
+done
+
 # ------------------------------------------------------------------ the deleting
 rm_safe() {   # rm_safe <path> <why>
   local path="$1" why="$2" real
@@ -186,11 +202,15 @@ else
 fi
 rm_safe "$HOME/.config/tutor-board" "the tool's config"
 rm_safe "$HOME/.local/state/tutor-board" "the tool's state"
+
+# And every account of any of it, this script's own included. Last, so that
+# everything above it has somewhere to be said while it is happening.
+say "the logs, and anything that ever said this machine was a board host"
 if doing; then
   rm -f "$HOME"/Library/Logs/tutor-*.log "$HOME/.tutor-current.json" \
-        "$HOME/.tutor-resume.log" 2>/dev/null
+        "$HOME/.tutor-resume.log" "$HOME/tutor-board-removed.log" \
+        "$HOME/.tutor-resume."*.lock 2>/dev/null
 fi
-say "the logs"
 
 if doing; then
   say "done. This machine no longer runs a board."

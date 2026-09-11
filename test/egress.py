@@ -113,10 +113,10 @@ check("and the default is the only place a provider is named",
       lib.count("api.anthropic.com") == 1)
 
 # The probe has to ask after the host this machine's tutor will actually open a
-# connection to. Pinned to Anthropic on a machine set to teach for nothing, it
-# asks about a server the tutor never touches: Anthropic answering proves nothing
-# when the free providers are the ones an exit node is challenging, and Anthropic
-# being blocked reports a broken machine that can teach perfectly well.
+# connection to. A probe aimed anywhere else answers a question about somebody
+# else's server: it proves nothing when the tutor's provider is the one being
+# challenged, and reports a broken machine that can teach perfectly well when it
+# is not.
 cfg_tmp = tempfile.mkdtemp(prefix="tutor-egress-cfg-")
 was_cfg = paths.CONFIG
 try:
@@ -128,20 +128,13 @@ try:
             json.dump(doc, fh)
 
     write_cfg({"default_agent": "claude"})
-    check("a machine that teaches with a paid agent probes its provider",
+    check("the default probes the default agent's provider",
           egress.egress_probe_urls() == egress.DEFAULT_EGRESS_PROBE)
 
-    write_cfg({"free_only": True, "default_agent": "free"})
-    urls = egress.egress_probe_urls()
-    check("a machine that teaches for nothing probes the free providers instead",
-          urls and all("anthropic" not in u for u in urls)
-          and any("openrouter" in u for u in urls)
-          and any("groq" in u for u in urls))
-
-    # The rule that has not changed: the board is not allowed to know which
-    # assistant is driving it, and a list in the config is how that stays true.
-    write_cfg({"free_only": True, "egress_probe": "https://example.invalid/x"})
-    check("and a list written in the config still beats both",
+    # The rule: the board is not allowed to know which assistant is driving it,
+    # and a list in the config is how that stays true.
+    write_cfg({"egress_probe": "https://example.invalid/x"})
+    check("and a list written in the config beats the default",
           egress.egress_probe_urls() == ("https://example.invalid/x",))
 finally:
     paths.CONFIG = was_cfg

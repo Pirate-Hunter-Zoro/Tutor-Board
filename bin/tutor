@@ -15,8 +15,6 @@ tutor -- start a tutoring session.
     tutor agent status          which course has an assistant attached
     tutor agent start galois    attach one there, detaching whatever was elsewhere
     tutor agent stop galois     ask it to write its handoff and go
-    tutor agent stop galois --on board    ...on another machine, when a course
-                                          has ended up with two owners
     tutor cost [galois]         what the turns on this machine actually cost
     tutor cost --all            every course, one line each
     tutor where                 what is up, on this machine and on the tailnet
@@ -69,8 +67,6 @@ DEFAULT_CONFIG = {
         # repository already in front of it, which is most of a tutor: it reads
         # the slate PNG itself rather than through a transcription model, writes
         # the card, and edits the course's own .tex when a homework sitting needs
-        # it. What it costs is the ~38k-token tool prompt on every turn, which is
-        # why `free` exists below and why it is still a name in this file.
         #
         # What it is allowed to do headless is NOT set here. `board start` writes
         # the course its own `.claude/settings.local.json` -- see
@@ -79,7 +75,7 @@ DEFAULT_CONFIG = {
         # same grant as a flag on this command would be a second source of truth
         # for one policy, and the two would drift the first time either moved.
         "claude": {
-            "cmd": ["claude"], "prompt": "argv", "cost": "paid",
+            "cmd": ["claude"], "prompt": "argv",
             # `headless_first` opens the session; `headless` continues it, so the
             # agent is not re-reading the whole contract on every single turn.
             "headless_first": ["claude", "-p", "{prompt}"],
@@ -124,75 +120,22 @@ DEFAULT_CONFIG = {
             "extra_args": [],
         },
         "opencode": {
-            "cmd": ["opencode"], "prompt": "argv", "cost": "paid",
+            "cmd": ["opencode"], "prompt": "argv",
             "headless_first": ["opencode", "run", "{prompt}"],
             "headless": ["opencode", "run", "--continue", "{prompt}"],
         },
-        # The free tutor: a per-turn script over the free-model chain, not a
-        # terminal agent. `raw_prompt` passes the inbox text through as-is rather
-        # than the opencode-style instruction prompt -- the script builds its own
-        # context. It is headless-only; the interactive `cmd` is opencode, so a
-        # person asking for a terminal session still gets one.
-        #
-        # It is no longer the default and is not going anywhere: it is the tutor
-        # for a machine you want to run without paying for a model, and it is
-        # still selected the same way as any other -- `--agent free`, a course's
-        # `tutorboard.json`, or this file's `hosts` and `default_agent`.
-        "free": {
-            "cmd": ["opencode"], "prompt": "argv",
-            # The one recipe that costs nothing to run a turn on, which is a
-            # property of the recipe and so is written on it -- see `free_only`.
-            # Its interactive `cmd` is opencode and that is NOT free, which is
-            # exactly why the cost is per-recipe rather than per-agent-name:
-            # `free_only` refuses to launch a terminal session it cannot pay for
-            # and still runs every headless turn for nothing.
-            "cost": "free", "cmd_cost": "paid",
-            "raw_prompt": True,
-            "headless_first": [sys.executable, os.path.join(TOOL, "bin", "free"), "{prompt}"],
-            "headless": [sys.executable, os.path.join(TOOL, "bin", "free"), "{prompt}"],
-            # The wrap-up turn writes HANDOFF.md rather than a card.
-            "handoff": [sys.executable, os.path.join(TOOL, "bin", "free"), "--handoff", "{prompt}"],
-        },
         "codex": {
-            "cmd": ["codex"], "prompt": "argv", "cost": "paid",
+            "cmd": ["codex"], "prompt": "argv",
             "headless": ["codex", "exec", "{prompt}"],
         },
-        "aider":  {"cmd": ["aider"], "prompt": "none", "cost": "paid"},
-        "cursor": {"cmd": ["cursor-agent"], "prompt": "none", "cost": "paid"},
+        "aider":  {"cmd": ["aider"], "prompt": "none"},
+        "cursor": {"cmd": ["cursor-agent"], "prompt": "none"},
     },
     # Which assistant a given machine prefers, keyed by its short hostname. A
     # laptop and a cluster node do not have the same tools installed and should
     # not need different configuration files to say so. Empty means every
     # machine falls through to default_agent.
     "hosts": {},
-    # What this machine teaches with when the tutor above it has no allowance
-    # left. It is the bottom of the order and nothing falls back from it, which
-    # is the point: `free` costs nothing, so there is always something able to
-    # answer. Set it to null on a machine where a free-model answer would be
-    # worse than a board that says nobody is home.
-    "fallback_agent": "free",
-    # ---------------------------------------------------------------------
-    # Whether this machine is allowed to spend money on a turn at all
-    # ---------------------------------------------------------------------
-    # True and nothing here runs an agent whose recipe is not marked free,
-    # whatever asked for it -- a course's own `tutorboard.json`, the `hosts`
-    # table, `default_agent`, or a `--agent` typed on the command line.
-    #
-    # It is a per-MACHINE fact and it has to override every one of those,
-    # including the two that come from further away than this machine. A course
-    # repository is a clone: `"agent": "claude"` written in one is a sentence
-    # about the machine it was written on, and it arrives everywhere else with
-    # the next `git pull` and takes effect there silently. `--agent claude` typed
-    # here is the same mistake made in person. Neither is a reason for this
-    # machine to start billing, so neither wins.
-    #
-    # A refusal is never silent and never leaves the board empty: the ask is
-    # reported, and the turn goes to `fallback_agent`, which must itself be free
-    # or there is nothing to fall back to.
-    #
-    # Off on a compute node, which has an allowance and is where the paid tutor
-    # belongs -- see `scripts/setup-node.sh`, which asserts exactly that.
-    "free_only": False,
     "headless_timeout": 900,
     # How long the wrap-up turn gets. It is one turn, but it writes files.
     "handoff_timeout": 600,
@@ -263,17 +206,16 @@ def load_config():
 
     `agents` merges one level DEEPER than everything else, and the reason is a
     trap somebody has to fall into only once. A machine adjusting a single field
-    of a built-in recipe -- saying that the opencode on THIS machine is pointed
-    at free models, say -- writes the obvious thing:
+    of a built-in recipe -- saying that the claude on THIS machine takes an extra
+    flag, say -- writes the obvious thing:
 
-        "agents": { "free": { "cmd_cost": "free" } }
+        "agents": { "claude": { "prompt": "none" } }
 
     With a plain `update` that REPLACES the whole recipe: the command, the
     headless turn, the handoff, all of it, gone. The machine then has an agent
-    called `free` that cannot run anything, `fallback_agent` names something
-    unusable, and a free-only machine ends up with no tutor at all -- reported by
-    `tutor --agents` as "every lesson goes to 'nothing'". Nothing in the file the
-    person wrote says that; they added one key.
+    called `claude` that cannot run anything, and every turn fails into a log
+    while the board shows a tutor listening. Nothing in the file the person wrote
+    says that; they added one key.
 
     So a dict per agent merges into the built-in one, and adding an agent that
     does not exist yet works exactly as before because there is nothing to merge
@@ -349,74 +291,10 @@ def missing_command(recipe):
     return None if shutil.which(exe) else exe
 
 
-def free_only(cfg):
-    """Is this machine forbidden to spend money on a turn? See `free_only` above."""
-    return bool(cfg.get("free_only"))
-
-
-def costs_money(cfg, name, interactive=False):
-    """Would running this agent here be billed to somebody?
-
-    An agent with no `cost` on its recipe is assumed to cost, which is the only
-    safe default: somebody adding their own entry to the config gets a machine
-    that refuses to run it for free rather than a machine that quietly bills for
-    it. Saying `"cost": "free"` is one word, and it is the person who knows.
-
-    `interactive` asks about the terminal session rather than a headless turn,
-    because they are not the same program. `free` runs its turns through a script
-    that costs nothing and hands a person opencode when they want to sit in front
-    of one, and opencode is billed -- so a free-only machine runs the turns and
-    declines the terminal, which is the honest answer to both.
-    """
-    spec = (cfg.get("agents") or {}).get(name) or {}
-    key = "cmd_cost" if interactive and spec.get("cmd_cost") else "cost"
-    return str(spec.get(key) or "paid").lower() != "free"
-
-
-def free_agent(cfg):
-    """What this machine runs when it may not spend. The fallback, checked.
-
-    `fallback_agent` is where the name comes from -- it is already "the bottom of
-    the order, and nothing falls back from it" -- so a free-only machine and an
-    exhausted one land in the same place, which is the point. It is verified free
-    here rather than assumed: a config that names a paid fallback on a free-only
-    machine is a mistake worth refusing rather than obeying.
-    """
-    name = cfg.get("fallback_agent")
-    if not name or name not in (cfg.get("agents") or {}):
-        return None
-    if costs_money(cfg, name):
-        return None
-    spec = cfg["agents"][name]
-    if not spec.get("headless") or missing_command(spec.get("headless")):
-        return None
-    return name
-
-
-def fallback_agent(cfg, current):
-    """What this machine teaches with when the tutor it wants has nothing left.
-
-    A name in the config, chosen the same way every other assistant is, and it
-    has to be one this machine can actually run: an agent whose command is
-    missing does not fail loudly, it shows a tutor listening while every turn
-    dies in a log file -- which is the whole reason `missing_command` exists.
-
-    None when there is nothing below where we already are. Falling back to
-    yourself is not a fallback.
-    """
-    name = free_agent(cfg) if free_only(cfg) else cfg.get("fallback_agent")
-    if not name or name == current:
-        return None
-    spec = cfg["agents"].get(name) or {}
-    if not spec.get("headless") or missing_command(spec.get("headless")):
-        return None
-    return name
-
-
 # What a turn said on its way down, in the order a person would find useful.
-# `!!` is this file's own marker for something that went wrong; the tutors write
-# their own reasons in the second and third forms.
-FAILURE_MARKERS = ("!! ", "free tutor: ", "error: ", "Error: ")
+# `!!` is this file's own marker for something that went wrong; a tutor writes
+# its own reason in the other two forms.
+FAILURE_MARKERS = ("!! ", "error: ", "Error: ")
 
 
 def failure_reason(text, code_note):
@@ -502,7 +380,7 @@ def read_turn_usage(path, offset, kind):
     """What the agent said this turn cost, or {} if it did not say.
 
     `kind` is the recipe's `usage` field, so an agent that reports nothing --
-    the free tutor, codex, anything driven by a script -- costs nothing here and
+    codex, anything driven by a script -- costs nothing here and
     is simply not accounted for. Never raises: this is bookkeeping beside a
     lesson, and a lesson does not stop because a number could not be parsed.
     """
@@ -616,13 +494,6 @@ def resolve_agent(cfg, course, override=None, interactive=False, say=None):
       3. "hosts" in the config, by hostname   -- this machine, every course
       4. default_agent                        -- everything else
 
-    Then one thing that is not a layer and deliberately sits OUTSIDE the order:
-    `free_only`. Three of those four layers can reach this machine from somewhere
-    else -- a course repository is a clone, and a `hosts` table is written once
-    and copied -- and a machine that has been told it may not spend money must not
-    be talked into it by a file that arrived in a `git pull`. So the winner is
-    checked, and a paid one is replaced by what this machine runs for nothing.
-
     Which model an assistant runs is not a layer here and never should be: an
     agent entry is a command recipe, so a second model is a second entry whose
     `cmd` carries the flag. Nothing in this file knows what a model is.
@@ -638,36 +509,7 @@ def resolve_agent(cfg, course, override=None, interactive=False, say=None):
         if pick:
             say("no agent called '%s'; try: tutor --agents" % pick)
             return None
-    if picked is None:
-        return None
-    if not free_only(cfg) or not costs_money(cfg, picked, interactive=interactive):
-        return picked
-
-    alt = free_agent(cfg)
-    if not alt:
-        say("this machine is set to teach for nothing (free_only), '%s' is not free, "
-            "and `fallback_agent` names nothing free it can run instead.\n"
-            "Either name a free one, or take free_only out of %s." % (picked, CONFIG))
-        return None
-
-    if interactive and costs_money(cfg, alt, interactive=True):
-        # There is nothing to swap to. The free tutor runs every headless turn
-        # for nothing and hands a person opencode when they want to sit in front
-        # of one, and opencode is billed -- so swapping here would open exactly
-        # the billed session this machine said not to, under a different name.
-        # Decline, and say which half still works, because the half that still
-        # works is the half the board uses.
-        say("this machine teaches for nothing (free_only) and has no free "
-            "interactive session to offer: '%s' runs its turns for nothing but "
-            "its terminal is %s, which is billed.\n"
-            "The board and the headless tutor are unaffected -- "
-            "`tutor headless` is the free one."
-            % (alt, " ".join((cfg["agents"][alt].get("cmd") or ["?"]))))
-        return None
-
-    say("this machine teaches for nothing (free_only): '%s' would be billed, so "
-        "'%s' takes the lesson" % (picked, alt))
-    return alt
+    return picked
 
 
 def courses(cfg):
@@ -1628,87 +1470,6 @@ def agent_stop(course, wait=False):
     return 0, "%s in %s is wrapping up" % (st.get("agent"), course["dir"])
 
 
-def agent_stop_elsewhere(cfg, course, host):
-    """Ask another machine to stand this course's tutor down, and mean it.
-
-    `/handover` refuses while somebody is being taught on the board it is asked
-    about -- see `in_use` -- because machinery must not end a live sitting. A
-    person is not machinery: somebody typing this has decided which machine owns
-    the course, which is the one thing `in_use` was never meant to argue with,
-    so this carries the override.
-
-    It exists because saying which machine owns a course used to mean being sat
-    at the machine that had to give it up. The board is the only door a machine
-    opens to the tailnet, and `/handover` is the only thing behind it that stops
-    a tutor.
-
-    Reached the way everything else reaches a peer's board -- an ordinary
-    socket first, then the SOCKS proxy, which is the only way out of a machine
-    running tailscaled in userspace mode.
-    """
-    import socket as _socket
-    from tutorboard import machines, ports
-    from tutorboard.net import boards, socks
-
-    secret = machines.handover_secret()
-    if not secret:
-        return 1, ("no handover_secret on this machine, so there is nothing %s "
-                   "would trust; set the same one on both" % host)
-    name = course["dir"]
-    port = None
-    for candidate in ports.port_sequence(name):
-        health = boards.board_health(host, candidate, timeout=4.0)
-        if health and health.get("dir") == name:
-            port = candidate
-            break
-    if port is None:
-        return 1, "no board for %s is answering on %s" % (name, host)
-
-    request = ("POST /handover HTTP/1.0\r\n"
-               "Host: board\r\n"
-               "X-Handover: %s\r\n"
-               "X-Handover-Force: 1\r\n"
-               "Content-Length: 0\r\n"
-               "Connection: close\r\n\r\n" % secret)
-    sock = None
-    if host not in ("127.0.0.1", "::1", "localhost"):
-        proxy = socks.socks_proxy()
-        if proxy:
-            sock = socks._socks_open(host, port, proxy, 20.0)
-    if sock is None:
-        try:
-            sock = _socket.create_connection((host, port), 20.0)
-        except OSError as exc:
-            return 1, "could not reach %s: %s" % (host, exc)
-    buf = b""
-    try:
-        sock.settimeout(20.0)
-        sock.sendall(request.encode())
-        while len(buf) < 65536:
-            chunk = sock.recv(4096)
-            if not chunk:
-                break
-            buf += chunk
-    except OSError as exc:
-        return 1, "could not ask %s: %s" % (host, exc)
-    finally:
-        try:
-            sock.close()
-        except OSError:
-            pass
-    status = buf.split(b"\r\n")[0].decode("utf-8", "replace").strip()
-    body = buf.partition(b"\r\n\r\n")[2].decode("utf-8", "replace")
-    try:
-        doc = json.loads(body)
-    except ValueError:
-        doc = {}
-    if " 200 " not in status:
-        return 1, "%s said %s: %s" % (host, status,
-                                      doc.get("error") or body[:200])
-    return 0, "%s is standing its %s tutor down: %s" % (
-        host, name, doc.get("detail") or "asked")
-
-
 def cmd_agent(cfg, args):
     """tutor agent status|start|stop [course]
 
@@ -1735,14 +1496,6 @@ def cmd_agent(cfg, args):
     course = pick(found, rest[0])
 
     if sub == "stop":
-        # `--on <host>` stops it on ANOTHER machine. A course wants one owner,
-        # and saying which one used to mean being sat at the machine that has
-        # to give it up. See `agent_stop_elsewhere`.
-        where = _flag(args, "--on")
-        if where:
-            code, msg = agent_stop_elsewhere(cfg, course, where)
-            print(msg, file=sys.stderr if code else sys.stdout)
-            return code
         code, msg = agent_stop(course, wait="--wait" in args)
         print(msg, file=sys.stderr if code else sys.stdout)
         return code
@@ -1897,16 +1650,6 @@ def headless(cfg, course, agent_name, session):
                 agent_state(live, state="listening")     # timed out; still alive
                 continue
 
-        # The allowance came back: climb out of the fallback before spending a
-        # turn on it. Asked here rather than on a timer because a turn is the
-        # only moment the answer changes anything, and it is a file on this
-        # machine either way.
-        if agent_name != wanted and not limits.limited_until():
-            log.write("-- the allowance is back; '%s' takes the lesson again\n" % wanted)
-            agent_name, spec = wanted, cfg["agents"][wanted]
-            recipe, carried = spec.get("headless"), 0
-            agent_state(live, agent=agent_name, fallback=False)
-
         turns += 1
         # `turn_started` is the daemon's clock, and the board needs it: its own
         # measure of how long a turn has been going starts when it first SEES
@@ -1944,9 +1687,9 @@ def headless(cfg, course, agent_name, session):
         if fresh and carried:
             log.write("-- starting a fresh session after %d turn(s); the lesson "
                       "is read back with `board recap`\n" % carried)
-        # A script agent (the free tutor) builds its own context, so it gets the
-        # raw inbox rather than the instruction prompt the interactive agents
-        # expect -- its whole state is on disk and it re-reads what it needs.
+        # A script agent builds its own context, so it gets the raw inbox rather
+        # than the instruction prompt the interactive agents expect -- its whole
+        # state is on disk and it re-reads what it needs.
         taught_chapter[0] = chapter_now(root) or taught_chapter[0]
         fill = {"inbox": out.strip(),
                 # Only the chapter that is open. A handoff about another one is
@@ -2018,17 +1761,14 @@ def headless(cfg, course, agent_name, session):
                 # the beat we have no time for.
                 sync_transcript(root, log)
 
-                # A free tutor is now the best this address can do, and it is
-                # a great deal better than a board where nobody answers.
-                alt = fallback_agent(cfg, agent_name)
-                if alt:
-                    log.write("-- no allowance left; falling back to '%s'\n" % alt)
-                    agent_name, spec = alt, cfg["agents"][alt]
-                    recipe, carried = spec.get("headless"), 0
-                    agent_state(live, agent=agent_name, fallback=True)
-                else:
-                    log.write("!! nothing else on this machine can teach; turns "
-                              "will fail until the allowance returns\n")
+                # And then nothing, deliberately. There is one tutor, it has
+                # nothing left to spend, and a turn it cannot take is a turn the
+                # board has to report rather than answer badly: the failure is on
+                # the card stream with its reason, `/health` publishes the limit,
+                # and `board limit` says until when. Turns go on failing until
+                # the allowance returns, which is the truth about the evening.
+                log.write("!! no allowance left; turns will fail until it "
+                          "returns -- `board limit` says when\n")
                 continue
 
             # Not a limit. On a host routing everything through an exit node the
@@ -2084,16 +1824,10 @@ def headless(cfg, course, agent_name, session):
         log.write("\n=== %s handoff ===\n" % time.strftime("%H:%M:%S"))
         # The handoff is the one turn that must not be skipped -- it is the only
         # continuity the next session has -- and a tutor stopped because its
-        # allowance ran out cannot write it. So whatever this machine can run
-        # for free writes it instead. A handoff in the free tutor's words is
-        # worth incomparably more than no handoff at all.
-        if limits.limited_until():
-            alt = fallback_agent(cfg, agent_name)
-            if alt:
-                log.write("-- '%s' has no allowance left for the handoff; "
-                          "'%s' writes it\n" % (agent_name, alt))
-                spec = cfg["agents"][alt]
-                recipe = spec.get("headless")
+        # allowance ran out cannot write it. It is attempted anyway and the
+        # failure is logged like any other: a session that ends with no handoff
+        # is a session the next one has to reconstruct from the cards, which is
+        # worse than the transcript but is not nothing.
         # A script agent may have its own way to write the handoff; default to the
         # ordinary turn recipe otherwise.
         wrap = spec.get("handoff") or recipe
@@ -2863,30 +2597,14 @@ def main(argv):
         elif a == "--agents":
             print("config: %s" % CONFIG)
             print("machine: %s (%s)" % (this_host(), machine.machine_shape()))
-            only = free_only(cfg)
-            if only:
-                print("teaching: for nothing (free_only) -- a paid agent asked for "
-                      "here is refused and '%s' takes the lesson"
-                      % (free_agent(cfg) or "nothing, which is a problem"))
             print()
             for n, spec in sorted(cfg["agents"].items()):
                 mark = "*" if n == cfg["default_agent"] else " "
                 gone = missing_command(spec.get("cmd"))
-                notes = []
-                if gone:
-                    notes.append("not installed here")
-                if costs_money(cfg, n):
-                    notes.append("REFUSED here (billed)" if only else "billed")
-                else:
-                    notes.append("free")
-                if only and not costs_money(cfg, n) and costs_money(cfg, n, True):
-                    notes.append("turns only; its terminal is billed")
                 print(" %s %-10s %-28s %s"
-                      % (mark, n, " ".join(spec.get("cmd", [])), "; ".join(notes)))
+                      % (mark, n, " ".join(spec.get("cmd", [])),
+                         "not installed here" if gone else ""))
             print("\n* is the default. Edit the config to add your own.")
-            if only and costs_money(cfg, cfg.get("default_agent") or ""):
-                print("The default is billed and this machine will not run it; "
-                      "every lesson goes to '%s'." % (free_agent(cfg) or "nothing"))
             return 0
         elif a == "--homework":
             flags["session"] = "homework"
@@ -3011,9 +2729,7 @@ def main(argv):
 
     # --- the assistant -----------------------------------------------------
     # `interactive`: this is the one call site that opens a terminal session
-    # rather than running headless turns, and on a free-only machine the two can
-    # have different answers -- the free tutor's turns cost nothing and its
-    # terminal is opencode, which does not.
+    # rather than running headless turns.
     name = resolve_agent(cfg, course, flags["agent"], interactive=True)
     spec = cfg["agents"].get(name) if name else None
     if not spec:

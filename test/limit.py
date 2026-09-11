@@ -132,20 +132,16 @@ check("the machine is marked, which is what /health then publishes",
       "limits.mark_limited(until, agent=agent_name)" in src)
 check("the message whose turn was lost is carried, not dropped",
       "pending = out" in src)
-check("the transcript is pushed before anything else, so the message it failed "
-      "to answer is somewhere a later session can read it",
-      src.index("sync_transcript(root, log)") < src.index("fallback_agent(cfg, agent_name)"))
-check("the fallback is a name in the config like every other agent",
-      'cfg.get("fallback_agent")' in src)
-check("and it is free by default", '"fallback_agent": "free"' in src)
-check("a fallback this machine cannot run is not a fallback",
-      "missing_command(spec.get(\"headless\"))" in src)
-check("the allowance coming back climbs the tutor home again",
-      "the allowance is back" in src)
-check("and a turn that goes through is what proves it",
+check("the transcript is pushed before the turn is given up on, so the message "
+      "it failed to answer is somewhere a later session can read it",
+      "sync_transcript(root, log)" in src)
+check("and then nothing: there is one tutor, and a turn it cannot take is a "
+      "turn the board reports rather than answering badly",
+      "no allowance left; turns will fail until it" in src)
+check("a turn that goes through is what proves the allowance is back",
       "limits.clear_limited()" in src)
-check("the handoff is written by whoever still can, so continuity survives",
-      "has no allowance left for the handoff" in src)
+check("the handoff is still attempted, because it is the only continuity there "
+      "is", "is a session the next one has to reconstruct" in src)
 
 health = open(os.path.join(ROOT, "tutorboard", "server", "routes",
                            "machines.py"), encoding="utf-8").read()
