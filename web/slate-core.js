@@ -33,6 +33,12 @@ var PICTURE_MS = 4000;
 /* How long a contact may sit in the map, unheard from, before it is taken to be
    one whose lift was never delivered. No gesture is held this long. */
 var TOUCH_STALE = 20000;
+/* And a much tighter bound for the arithmetic that decides what a gesture IS.
+   A live contact reports on every frame it moves, and a hand holding a pinch
+   still reports as it settles -- so a contact that has said nothing for this
+   long while another is moving is not part of the gesture in hand. Long enough
+   that a finger resting perfectly still through a slow pinch is kept. */
+var GESTURE_STALE = 2500;
 var LIVE_IDLE_MS = 3000;
 var LIVE_MIN_GAP_MS = 15000;
 var UNDO_DEPTH = 60;
@@ -387,6 +393,69 @@ function create(opts) {
       if (t && now - (t.at || 0) < TOUCH_STALE) return true;
     }
     return false;
+  }
+
+  /* WHICH CONTACTS ARE ACTUALLY PART OF THE GESTURE IN HAND.
+
+     Everything below decides what a gesture is by COUNTING this map -- one
+     contact pans, two pinch -- so a contact that should not be in it does not
+     merely add noise, it changes the answer. A finger whose lift was never
+     delivered turned one moving finger into a pinch against a frozen phantom,
+     and turned a real two-finger pinch into three entries that matched neither
+     branch and did nothing.
+
+     A lift is now caught at the window as well as at the sheet, which is the
+     first line of defence and the same one `penDown` already had. This is the
+     second: anything that has not reported since `GESTURE_STALE` is dropped
+     before it is counted. Both, because the cost of being wrong here is the
+     writing surface not answering, and that has cost an evening before. */
+  function liveTouches() {
+    var now = Date.now();
+    var ids = Object.keys(touches);
+    var live = [];
+    for (var i = 0; i < ids.length; i++) {
+      var t = touches[ids[i]];
+      if (!t || now - (t.at || 0) > GESTURE_STALE) { delete touches[ids[i]]; continue; }
+      live.push(ids[i]);
+    }
+    return live;
+  }
+
+  /* Forgetting one contact, and ending the pinch if it was one of the pair.
+
+     One function, because a lift is caught in two places -- at the sheet, and
+     at the window for a finger that left past the sheet's edge -- and the two
+     must do the same thing. They did not: the window's copy deleted the contact
+     and the sheet's copy, running afterwards, then found nothing to delete and
+     skipped the `zoomSettled` that pays for the crisp repaint. A pinch that
+     ended at the window left the page soft.
+
+     Idempotent, so whichever hears the lift first does the work and the other
+     is a no-op. */
+  function forgetContact(id) {
+    var had = !!touches[id];
+    if (had) delete touches[id];
+    /* The pinch ends when one of ITS OWN pair leaves, not when the map happens
+       to drop below two: a palm resting alongside kept the count up and left
+       the surface soft after the fingers had gone. */
+    if (pinch && !(touches[pinch.ids[0]] && touches[pinch.ids[1]])) {
+      pinch = null;
+      /* Both fingers accounted for: draw it properly now. */
+      zoomSettled();
+    }
+    return had;
+  }
+
+  /* The two contacts a pinch is between: the two most recently heard from, so a
+     palm that lands beside two fingers already pinching cannot take the gesture
+     over or stop it. Counting exactly two used to mean a third contact -- the
+     heel of a hand arriving late -- silently ended the pinch. */
+  function pinchPair(live) {
+    if (live.length < 2) return null;
+    var sorted = live.slice().sort(function (a, b) {
+      return (touches[b].at || 0) - (touches[a].at || 0);
+    });
+    return [sorted[0], sorted[1]];
   }
 
   /* A PEN is never a palm, whatever the id says.
@@ -1448,10 +1517,11 @@ function create(opts) {
         return;
       }
       touches[ev.pointerId] = { x: ev.clientX, y: ev.clientY, at: Date.now() };
-      var ids = Object.keys(touches);
-      if (ids.length === 2) {
-        var a = touches[ids[0]], b = touches[ids[1]];
-        pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), k: view.k };
+      var pair = pinchPair(liveTouches());
+      if (pair) {
+        var a = touches[pair[0]], b = touches[pair[1]];
+        pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), k: view.k,
+                  ids: [pair[0], pair[1]] };
         zoomingNow();
       }
       /* A finger scrolls unless it has been told to write. It used to be the
@@ -1498,20 +1568,25 @@ function create(opts) {
     if (touches[ev.pointerId]) {
       var prev = touches[ev.pointerId];
       touches[ev.pointerId] = { x: ev.clientX, y: ev.clientY, at: Date.now() };
-      var ids = Object.keys(touches);
+      var live = liveTouches();
       /* The heel of a hand is a touch. With a finger set to scroll it would drag
          the canvas out from under the nib mid-word, so anything the hand does is
          ignored for a moment after the pen last reported. */
       if (handAtWork()) return;
-      if (ids.length === 2 && pinch) {
-        var a = touches[ids[0]], b = touches[ids[1]];
+      /* The pinch is between the two contacts it STARTED between, while both are
+         still down. Re-choosing them on every move is how a third contact takes
+         a gesture over halfway through; picking them by count is how it stops
+         one dead. */
+      var a = pinch && pinch.ids && touches[pinch.ids[0]];
+      var b = pinch && pinch.ids && touches[pinch.ids[1]];
+      if (pinch && a && b) {
         var r = sheetRect();
         zoomingNow();
         setZoom(pinch.k * (Math.hypot(a.x - b.x, a.y - b.y) / pinch.d),
                 (a.x + b.x) / 2 - r.left, (a.y + b.y) / 2 - r.top);
         return;
       }
-      if (ids.length === 1 && !drawing && !lasso && !dragging) {
+      if (live.length === 1 && !drawing && !lasso && !dragging) {
         view.ox += ev.clientX - prev.x;
         view.oy += ev.clientY - prev.y;
         view.held = true;
@@ -1614,17 +1689,19 @@ function create(opts) {
 
   function endStroke(ev) {
     if (ev && ev.pointerType === "pen") penDown = false;
-    if (isPalm(ev)) { delete palms[ev.pointerId]; return; }
+    if (isPalm(ev)) {
+      delete palms[ev.pointerId];
+      /* Forgotten even so. A contact condemned as a palm returned from here
+         before it was taken out of `touches`, so a finger that was a palm for
+         part of its life -- which is any finger that lands while the nib is
+         down -- was left in the map for good. That is one of the two ways a
+         phantom got in. */
+      forgetContact(ev.pointerId);
+      return;
+    }
     if (ev && ev.pointerType === "pen") delete palms[ev.pointerId];
     /* fall through: a contact that was never a palm ends normally */
-    if (ev && touches[ev.pointerId]) {
-      delete touches[ev.pointerId];
-      if (Object.keys(touches).length < 2) {
-        pinch = null;
-        /* Both fingers accounted for: draw it properly now. */
-        zoomSettled();
-      }
-    }
+    if (ev) forgetContact(ev.pointerId);
     if (dragging) { dragging = null; markDirty(); invalidateInk(); return; }
     if (lasso) {
       if (lasso.length > 4) {
@@ -1668,15 +1745,33 @@ function create(opts) {
   ["pointerup", "pointercancel"].forEach(function (t) {
     window.addEventListener(t, function (ev) {
       if (ev.pointerType === "pen") penDown = false;
+      /* AND THE HAND GETS THE SAME TREATMENT, for the same reason and it took
+         longer to notice. A finger whose lift the sheet never saw stayed in
+         `touches` for ever, and a phantom contact is worse than a latch because
+         the arithmetic downstream is a COUNT:
+
+           two entries and one real finger -> the pinch branch runs, driven by
+           one moving finger against a frozen phantom, so a single finger zooms;
+           three entries and two real fingers -> neither the two-finger branch
+           nor the one-finger branch matched, so a pinch did nothing at all.
+
+         Reported in exactly that shape: "one finger acts as if I'm zooming with
+         two fingers! And two fingers does nothing". Every other rule in this
+         file that refuses or remembers a touch can expire -- `penDown` has
+         `PEN_STALE`, `palms` has `PALM_STALE` -- and this map had neither an
+         expiry nor a lift it could rely on. */
+      forgetContact(ev.pointerId);
     }, true);
   });
-  window.addEventListener("blur", function () {
-    penDown = false;
-    /* And no contact survives the app going away: the lift that would have
-       cleared it is exactly the event that is not delivered. */
-    touches = {};
-    pinch = null;
-  });
+  /* THE PEN, AND ONLY THE PEN. A window `blur` used to clear the contacts too,
+     on the reasoning that an app backgrounded mid-gesture never delivers the
+     lift. The reasoning is right and the event is wrong: `blur` arrives at
+     moments nobody chose -- iOS raises it as the browser takes a gesture over,
+     among other things -- so a pinch could have both its fingers forgotten
+     underneath it and then do nothing at all for the rest of the gesture.
+     A contact is forgotten when it is LIFTED, or when it goes stale; never
+     because the window lost focus. */
+  window.addEventListener("blur", function () { penDown = false; });
   ["touchstart", "touchmove", "touchend", "gesturestart", "gesturechange"].forEach(function (t) {
     sheet.addEventListener(t, function (e) { e.preventDefault(); }, { passive: false });
   });

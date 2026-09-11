@@ -45,7 +45,65 @@ now: one interface, one method, whether the exercises are proofs or functions.
 >   board that is answering) but it is worth confirming: the port the HTTPS name points at should
 >   be the course they are working in.
 >
-> ### Where this is right now, 10 September 2026 (late)
+> ### Where this is right now, 11 September 2026
+>
+> **A regression, and the latent defect underneath it that made both symptoms.** Reported
+> immediately after the last ship: *"Now zooming on the writing board is fucked up!!! One finger
+> acts as if I'm zooming with two fingers! And two fingers does nothing"*. Two symptoms, one cause,
+> and the cause was not new — the change I shipped only made it reachable.
+>
+> **What a gesture IS was decided by counting a map.** One contact in `touches` pans, two pinch. So
+> a contact that should not be in that map does not add noise, it changes the answer:
+>
+> | `touches` | fingers actually down | what the code did |
+> |---|---|---|
+> | 2 entries | 1 | the pinch branch ran, one moving finger against a frozen phantom — **one finger zooms** |
+> | 3 entries | 2 | matched neither the two-finger branch nor the one-finger branch — **two fingers do nothing** |
+>
+> **A phantom got in two ways, and neither had anything to expire.** This file has learned that
+> lesson twice already — `penDown` latched and took the surface away outright, `palms` latched and
+> killed the next finger given a reused pointer id, and both got a staleness bound and a
+> window-level lift. `touches` had neither. A finger lifted past the edge of the sheet delivered its
+> `pointerup` to the window, where only the pen was being listened for; and a contact condemned as a
+> palm returned out of `endStroke` *before* the line that would have taken it out of the map, so any
+> finger that landed while the nib was down was left there for good.
+>
+> Now: a lift is caught at the window as well as at the sheet, for every pointer type, through one
+> `forgetContact` so the two cannot disagree — they did, and the sheet's copy finding nothing left
+> to delete is what skipped the `zoomSettled` that pays for the crisp repaint, leaving the page soft
+> after a pinch that ended off the edge. Anything that has not reported for `GESTURE_STALE` is
+> dropped before it is counted. And the pinch is between the two contacts it *started* between
+> rather than whichever two the map holds, so a heel of a hand landing late no longer ends it.
+>
+> **My part in it was the `blur` handler**, added the day before to clear the contacts when the app
+> goes away mid-gesture. The reasoning is right and the event is wrong: `blur` arrives at moments
+> nobody chose — iOS raises it as the browser takes a gesture over, among other things — so a pinch
+> could have both its fingers forgotten underneath it and then do nothing for the rest of the
+> gesture. It takes the pen and never the hand now. The case it was for is covered by the expiry,
+> which cannot misfire mid-gesture because a live contact reports on every frame it moves.
+>
+> **And the three-dot menu was underneath the writing toolbar.** *"It may have been that the writing
+> toolbar when on a board is covering up elements of the three-dot menu from the top right. Make
+> sure that menu is on TOP of everything when it appears."* At `z-index: 50` it was above
+> `#drawbar`'s 41 and still came out under it: `#drawbar` is `flex-direction: column-reverse` and
+> grows UPWARD as the slate's own menu and selection bar open inside it, so on a board with the pen
+> out the toolbar reached into the lower half of the menu. It is 99 — above the toolbar, the
+> annotation bar, the send prompts, the panic button and the full-screen drawers. A menu is the most
+> recent thing the person asked for; nothing should be over it.
+>
+> Being drawn on top of a thing is not the same as not overlapping it, though, so `placeMenu` now
+> takes the toolbar's top edge as its floor rather than the bottom of the glass. An entry painted
+> over a black tool bar is still an entry nobody can read.
+>
+> `test/plane.js` reproduces the report: a finger lifted where the sheet never hears it, then a
+> single finger dragging, and the zoom must not move — against the code this replaced it runs from
+> 0.4939 to 0.1822, which is the complaint in one number. Also that two fingers still pinch
+> afterwards, that a third contact does not end a live pinch, and that `blur` takes the pen and not
+> the hand. `test/chrome.js` compares the menu's stacking against every other layer on the page
+> rather than against one of them, and `test/panic.js` opens it with the toolbar out and checks it
+> stops above it. Shell version `board-shell-v89`.
+>
+> ### Where this was on 10 September 2026 (late)
 
 > **The ⋯ menu could not be scrolled, and the lesson scrolled instead.** *"At the top right, there
 > are three dots I can tap to get a menu of other things I can do, like refresh the app, etc. That

@@ -1181,6 +1181,141 @@ const heelSwipe = (id, x, y, dx, dy) => {
     }
   }
 
+  // ------------------------- A CONTACT NOBODY IS MAKING IS NOT PART OF A PINCH
+  //
+  // Everything about what a gesture IS was decided by counting `touches`: one
+  // contact pans, two pinch. So a contact left in that map by a lift the sheet
+  // never saw does not add noise, it changes the answer -- and it produced both
+  // halves of one report, which is how it was found:
+  //
+  //   "Now zooming on the writing board is fucked up!!! One finger acts as if
+  //    I'm zooming with two fingers! And two fingers does nothing"
+  //
+  // Two entries and one real finger: the pinch branch runs, driven by one moving
+  // finger against a frozen phantom, so a single finger zooms. Three entries and
+  // two real fingers: neither branch matches, so a pinch does nothing at all.
+  {
+    slate.tool('pen');
+    slate.clear();
+    slate.load({ w: 1130, h: 900, strokes: [
+      { c: '#eee', w: 3, pts: [[200, 200], [260, 200], [300, 240]] },
+    ] });
+    slate.finger('scroll');
+    await sleep(2700);                   // past the pen's tail, hands free
+    slate.zoom(1);
+    await sleep(30);
+
+    const at = (type, id, x, y, target) => {
+      const ev = new window.Event(type, { bubbles: true, cancelable: true });
+      Object.assign(ev, { pointerId: id, pointerType: 'touch', pressure: 0,
+                          clientX: x, clientY: y, isPrimary: id === 201 });
+      ev.getCoalescedEvents = () => [ev];
+      (target || sheet).dispatchEvent(ev);
+    };
+
+    // A two-finger pinch, and then ONE finger lifts somewhere the sheet never
+    // hears about it -- past the edge of the surface, which is where a pinch
+    // ends more often than not. The window hears it; the sheet does not.
+    at('pointerdown', 201, 250, 250);
+    at('pointerdown', 202, 550, 450);
+    at('pointermove', 201, 300, 300);
+    at('pointermove', 202, 500, 400);
+    await sleep(30);
+    at('pointerup', 202, 900, 900, window);          // gone, past the sheet
+    await sleep(30);
+
+    // Now one finger drags. It must PAN, not zoom: there is no second contact.
+    const v0 = slate.view();
+    at('pointermove', 201, 360, 340);
+    at('pointermove', 201, 420, 380);
+    await sleep(30);
+    const v1 = slate.view();
+    Math.abs(v1.k - v0.k) < 1e-9
+      ? ok('one finger after a lift the sheet never saw pans and does not zoom')
+      : fail('a single finger changed the zoom from ' + v0.k.toFixed(4) + ' to '
+             + v1.k.toFixed(4) + ' — it is pinching against a phantom contact, '
+             + 'which is "one finger acts as if I am zooming with two fingers"');
+    (v1.ox !== v0.ox || v1.oy !== v0.oy)
+      ? ok('and it does pan, so the surface has not simply stopped answering')
+      : fail('the single finger did nothing at all');
+    at('pointerup', 201, 420, 380);
+    await sleep(30);
+
+    // And two fingers pinch afterwards, rather than being a third entry in a map
+    // that matches no branch.
+    const v2 = slate.view();
+    at('pointerdown', 203, 250, 250);
+    at('pointerdown', 204, 550, 450);
+    at('pointermove', 203, 350, 330);            // closing: zooming out
+    at('pointermove', 204, 450, 370);
+    await sleep(30);
+    const v3 = slate.view();
+    Math.abs(v3.k - v2.k) > 1e-9
+      ? ok('and two fingers still pinch, rather than doing nothing')
+      : fail('a real two-finger pinch changed nothing — the map has an extra '
+             + 'contact in it and the count matches no branch, which is "two '
+             + 'fingers does nothing"');
+    at('pointerup', 203, 350, 330);
+    at('pointerup', 204, 450, 370);
+    await sleep(30);
+  }
+
+  // ------------------------------- A THIRD CONTACT DOES NOT END A LIVE PINCH
+  //
+  // The heel of a hand lands late, all the time. Keying the pinch off an exact
+  // count meant it stopped the moment that happened; keying it off the two
+  // contacts the pinch STARTED between means it carries on.
+  {
+    await sleep(2700);
+    slate.zoom(1);
+    await sleep(30);
+    const at = (type, id, x, y) => {
+      const ev = new window.Event(type, { bubbles: true, cancelable: true });
+      Object.assign(ev, { pointerId: id, pointerType: 'touch', pressure: 0,
+                          clientX: x, clientY: y, isPrimary: id === 211 });
+      ev.getCoalescedEvents = () => [ev];
+      sheet.dispatchEvent(ev);
+    };
+    at('pointerdown', 211, 250, 250);
+    at('pointerdown', 212, 550, 450);
+    at('pointermove', 211, 300, 300);
+    at('pointermove', 212, 500, 400);
+    await sleep(20);
+    const mid = slate.view();
+    at('pointerdown', 213, 700, 500);            // a heel, arriving late
+    at('pointermove', 211, 340, 330);
+    at('pointermove', 212, 460, 370);
+    await sleep(30);
+    Math.abs(slate.view().k - mid.k) > 1e-9
+      ? ok('a third contact landing mid-pinch does not stop the pinch')
+      : fail('the pinch died when a palm arrived beside it');
+    [211, 212, 213].forEach((id) => at('pointerup', id, 400, 400));
+    await sleep(30);
+  }
+
+  // ------------------------------------- AND EVERY REFUSAL HERE CAN EXPIRE
+  //
+  // The lesson this file keeps relearning: `penDown` latched and took the
+  // surface away, `palms` latched and killed the next finger given a reused id,
+  // and `touches` had neither an expiry nor a lift it could rely on. A window
+  // `blur` is not the answer -- it arrives at moments nobody chose, and clearing
+  // the contacts on one meant a pinch could have both fingers forgotten
+  // underneath it and then do nothing for the rest of the gesture.
+  {
+    const js = fs.readFileSync(path.join(WEB, 'slate-core.js'), 'utf8');
+    /GESTURE_STALE/.test(js) && /function liveTouches\(\)/.test(js)
+      ? ok('a contact that has gone quiet is dropped before it is counted')
+      : fail('the contact map has no expiry, so one phantom breaks every gesture');
+    /window\.addEventListener\("blur", function \(\) \{ penDown = false; \}\)/.test(js)
+      ? ok('and a lost window focus takes the pen, never the hand')
+      : fail('blur is clearing the contacts again — a pinch can be forgotten '
+             + 'underneath the fingers making it');
+    /forgetContact\(ev\.pointerId\)/.test(js)
+      ? ok('and a lift is caught at the window as well as at the sheet')
+      : fail('only the canvas can forget a contact; a finger lifted past its '
+             + 'edge stays in the map for ever');
+  }
+
   console.log(errors.length ? '\n' + errors.length + ' FAILURES'
                             : '\nthe surface is a plane, and a finger is not a pen');
   window.close();

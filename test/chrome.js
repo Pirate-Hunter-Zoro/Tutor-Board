@@ -253,6 +253,35 @@ decl(draw, 'top') === null
     ? ok('with no deprecated overflow-scrolling layer to lose the gesture in')
     : fail('-webkit-overflow-scrolling is back; it is the separate scrolling '
            + 'layer this element could not be scrolled inside');
+
+  // And ON TOP. `#drawbar` is `column-reverse` and grows upward as the slate's
+  // own menu and selection bar open inside it, so on a board with the pen out
+  // the writing toolbar reached up into the lower half of this menu. Reported
+  // as "the writing toolbar when on a board is covering up elements of the
+  // three-dot menu from the top right. Make sure that menu is on TOP of
+  // everything when it appears."
+  {
+    const zOf = (sel) => {
+      const b = block(sel) || '';
+      const m = /z-index:\s*(\d+)/.exec(b);
+      return m ? +m[1] : null;
+    };
+    const mine = zOf('.barmenu');
+    const others = ['#drawbar', '.annbar', '.notesend', '.jump', '.sendwhat',
+                    '#history', '#panic, #findink', '#scratch, #contents, #review, #papers',
+                    '.drop', '#viewer', '#paper']
+      .map((sel) => ({ sel, z: zOf(sel) }))
+      .filter((r) => r.z !== null);
+    const over = others.filter((r) => r.z >= mine);
+    mine !== null
+      ? ok('the menu declares a stacking order (' + mine + ')')
+      : fail('the menu has no z-index at all');
+    !over.length
+      ? ok('and nothing on the page is drawn over it (highest other layer: '
+           + Math.max.apply(null, others.map((r) => r.z)) + ')')
+      : fail('these are at or above the menu and will cover it: '
+             + over.map((r) => r.sel + ' (' + r.z + ')').join(', '));
+  }
 }
 
 console.log(errors.length ? '\n' + errors.length + ' FAILURES'

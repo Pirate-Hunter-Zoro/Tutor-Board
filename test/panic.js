@@ -331,10 +331,41 @@ const press = (type, x, y) => btn.dispatchEvent(
       vv.height = 520;
       vv.dispatchEvent(new window.Event('resize'));
       await sleep(30);
-      parseFloat(menu.style.maxHeight) > was
+      const roomy = parseFloat(menu.style.maxHeight);
+      roomy > was
         ? ok('and is measured again when the keyboard goes away')
         : fail('the menu keeps the cap it was opened with, so it stays wrong '
                + 'for as long as it is up');
+
+      // 9. AND IT STOPS ABOVE THE WRITING TOOLBAR.
+      //
+      // `#drawbar` is fixed to the bottom and grows UPWARD -- it is
+      // `column-reverse`, so the slate's own menu and selection bar open above
+      // the tool row -- and on a board with the pen out it reaches well into
+      // the lower half of this menu. Being painted on top of it is not the
+      // same as not overlapping it: an entry drawn over a black tool bar is
+      // still an entry nobody can read.
+      const drawbar = doc.getElementById('drawbar');
+      drawbar.hidden = false;
+      drawbar.getBoundingClientRect = () => ({
+        left: 0, right: 800, width: 800, top: 380, bottom: 520, height: 140,
+        x: 0, y: 380,
+      });
+      vv.dispatchEvent(new window.Event('resize'));
+      await sleep(30);
+      const capped = parseFloat(menu.style.maxHeight);
+      const top = parseFloat(menu.style.top);
+      capped <= 380 - top + 1
+        ? ok('and stops above the writing toolbar (' + capped + 'px, toolbar at '
+             + '380 with the menu opening at ' + top + ')')
+        : fail('the menu runs down behind the writing toolbar: ' + capped
+               + 'px from ' + top + ' reaches ' + (top + capped)
+               + ', and the toolbar starts at 380');
+      capped < roomy
+        ? ok('so the toolbar coming out actually costs it room')
+        : fail('the toolbar was ignored entirely');
+      drawbar.hidden = true;
+      delete drawbar.getBoundingClientRect;
     }
   }
 

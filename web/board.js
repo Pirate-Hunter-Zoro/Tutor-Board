@@ -77,6 +77,7 @@ var els = {
   save: document.getElementById("btn-save"),
   barmenu: document.getElementById("barmenu"),
   chrome: document.getElementById("chrome"),
+  drawbar: document.getElementById("drawbar"),
   notesAgain: document.getElementById("btn-notes-again"),
   home: document.getElementById("btn-home"),
   finishLeave: document.getElementById("finish-leave"),
@@ -2984,9 +2985,21 @@ function placeMenu() {
   var right = Math.max(6, window.innerWidth - (ox + w) + 10);
   els.barmenu.style.top = top + "px";
   els.barmenu.style.right = right + "px";
+  /* And the floor is the top of the writing toolbar, not the bottom of the
+     glass. `#drawbar` is fixed to the bottom and grows UPWARD -- it is
+     `column-reverse`, so the slate's own menu and its selection bar open above
+     the tool row -- and on a board with the pen out it reaches well into the
+     lower half of this menu. Being painted on top of it is not the same as not
+     overlapping it: an entry drawn over a black tool bar is still an entry
+     nobody can read. */
+  var floor = oy + h;
+  if (els.drawbar && !els.drawbar.hidden) {
+    var bar = els.drawbar.getBoundingClientRect();
+    if (bar.height > 0 && bar.top < floor) floor = bar.top;
+  }
   /* Never so small that it is a scroller with one entry in it: below this the
      menu is the wrong shape for the screen and the cap is the lesser problem. */
-  els.barmenu.style.maxHeight = Math.max(140, oy + h - top - pad) + "px";
+  els.barmenu.style.maxHeight = Math.max(140, floor - top - pad) + "px";
   menuCue();
 }
 
