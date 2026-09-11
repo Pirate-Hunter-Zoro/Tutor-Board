@@ -27,10 +27,10 @@ TS_DIR = os.environ.get("BOARD_STATE_DIR") or os.path.join(paths.HOME, ".local",
 TS_SOCK = os.path.join(TS_DIR, "tailscaled.sock")
 
 # Where a system-managed Tailscale keeps its CLI when it is not simply on PATH.
+# Unlikely here: a cluster node has no administrator, which is why this tool runs
+# its own tailscaled in userspace mode out of `$HOME`.
 SYSTEM_TS = [
-    "/Applications/Tailscale.app/Contents/MacOS/Tailscale",     # the Mac App Store build
     "/usr/local/bin/tailscale",
-    "/opt/homebrew/bin/tailscale",
     "/usr/bin/tailscale",
 ]
 
@@ -193,14 +193,9 @@ def tailscale_cli():
 
 
 def tailscale_download_hint():
-    """The right static build to fetch, for a machine that needs its own."""
+    """The right static build to fetch. Every machine here needs its own."""
     import platform
-    sysname = platform.system().lower()
     machine = platform.machine().lower()
-    if sysname == "darwin":
-        return ("Tailscale on macOS is an application, not a static binary.\n"
-                "Install it from the App Store or tailscale.com/download and sign in;\n"
-                "there is no daemon for the board to start.")
     arch = {"x86_64": "amd64", "amd64": "amd64",
             "aarch64": "arm64", "arm64": "arm64"}.get(machine, "amd64")
     return ("mkdir -p ~/.local/opt/tailscale\n"

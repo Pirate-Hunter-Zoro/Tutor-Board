@@ -5,6 +5,12 @@ use for tutoring. If you are here to *use* the board, the contract you want is t
 `AI_INSTRUCTIONS.md` in the course repository, section "The live board". This file governs work on
 the board itself.
 
+**It runs on one machine: a compute node on a Slurm cluster, no administrator rights, shared home.**
+Every rule below assumes those four facts. Nothing may need `sudo`, nothing may be supervised
+(an allocation ends and the machine stops being yours, so a login is the only moment there is),
+nothing may trust a pid on the shared filesystem without checking whose machine wrote it, and
+nothing may be added for a machine of a different shape.
+
 Read `README.md` first.
 
 ## Catch up before you change anything
@@ -609,9 +615,11 @@ tutorboard/
 - **Do not promise handwriting recognition.** Ink to text or to LaTeX needs a trained engine. The
   tutor reads the PNG; that is the design, and it is why the slate does not need one.
 - **Platform knowledge lives under `tutorboard/`, in the module for it.** Where TeX is (`tex`),
-  which `tailscale` is in charge (`net/tailscale`), what this machine is called (`machine`).
-  Do not hardcode an architecture directory or a socket path anywhere else; the board has to run on
-  a cluster node, a desktop and a laptop without noticing the difference.
+  which `tailscale` is in charge (`net/tailscale`), what this machine is called (`machine`). Do not
+  hardcode an architecture directory or a socket path anywhere else. And do not add a branch for a
+  machine this is not run on: it is written for a compute node with no administrator rights on a
+  shared home, and a platform case nobody here exercises is a platform case nobody here can tell is
+  broken.
 - **Nothing model-specific, ever.** The interface is a command line and a directory of files. No
   SDK, no plugin, no assumption about which assistant is driving. `board wait` is the wake-up
   primitive precisely because a blocking process exiting is something every agent understands.
@@ -712,13 +720,11 @@ tutorboard/
   -- but say what it costs and take the saving back somewhere else in the same
   change. Never let a style note ship without the token pass; the two are one
   piece of work, not a feature and an optimisation to do later.
-- **The subject list belongs to whoever is serving.** The hub lists the serving
-  host's own `courses_dir`, built per request -- so a machine with a subset of
-  the repositories offers a subset, and a proxy forwarding to a compute node
-  shows that node's list, which is the machine that would have to run the board.
-  Never cache it, never bake it into the app, and never add a list of subjects
-  anywhere: the two cases compose correctly precisely because neither machine
-  knows about the other's repositories. And never let the hub claim a course is
+- **The subject list is a directory listing, built per request.** The hub shows
+  this machine's own `courses_dir` -- so a machine with a subset of the
+  repositories offers a subset, and adding a course is making a directory. Never
+  cache it, never bake it into the app, and never add a list of subjects
+  anywhere. And never let the hub claim a course is
   running on the strength of a `live/.board.json` naming another node -- the home
   directory is shared, so a board that died with an allocation leaves a record
   identical to a live one. Check it against the nodes Slurm still says are yours;

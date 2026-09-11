@@ -198,6 +198,9 @@ body { background: var(--paper); min-height: 100vh; min-height: 100dvh; }
 }
 #linkbad-retry { margin-top: 0; margin-left: auto; flex: none; }
 .linkbad { background: color-mix(in srgb, var(--bad) 14%, var(--paper)); }
+/* The same red as a dropped link, for the same reason: the lesson is readable
+   and it is not going anywhere by itself. */
+.tutorbad { background: color-mix(in srgb, var(--bad) 14%, var(--paper)); }
 
 /* The update strip. Quiet on purpose -- nothing is wrong, and the lesson is
    what the person is here for. */
@@ -552,7 +555,7 @@ body[data-mode="auto"].sys-dark .figure img { filter: invert(1) hue-rotate(180de
 .to-board:hover { color: var(--ink); border-color: var(--ink-3); }
 
 /* ---------- end of session ---------- */
-.finish, .pushed, .linkbad, .hwbar, .newver {
+.finish, .pushed, .linkbad, .tutorbad, .hwbar, .newver {
   display: flex; align-items: center; gap: .8rem;
   padding: .7rem max(1rem, env(safe-area-inset-left)) .7rem max(1rem, env(safe-area-inset-right));
   font-family: var(--ui);

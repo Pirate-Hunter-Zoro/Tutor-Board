@@ -49,8 +49,8 @@ case ":$PATH:" in
 esac
 
 # --- TeX -------------------------------------------------------------------
-# TinyTeX hides its binaries under an architecture-named directory, and macOS
-# puts the whole thing somewhere else again. Ask Python, which already knows.
+# TinyTeX hides its binaries under an architecture-named directory. Ask Python,
+# which already knows.
 TEXPATH="$(python3 -c 'import sys,os; sys.path.insert(0, "'"$HERE"'"); import boardlib; print(os.pathsep.join(boardlib.tex_bin_dirs()))' 2>/dev/null)"
 [ -n "$TEXPATH" ] && export PATH="$TEXPATH:$PATH"
 missing=""
@@ -65,9 +65,8 @@ else
   say  "        A small installation is enough:"
   say  "          https://yihui.org/tinytex/   then:"
   say  "          tlmgr install dvisvgm standalone varwidth preview needspace"
-  case "$(uname -s)" in
-    Darwin) say "        On macOS, MacTeX also works; its binaries live in /Library/TeX/texbin." ;;
-  esac
+  say  "        It installs under \$HOME, which is the only place a cluster node"
+  say  "        lets you put anything."
 fi
 
 for pkg in standalone varwidth preview needspace; do

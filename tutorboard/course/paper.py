@@ -188,18 +188,15 @@ def _size(path):
 def raster_env():
     """The environment a page renderer is looked for in.
 
-    `tex.tex_env` already knows every place a TeX lives on either machine, and
-    on a Mac that is where Ghostscript lands too. What it does not cover is
-    poppler, which is where `pdftoppm` comes from: Homebrew on Apple silicon,
-    `/usr/local/bin` on Intel and for MacTeX's own Ghostscript, MacPorts, and a
-    Linux node's `/usr/bin`. A board started by launchd or detached by
-    `board start` has a PATH of `/usr/bin:/bin` and nothing more, so none of
-    these can be assumed to be on it already -- which is the same reason
+    `tex.tex_env` already knows every place a TeX lives here. What it does not
+    cover is poppler, which is where `pdftoppm` comes from, and Ghostscript --
+    both of which a cluster node has in `/usr/bin` if it has them at all. A board
+    detached by `board start` has a PATH of `/usr/bin:/bin` and nothing more, so
+    neither can be assumed to be on it already, which is the same reason
     `hw_build` stopped trusting PATH for `pdflatex`.
     """
     env = tex.tex_env()
-    extra = [d for d in ("/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin",
-                         "/usr/bin", "/bin")
+    extra = [d for d in ("/usr/local/bin", "/usr/bin", "/bin")
              if os.path.isdir(d)]
     env["PATH"] = os.pathsep.join(extra + [env.get("PATH", "")])
     return env

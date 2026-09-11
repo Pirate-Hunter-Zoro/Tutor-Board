@@ -473,13 +473,11 @@ try:
 
 
     # --- the board catches ITSELF up ---------------------------------------
-    # `sync` above pulls a course. Nothing pulled the board, on the one machine
-    # where nothing else could: `--tool-pull` refuses to install a timer on a
-    # compute node, because a timer on a machine that ceases to exist is not a
-    # plan. So a fix shipped from the Mac sat on GitHub until somebody pulled it
-    # by hand -- and remembering by hand is precisely the thing this repository
-    # keeps failing at. The login hook is the only moment a node gets, and
-    # `tutor resume` is what the hook runs.
+    # `sync` above pulls a course. Nothing pulled the board, and nothing can on a
+    # timer: a schedule on a machine that ceases to exist is not a plan. So a fix
+    # sat on GitHub until somebody pulled it by hand -- and remembering by hand
+    # is precisely the thing this repository keeps failing at. The login hook is
+    # the only moment a node gets, and `tutor resume` is what the hook runs.
     import contextlib  # noqa: E402
     import io as _io   # noqa: E402
     import subprocess as _sp  # noqa: E402

@@ -14,11 +14,17 @@ The same turned out to be true of being walked through code on a tablet — and,
 the two wanted the *same* board rather than two. A repository declares nothing about its subject
 now: one interface, one method, whether the exercises are proofs or functions.
 
+**It is written for one machine: a compute node on a Slurm cluster, with no administrator rights,
+on a shared home.** Nothing needs `sudo`, nothing is supervised, and nothing assumes the machine
+will still be yours tomorrow — see [The machine this is written
+for](#the-machine-this-is-written-for).
+
 **Contents** — [What it is not](#what-it-is-not) · [The three surfaces](#the-three-surfaces) ·
 [Commands](#commands) · [Writing a card](#writing-a-card) · [The slate](#the-slate--writing-by-hand)
 · [Getting work back](#getting-work-back) ·
 [Exporting it](#exporting-the-whole-conversation) · [Any agent](#any-agent-not-just-one) ·
-[Layout](#layout) · [Setup, start to finish](#setup-start-to-finish) ·
+[Layout](#layout) · [The machine](#the-machine-this-is-written-for) ·
+[Setup, start to finish](#setup-start-to-finish) ·
 [Networking](#networking-reaching-it-from-anywhere) · [The iPad app](#the-ipad-app) ·
 [What is verified](#what-is-verified-and-what-is-not)
 
@@ -92,28 +98,31 @@ now: one interface, one method, whether the exercises are proofs or functions.
 > board: a tap is a person naming the lesson they want, which is exactly the case `ts_repoint` holds
 > a name *for* rather than against. The overlay asks nothing now — a tap dismisses it — and a course
 > on another machine says where it is instead of waiting for an address that will never serve it.
-> `test/hub.js` drives the tap in a real DOM; `test/choice.py` holds the rule. Shell version
-> `board-shell-v91`.
+> `test/hub.js` drives the tap in a real DOM; `test/choice.py` holds the rule.
 >
-> **`scripts/retire-host.sh` takes the board off a machine nobody can log in to**, through the two
-> channels that reach it: the round that pulls this repository, and the periodic `tutor resume`. An
-> instruction that can only arrive by one route is an instruction that does not arrive.
+> **A dead tutor was a sentence in a bar that cannot grow.** *"I get a message that 'tutor stopped -
+> nothing is rea...' that gets cut off on the top bar."* The title bar already carries the course,
+> the chapter, the sitting badge and three controls; it is the one row on this page with no room, and
+> the half of that sentence that gets cut is the half saying what to do. The chip is two words now —
+> `tutor stopped` — and `#tutorbad` carries the rest across the width of the chrome: *anything you
+> send starts another and waits in the inbox until it is up*, which is true, because a send wakes a
+> dead tutor by itself. In the chrome and not in the empty-board panel, because a tutor dies in the
+> middle of a lesson that has cards on it, which is exactly when that panel is not on screen.
+> `test/hanging.js` holds it. Shell version `board-shell-v92`.
 >
-> Everything that machine has goes to origin first, **on a branch of its own** —
-> `retired/<machine>/<course>` — and that is not tidiness. A machine being retired has been teaching
-> the same courses as another one, both clones running the transcript beat, both committing
-> `live/slate/page-06.png`: a pull of that is a merge conflict in a binary file, and a repository
-> sitting in a half-finished merge is a repository whose push fails for ever. So nothing tries to
-> merge. A merge in progress is abandoned, the working tree is committed as it stands, the branch is
-> pushed, and which of two divergent lessons to keep is a decision somebody makes later with both in
-> front of them.
+> **This tool is written for one machine: a compute node on a Slurm cluster, no administrator
+> rights, shared home.** Everything that existed for a machine of a different shape is gone — no
+> supervisors, no launch agents, no periodic rounds, no second host to arbitrate with, and no
+> platform branches for an operating system this is never run on. What is left assumes the four
+> facts under [The machine this is written for](#the-machine-this-is-written-for), and the one that
+> shapes the most code is that **nothing here can be supervised**: an allocation ends and the
+> machine stops being yours, so a login is the only moment there is. `scripts/install-autostart.sh
+> --login-hook` is the whole of the automation, and `tutor resume` is what it runs.
 >
-> Then it stops and removes the launch agents and deletes the courses, the clone, the config, the
-> commands it put on the path and every log — including the one it is writing into, so nothing is
-> left carrying the board's name. The gate is macOS **and** a registered board host **and** no
-> Slurm; it exits 9 so the round it runs inside stops rather than putting the timer back; and
-> `test/retire.py` proves it is a silent no-op on every other machine. It and `scripts/tool-pull.sh`
-> exist only for that one errand; once it has been done, both go.
+> **Two clones of one course must never both run a transcript beat.** Two boards each committing
+> `live/slate/page-06.png` is a merge conflict in a binary file, and a repository left in a
+> half-finished merge is a repository whose every later push fails — reported as "I just tried to
+> push changes and it failed". One machine is how that stays impossible.
 >
 > ### Where this was earlier on 11 September 2026
 >
@@ -2368,7 +2377,6 @@ repository and it carries the invariants that were learned the hard way. Then:
 board doctor          # is this machine equipped
 tutor where           # what is running, and where
 bash scripts/catch-up.sh   # put this machine right, and say what is true
-bash scripts/stay-current.sh  # ...and keep doing that, without anybody here
 bash test/all.sh      # every suite; fetches jsdom itself the first time
 ```
 
@@ -2540,7 +2548,7 @@ these tests fail, the test is right.
 | The node never pulled the board. Every session pulled the *course*, and no timer can keep a machine that ceases to exist current — so a node ran whatever it was last pulled by hand, indefinitely. And a pull that bounces nothing leaves the boards and tutors serving the old code: a fix reaches the disk and not the lesson | `tutor` and `tutor resume` pull this repository, re-exec onto it, and then `tutor restart --tutors`; `test/resume.py` |
 | ...and the first version of that fix could not say it had happened: `execve` throws away whatever is sitting in the process's buffers, and stdout is a pipe or a log file every time this runs for real — so the one line explaining why the board changed under somebody's lesson was dropped on the way out | a flush before the exec; `test/resume.py` drives a real clone and reads what it printed |
 | A deploy dropped somebody mid-proof into a different course: starting a board claimed the tailnet name unconditionally, and `tutor restart` restarts every board on the machine one after another — so the address ended up wherever the course list happened to end. The installed app has one URL baked into it and no way to say which lesson it wanted | `ts_repoint` will not take a name from a board that is still answering; `board vpn serve` is the one command that does, because that is a person asking; `test/address.py` |
-| An evening's homework was written up and could not be typeset. Two causes wearing one face. A course's `.claude/settings.local.json` was written the first time its board started and never touched again, so a course created before the LaTeX grant existed was never going to get it — and the tutor, refused the compiler, reasonably concluded the machine was the problem. Underneath that, `board hw build` handed the course's own `scripts/build.sh` whatever `PATH` the board process happened to have: that script prepends TinyTeX's *Linux* directory, and on the Mac, started by a login agent with `/usr/bin:/bin` and nothing else, there was no `pdflatex` to find. The sheet was complete and correct the whole time | the grant covers `pdflatex`, `latexmk`, the course's build script and the rest of the toolchain, and `install_permissions` now tops an existing file up instead of skipping it — appending only what is missing, so a course's own list survives intact; the build runs under `tutorboard.tex.tex_env()`, which already knew every place a TeX gets installed on either machine; `test/agents.py`, `test/homework.py` |
+| An evening's homework was written up and could not be typeset. Two causes wearing one face. A course's `.claude/settings.local.json` was written the first time its board started and never touched again, so a course created before the LaTeX grant existed was never going to get it — and the tutor, refused the compiler, reasonably concluded the machine was the problem. Underneath that, `board hw build` handed the course's own `scripts/build.sh` whatever `PATH` the board process happened to have, which for a detached board is `/usr/bin:/bin` and nothing else — so there was no `pdflatex` to find. The sheet was complete and correct the whole time | the grant covers `pdflatex`, `latexmk`, the course's build script and the rest of the toolchain, and `install_permissions` now tops an existing file up instead of skipping it — appending only what is missing, so a course's own list survives intact; the build runs under `tutorboard.tex.tex_env()`, which knows every place a TeX gets installed here; `test/agents.py`, `test/homework.py` |
 | **The pattern this repository keeps relearning, again: a rule with no way to expire.** "Only ever created, never edited" was written to protect a course's own permission list, and it did — while quietly guaranteeing that no course would ever receive a grant added after its first board start. A file that is only ever created is a file frozen at the moment the project understood the least about what it needed | anything that installs a file into a course has to have an answer to "and then what, in six weeks"; here it is a merge that only appends |
 | `board hw build` printed the single word `FAILED` for an entire sitting while knowing more than that. The course's build script discards its own output by design, so on the one failure it could not explain — no compiler at all — it had nothing to pass on, and "failed" with no reason reads as a broken proof to the person who just wrote it | a failed build with nothing to say is given a reason: the missing compiler is named when that is what it is, and a silent script is named when it is not; the board shows it the way it shows a LaTeX error; `test/homework.py` |
 
@@ -2725,13 +2733,14 @@ because it still covers the cases the slate cannot:
 For ordinary "here is my answer", use the slate. The `＋` in the title bar is the same upload path
 and is the practical one on iOS, where dragging a file onto a web page is awkward.
 
-## Setting up a second machine
+## Setting it up on the cluster
 
-Every machine that teaches is set up the same way, and one script does the whole of it:
+One script does the whole of it, in the shared home, where every node you are ever given can see
+it:
 
 ```
 git clone https://github.com/<you>/Tutor-Board ~/Tutor-Board
-cd ~/Tutor-Board && bash bootstrap.sh --name desk
+cd ~/Tutor-Board && bash bootstrap.sh
 ```
 
 It installs `tutor` and `board`, clones the course repositories, turns on the commit-attribution
@@ -2753,13 +2762,18 @@ produce the list on a machine that already has everything:
 for d in ~/*/; do git -C "$d" remote get-url origin 2>/dev/null; done
 ```
 
-### Two machines at once
+### One identity, whichever node you were given
 
-The tailnet identity is one machine that moves, which is what keeps the address stable across
-compute nodes on a shared home. Two hosts cannot both answer to `board`, so give the second its
-own name — `bootstrap.sh --name`, or `board vpn up --hostname desk` later. Each gets its own
-`*.ts.net` address; install the board on the iPad from each, and you have two icons with no
-ambiguity about which machine you are talking to.
+The tailnet identity is one machine that moves, and that is the whole of why the iPad's address
+survives an allocation ending: the registration lives in the shared home, so `compute304` and
+`compute309` are the same `*.ts.net` name a week apart. The machine's own name still changes with
+the allocation, because it is a different machine and every ownership check depends on knowing
+that — see [`board node`](#one-address-and-the-machine-holding-it).
+
+If you ever run a second machine, give it a name of its own (`bootstrap.sh --name`, or `board vpn
+up --hostname <name>`) and install the board on the iPad from each. An address only ever opens a
+board on the machine holding it, so two machines mean two icons — this tool is written for the one
+on the cluster.
 
 ### Arriving on a new node
 
@@ -2856,24 +2870,6 @@ said; `export TUTOR_BOARD_NO_RESUME=1` turns it off for one shell.
 
 The board is up for as long as the allocation is, which is the honest ceiling on a cluster: nothing
 on a node outlives the job that gave it to you.
-
-### Surviving a reboot
-
-A machine that stays on is always on until it isn't.
-
-```
-bash scripts/install-autostart.sh Galois-Theory opencode
-bash scripts/install-autostart.sh --uninstall
-```
-
-On macOS that writes a LaunchAgent with `RunAtLoad` and `KeepAlive`, so the daemon starts at login
-and is restarted if it dies; logs go to `~/Library/Logs/tutor-headless.log`. On Linux with
-systemd it writes a `--user` unit with `Restart=always` (add `loginctl enable-linger $USER` to
-survive logout). Both run as you, which is necessary — the daemon needs your tailnet, your git
-credentials, and your agent's own auth.
-
-Neither survives a machine that is off. Nothing does. `tutor where` and the dot on the board are
-how you find out, and the board keeps working from any other machine in the meantime.
 
 ## Starting a session
 
@@ -3610,25 +3606,29 @@ tree from a tap. Two rules keep those out of somebody's way, and they are in
 So `git rebase -i`, a bisect, or an afternoon of half-staged work in a course with a live board on
 it is ordinary and safe in both directions. `test/beside.py` holds it, against real repositories.
 
-## Running it on another machine
+## The machine this is written for
 
-Nothing here is tied to a Linux cluster. The server is standard-library Python, the pages are
-plain browser JavaScript, and the two things that genuinely differ between machines — where TeX
-keeps its binaries and which `tailscale` is in charge — are isolated in `tutorboard/`,
-in `tex.py`, `machine.py` and `net/tailscale.py`.
+**A compute node on a Slurm cluster, with no administrator rights, on a shared home.** Every
+decision in here follows from those four facts, and it is worth saying which ones:
 
-- **TeX** is found by globbing rather than guessing an architecture: `~/.TinyTeX/bin/*`,
-  `~/Library/TinyTeX/bin/*` (where TinyTeX lands on macOS), `/Library/TeX/texbin` for MacTeX, and
-  `/usr/local/texlive/*/bin/*`.
-- **Tailscale** comes in two shapes. On a machine with no administrator rights the board runs its
-  own `tailscaled` in userspace mode. On a machine where Tailscale is already installed and
-  running — a Mac, most obviously — there is nothing to start, and `board vpn` says so and gets
-  out of the way instead of fighting the daemon that already works.
-- **Slurm** is used for one thing, deciding whether a stale lock belongs to a job that has ended.
-  Where `squeue` does not exist that check is simply skipped.
+- **Nothing needs `sudo`, ever.** The server is standard-library Python, the pages are plain
+  browser JavaScript, KaTeX is vendored, and `tailscaled` runs in userspace mode out of `$HOME`.
+  A change that needs a package manager or a system service is a change that cannot be deployed
+  here.
+- **TeX lives under `$HOME`**, and is found by globbing rather than guessing an architecture:
+  `~/.TinyTeX/bin/*`, `~/.local/TinyTeX/bin/*`, `/usr/local/texlive/*/bin/*`.
+- **Nothing may be supervised.** A timer or a service assumes a machine that comes back; an
+  allocation ends and the machine stops being yours. A login is the only moment there is, which is
+  what `tutor resume` and the login hook are for.
+- **The home directory is shared and the machine is not.** Every record that crosses `live/`
+  carries the node's name and every liveness check compares it, because a pid on a shared
+  filesystem is a pid on somebody else's machine until proved otherwise. Slurm is asked whether a
+  node is still yours; where `squeue` does not answer, the answer is *unknown*, and unknown is left
+  alone rather than acted on.
 
-`board doctor` reports the platform it thinks it is on. `install.sh` prints the right instructions
-for it, including that Tailscale on macOS is an application rather than a static binary.
+It will run elsewhere — the platform knowledge is isolated in `tutorboard/tex.py`, `machine.py` and
+`net/tailscale.py`, and `board doctor` says what it thinks it is on — but nothing is kept here for
+the sake of a machine that is not this one.
 
 ### Driving it with a different assistant
 
@@ -4471,7 +4471,7 @@ name, the port, and the tailnet name. What it is checking for:
 | A TeX installation | TinyTeX in `~/.TinyTeX` |
 | `dvisvgm`, `standalone` | `tlmgr install dvisvgm standalone varwidth preview needspace` |
 | KaTeX | vendored into `web/katex/`, see step 2 |
-| `pdftoppm` (poppler) | `/usr/bin` on a Linux node; `brew install poppler` on a Mac. Wanted rather than needed: without it — or `pdftocairo`, or Ghostscript's `gs`, which MacTeX brings — a PDF can still be saved to the iPad but cannot be **read on the board**, because the pages are rendered here. `board doctor` says so in as many words rather than leaving it to be found from a panel that will not fill |
+| `pdftoppm` (poppler) | `/usr/bin`, where a cluster node has it if it has it at all. Wanted rather than needed: without it — or `pdftocairo`, or Ghostscript's `gs` — a PDF can still be saved to the iPad but cannot be **read on the board**, because the pages are rendered here. `board doctor` says so in as many words rather than leaving it to be found from a panel that will not fill |
 | node | only to run the tests |
 
 ## 1. The tool itself
@@ -4770,8 +4770,6 @@ python3 test/paper.py    that both documents can be READ on the board and SAVED 
 python3 test/teaching.py that the teaching method reaches every course
 python3 test/choice.py   that the address opens the course a person chose
 python3 test/limit.py    that an allowance running out is reported rather than hidden
-python3 test/retire.py   that the one command that deletes anything deletes it on one
-                         machine and is a silent no-op on every other
 python3 test/tokens.py   what a turn is allowed to read, what it must not run, and that
                          what it cost is measured rather than argued about
 

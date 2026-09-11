@@ -180,8 +180,7 @@ if [ "$REPORT" -eq 0 ]; then
     fi
 
     # It has to move, so the working tree is about to be walked over. Uncommitted
-    # work goes into the stash BEFORE anything touches it -- the same promise
-    # `stay-current.sh` already keeps for the tool itself. If it will not stash,
+    # work goes into the stash BEFORE anything touches it. If it will not stash,
     # nothing else happens to this repository: an unmoved course is a nuisance,
     # and a deleted afternoon is not.
     if [ -n "$dirty" ]; then

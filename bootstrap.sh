@@ -136,4 +136,6 @@ say "  tutor --agents        point it at the assistant you use here"
 say "  tutor galois          start a session"
 say
 say "  tutor headless galois --agent opencode     run it as a daemon"
-say "  bash $HERE/scripts/install-autostart.sh    keep it running across reboots (macOS)"
+say "  bash $HERE/scripts/install-autostart.sh --login-hook"
+say "                                            and it comes back by itself on"
+say "                                            every node you are given"

@@ -117,6 +117,20 @@
   <button id="linkbad-retry" type="button">reconnect</button>
 </div>
 
+<!-- A DEAD TUTOR IS NEWS, AND THE BAR IS NOT WHERE NEWS FITS.
+     The chip in the title bar is a dot and two words: the bar is the one row on
+     this page that cannot grow, so a sentence put there comes out as "tutor
+     stopped - nothing is rea..." and the half that says what to do about it is
+     the half that gets cut. Reported in those words. So the chip says the state
+     and this says what it means, across the width, where there is room for it --
+     and it is in the chrome stack rather than in the empty-board panel, because
+     a tutor dies in the middle of a lesson that already has cards on it, which
+     is exactly when that panel is not on screen. -->
+<div id="tutorbad" class="tutorbad" hidden>
+  <span>The tutor stopped. Anything you send starts another and waits in the
+    inbox until it is up.</span>
+</div>
+
 <!-- New code has arrived, and taking it means reloading the page. Which is
      somebody's decision, not the app's: a reload landing unasked in the middle
      of a lesson is a white screen, a scroll position gone, and every card

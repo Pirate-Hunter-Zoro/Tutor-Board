@@ -137,6 +137,43 @@ busy().classList.contains('busy-bad')
   ? ok('and it reads as a problem rather than as progress')
   : fail('a board nobody is reading is painted as though it were working');
 
+// ------------------------------------------- a tutor that died mid-lesson
+//
+// "I get a message that 'tutor stopped - nothing is rea...' that gets cut off
+// on the top bar". The title bar is the one row on this page that cannot grow:
+// it already carries the course, the chapter, the sitting badge and three
+// controls, so a sentence put in the chip comes out truncated exactly where it
+// stops being useful. The chip says the state; the chrome says what it means.
+es.onmessage({ data: frame({ agent: 'claude', state: 'stale', turns: 2 }, null) });
+await sleep(40);
+
+chip().length <= 16 && /stopped/.test(chip())
+  ? ok('a dead tutor is two words in the bar, which is what fits: "' + chip() + '"')
+  : fail('the chip is a sentence in a bar that cannot grow: "' + chip() + '"');
+!/nothing is reading/.test(chip())
+  ? ok('and the half that gets cut off is not in there to be cut')
+  : fail('the chip still carries the sentence: "' + chip() + '"');
+!doc.getElementById('tutorbad').hidden
+  ? ok('the chrome carries it instead, across the width')
+  : fail('nothing anywhere says what a stopped tutor means');
+/waits in the\s+inbox/.test(doc.getElementById('tutorbad').textContent)
+  ? ok('and says what happens to anything sent meanwhile')
+  : fail('the banner does not say what to do: "'
+         + doc.getElementById('tutorbad').textContent + '"');
+// It is in the chrome stack and not in the empty-board panel, because a tutor
+// dies in the middle of a lesson that has cards on it -- which is exactly when
+// that panel is not on screen.
+/<div id="chrome">[\s\S]*id="tutorbad"[\s\S]*<\/div>/
+  .test(fs.readFileSync(path.join(WEB, 'board.html'), 'utf8'))
+  ? ok('and it lives in the chrome, where the lesson cannot hide it')
+  : fail('the banner is outside the chrome stack');
+
+es.onmessage({ data: frame({ agent: 'claude', state: 'listening' }, null) });
+await sleep(40);
+doc.getElementById('tutorbad').hidden
+  ? ok('and it goes the moment one is listening again')
+  : fail('the banner stays up over a tutor that is fine');
+
 // --------------------------------------------------------- a failed turn
 //
 // AND WITH NOTHING IN THE INBOX, WHICH IS THE REAL CASE. `board wait` marks a

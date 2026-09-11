@@ -21,6 +21,7 @@ var els = {
   emptyLead: document.getElementById("empty-lead"),
   begin: document.getElementById("begin"),
   noTutor: document.getElementById("no-tutor"),
+  tutorBad: document.getElementById("tutorbad"),
   skip: document.getElementById("skip"),
   notesend: document.getElementById("notesend"),
   annbar: document.getElementById("annbar"),
@@ -1242,9 +1243,13 @@ function paintSession(state, push, agent, exported, hwBuilt) {
      chrome. An empty board with nothing attached is a dead end, and the person
      holding the iPad cannot be expected to infer that from a missing chip. */
   els.noTutor.hidden = attached;
+  /* And in the chrome, where it is legible from anywhere in the lesson. The
+     panel above only exists on a board with no cards on it; a tutor dies in the
+     middle of one that has plenty. */
+  els.tutorBad.hidden = attached;
   if (!agent) {
     els.agent.dataset.state = "none";
-    els.agent.textContent = "no tutor attached";
+    els.agent.textContent = "no tutor";
   } else {
     els.agent.dataset.state = agent.state || "stale";
     els.agent.textContent =
@@ -1272,8 +1277,11 @@ function paintSession(state, push, agent, exported, hwBuilt) {
     : agent.state === "reattaching" ? (agent.agent || "assistant") + " reattaching…"
     : agent.state === "wrapping up" ? (agent.agent || "assistant") + " wrapping up…"
       /* Only reached when the record exists but nothing recognises its state --
-         a daemon whose process is gone. Say what that means for them. */
-    : "tutor stopped — nothing is reading the board";
+         a daemon whose process is gone. TWO WORDS, because this is a bar that
+         cannot grow: "tutor stopped — nothing is reading the board" came out as
+         "tutor stopped - nothing is rea...", which loses the half that matters.
+         `#tutorbad` carries the sentence. */
+    : "tutor stopped";
   }
   var kind = state.session || "lecture";
   sittingKind = kind;
