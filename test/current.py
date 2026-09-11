@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """A machine that is not the one you are sitting at keeps itself current.
 
-Fixes to this tool are written on the compute node, which cannot reach the Mac.
-The Mac holds the address and runs the follower, so until something over there
-restarts the processes holding the old code, half of every fix is on disk and
-none of it is in the lesson. `scripts/catch-up.sh` is the command that puts a
-machine right and somebody has to be sitting at it to type that.
+A machine nobody logs in to never restarts the processes holding the old code,
+so half of every fix is on its disk and none of it is in the lesson.
+`scripts/catch-up.sh` is the command that puts a machine right and somebody has
+to be sitting at it to type that.
 
 `scripts/stay-current.sh` is that command on a timer. What is guarded here is
 the part that is easy to get wrong and impossible to notice from the other end
@@ -17,7 +16,9 @@ of a tailnet:
     -- a machine that is AHEAD differs too, and reading that as behind is an
     infinite loop with a `git pull` in it;
   - a round re-asserts its own supervision from the repository it just pulled,
-    which is what makes this the LAST time anybody has to visit the machine;
+    which is what makes this the LAST time anybody has to visit the machine --
+    including the instruction to stop being a board host at all, which is the
+    only way a machine nobody can log in to can be retired;
   - and the tool repository can never be the thing that gets stuck, because a
     machine that cannot fast-forward is a machine somebody has to go and visit.
 """
@@ -56,13 +57,15 @@ check("on linux too, so the tool is not one machine's script",
 # The half that makes it the last visit.
 check("a round re-asserts its own definition from the repository",
       "install_timer" in src and "plist_text | write_if_changed" in src)
-check("and reloads only when that definition actually changed, because "
-      "reloading the follower costs the address a moment",
+check("and reloads only when that definition actually changed, because a "
+      "reload costs whatever the job was doing",
       "write_if_changed()" in src and "cmp -s" in src)
-check("the follower and the warm board are asserted, not reinstalled",
-      "ensure_always_on" in src and 'loaded "$LABEL_FOLLOW"' in src)
-check("and the timer this supersedes is retired rather than left racing it",
-      "retire_pull_timer" in src and "com.tutorboard.pull" in src)
+check("a round asks whether this machine should be a board host at all, out of "
+      "the repository that just landed",
+      "scripts/retire-host.sh" in src)
+check("and it asks before it re-asserts the supervision, so a retired machine "
+      "is not handed its timer straight back",
+      src.index("retire-host.sh") < src.index("install_timer >/dev/null"))
 check("a round hands over to the code it just pulled",
       "exec bash \"$HERE/scripts/stay-current.sh\" --run --after-pull" in src)
 check("with a guard, so a pull that moved nothing cannot loop for ever",

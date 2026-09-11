@@ -9,9 +9,8 @@ Read `README.md` first.
 
 ## Catch up before you change anything
 
-This repository is cloned on more than one machine — this Mac mini and the compute
-node — and work moves between them by git, never by hand. The first act of any
-session here is:
+This repository may be cloned on more than one machine, and work moves between
+them by git, never by hand. The first act of any session here is:
 
 ```
 git pull --ff-only
@@ -28,24 +27,19 @@ opened it. The same rule applies to a course repository — its lesson transcrip
 same one taught there. The headless tutor pushes that transcript on a beat and the
 session start pulls it; do not re-commit a card the other machine already wrote.
 
-**Then check the machine you are standing on.** This repository runs on an
-always-on Mac mini (`board` on the tailnet) and on a compute node, and each has
-two things that have to be true for the one iPad address to work. Prompt the
-person for them rather than assuming they are done — a node whose name was changed
-in the admin console still has the old name in its local state, and a missing
-`handover_secret` fails silently.
+**Then check the machine you are standing on.** The one iPad address belongs to the machine holding
+the tailnet name, and a node whose name was changed in the admin console still has the old one in
+its local state. Prompt the person rather than assuming it is right.
 
-**On the compute node this is one command, not a checklist:**
+**On a compute node this is one command, not a checklist:**
 
 ```
-bash scripts/setup-node.sh --secret <the Mac mini's handover_secret> --tailnet-name <node-name>
+bash scripts/setup-node.sh [--tailnet-name <node-name>]
 ```
 
-Ask the person for both values; the script refuses to run anywhere but a compute node, is
-idempotent, and reports what it found rather than what it assumed. Do not pin the machine's name
-there — on a cluster it is supposed to change with the allocation. The reasoning, and the one step
-left to a person, are in `README.md` under "Always-on, with the machine that holds the repository
-preferred".
+The script is idempotent and reports what it found rather than what it assumed. Do not pin the
+machine's name there — on a cluster it is supposed to change with the allocation. The reasoning, and
+the one step left to a person, are in `README.md` under "One address, and the machine holding it".
 
 ## What this must never become
 
@@ -126,29 +120,28 @@ tutorboard/
   `test/shot.js` AND a page rendered and looked at — the suite cannot rasterise anything, and the
   device is where this is used.
 - **One process per course repository.** Ports derive from the directory name so two courses can
-  hold boards at once, and derive it identically on every machine — the always-on host cannot read
-  the compute node's filesystem, so a shared rule is the only way it knows where to knock. A name
+  hold boards at once, and derive it identically on every machine — one machine cannot read
+  another's filesystem, so a shared rule is the only way it knows where to knock. A name
   maps to a short *sequence* of ports (`tutorboard.ports.port_sequence`) rather than to one, because a hash
   cannot promise distinct numbers and did not: two courses collided and the second to start simply
   failed to come up. A start walks the sequence for a free port and records which one it took.
 - **Which course the address serves is a decision, not a race.** `chosen.json` records the course a
   person named — `tutor <course>` writes it, and so does a tap in the hub — and every board
-  publishes it through `/health` so the always-on host can follow it without reading this
-  filesystem. Nothing may go back to serving whichever board answers first: with two boards up that
-  is alphabetical order wearing a disguise, and it made tapping a course in the hub do nothing
-  visible at all. A board also says who it is in `/health`, and no port is served without that name
-  matching the course being looked for — a port is derived from a name and derivation is not proof.
-- **A board that is merely running has no claim on the address.** There is one address and it opens
-  one lesson, so the follower's first question is never "who answered" — it is "who is serving the
-  course that was chosen". `local_target` and `remote_target` both return an `exact` flag saying
-  which they are, and in `choose_target` an exact target beats a fallback on either machine, above
-  `prefer` and above the allowance. Preference breaks ties between two boards with an equal claim and
-  decides nothing else; the allowance decides between two machines serving the *same* chosen course,
-  and must never be able to demote a machine to a course nobody asked for — a limited board still
-  shows the lesson, and only new turns fail. The choice itself is read from BOTH machines, newest
-  `at` winning, because it is recorded wherever the hub was served from. `test/choice.py`.
-- **Only a person records a course choice.** `chosen.json` is the record the always-on host follows
-  to decide which lesson the one installed address opens, and it means *somebody asked for this*. It
+  publishes it through `/health`, because only the machine serving can read either the record or the
+  port a course actually took. Nothing may go back to serving whichever board answers first: with
+  two boards up that is alphabetical order wearing a disguise, and it made tapping a course in the
+  hub do nothing visible at all. A board also says who it is in `/health`, and no port is served
+  without that name matching the course being looked for — a port is derived from a name and
+  derivation is not proof.
+- **The machine that opens a course takes the address for it, in the same request.** A tap in the hub
+  is a person naming the lesson they want, so `/switch` records the choice, starts the board and
+  re-points the tailnet name before it answers; the hub then waits until the address really is
+  serving that course before reloading, because reloading sooner lands on the board being tapped
+  away from. A *start* is the opposite case and must not take a name a live board is holding —
+  `tutor restart` walks every course on the machine and would leave the address wherever the
+  alphabet finished. `test/choice.py`, `test/address.py`, `test/hub.js`.
+- **Only a person records a course choice.** `chosen.json` decides which lesson the one installed
+  address opens, and it means *somebody asked for this*. It
   exists precisely because the answer cannot be derived from disk — working in a course touches its
   files, so "most recently used" re-elects itself. Machinery must therefore never write it:
   `agent_start` spawns `tutor headless <course> --respawn`, and `--respawn` means *record nothing*.
@@ -339,38 +332,35 @@ tutorboard/
 - **The service worker caches the shell and nothing live.** SSE, the board payload, uploads,
   slate saves, and figures go to the network every time. A cached lesson is a stale lesson, which
   is worse than a blank screen. Bump `VERSION` in `sw.js` whenever a shell file changes.
-- **The identity does not move to the Mac mini; the proxy does.** Between cluster nodes the
-  tailnet identity `board` moves, and that works because they share one home directory and one
-  ownership record. An always-on Mac shares neither, and runs the system Tailscale as its own node
-  besides. So the always-on host keeps `board` permanently and re-points `tailscale serve` at
-  whichever machine is actually serving. Do not try to make the identity migrate across that
-  boundary; the reasoning and the work list are in the README under "Not yet built".
-- **A board must be reachable from the other machine.** It binds its tailscale address as well as
-  loopback — the tailnet, not the LAN. Without that the follower's probes are refused and the
-  address can only ever point at a board the always-on host is running itself, which is switching
-  that cannot work however correct the arbitration above it is. It went unseen for a week because
-  every test of the arbitration passed. And never look for the far side at a hostname out of the
-  config alone: a compute node's name is an allocation. `tutorboard.net.boards.locate_course` asks the tailnet.
+- **One address serves one machine.** `tailscale serve` proxies the tailnet HTTPS name to a port on
+  the machine running it, and answers every request with a 502 if its config names a remote tailnet
+  backend. The identity moves between cluster nodes, which works because they share one home
+  directory and one ownership record; it does not move to a machine that shares neither, and such a
+  machine keeps a name of its own instead. Two names, two icons on the iPad, no ambiguity.
+- **A board must be reachable from another machine.** It binds its tailscale address as well as
+  loopback — the tailnet, not the LAN. Without that, asking where a course is served is refused by a
+  loopback socket and a course can only ever be found on the machine doing the asking, which is
+  switching that cannot work however correct everything above it is. It went unseen for a week
+  because every test above it passed. And never look for another machine at a hostname out of the
+  config alone: a compute node's name is an allocation. `tutorboard.net.boards.locate_course` asks
+  the tailnet.
 - **The machine is the person's choice, not an inference.** Which courses exist is a property of a
   machine — they are whatever is cloned beside the board — so a course name can mean two clones and
   the hub must be able to say which. `/hosts.json` lists every machine on the tailnet running a
-  board and what each has; the record carries the host beside the course; the follower treats a
-  named machine as the answer, above preference, but only among boards serving the chosen course.
-  Never let a named host promote a board that is not serving what was chosen: a machine is a
+  board and what each has, and the record carries the host beside the course. A machine is a
   qualifier on the lesson, never a reason to take the address off one. `test/hub.js`,
   `test/choice.py`.
-- **A course runs in ONE place, and a tap in the hub does not move it.** The tap records the
-  choice — that record is the only thing two machines can both read — and nothing else, unless this
-  machine owns its own name or already serves that course. It must never start a board, take the
-  tailnet name, or start a tutor for a course that lives on the other machine: that is two boards
-  for one course, **two tutors on one inbox** writing contradictory cards into one lesson, and the
-  address re-pointed at itself every tick. All three happened in one evening, 1 September 2026.
-  The follower places the address; a board with a tutor attached beats an empty room with the same
-  claim. `test/choice.py`.
-- **The tailnet address must never depend on the machine.** The node registers as `board`, not
-  as the compute host, and its state lives in the shared home so the identity follows the user
-  from node to node. The installed iPad app has one origin baked into it; changing that address
-  breaks it silently.
+- **A course runs in ONE place.** A tap on a course that another machine is already serving records
+  the choice — that record is the only thing two machines can both read — and asks that machine to
+  bring it up. It must never start a second board, or a tutor, for a course being served elsewhere:
+  that is two boards for one course and **two tutors on one inbox** writing contradictory cards into
+  one lesson. Both happened in one evening, 1 September 2026. Whether anybody else is serving it is
+  asked over the tailnet, never assumed from the machine's role — a machine that cannot be reached
+  would otherwise leave a course that opens nowhere. `test/choice.py`.
+- **The tailnet address must never depend on which node you were given.** A cluster node registers
+  under the service name rather than the compute host's, and its state lives in the shared home so
+  the identity follows the user from node to node. The installed iPad app has one origin baked into
+  it; changing that address breaks it silently.
 - **Two kinds of assistant, two ways of expiring.** A headless daemon has a heartbeat and is dead
   after two minutes of silence. An interactive one is idle for exactly as long as the person in
   front of it is thinking, so it is judged by whether its process still exists — `tutor` records
@@ -630,8 +620,8 @@ tutorboard/
   tutor reads the PNG; that is the design, and it is why the slate does not need one.
 - **Platform knowledge lives under `tutorboard/`, in the module for it.** Where TeX is (`tex`),
   which `tailscale` is in charge (`net/tailscale`), what this machine is called (`machine`).
-  Do not hardcode an architecture directory or a socket path anywhere else; the board has to run
-  on a Mac and a cluster node without noticing the difference.
+  Do not hardcode an architecture directory or a socket path anywhere else; the board has to run on
+  a cluster node, a desktop and a laptop without noticing the difference.
 - **Nothing model-specific, ever.** The interface is a command line and a directory of files. No
   SDK, no plugin, no assumption about which assistant is driving. `board wait` is the wake-up
   primitive precisely because a blocking process exiting is something every agent understands.
@@ -656,9 +646,9 @@ tutorboard/
 - **The machine's name is pinned, and derived in exactly one place.** Every record that crosses
   `live/` carries it and every liveness check compares it, so if it moves a machine stops
   recognising its own boards: `tutor restart` skips them, the hub reports them elsewhere, and a
-  board that is answering becomes impossible to bounce onto new code. It moved here — a Mac with no
-  `HostName` set takes its name from the network, and Tailscale's DNS renamed this one mid-session
-  — and it was being derived four different ways in four files (`os.uname()` in the launcher,
+  board that is answering becomes impossible to bounce onto new code. It moved here — a machine with
+  no hostname of its own takes its name from the network, and Tailscale's DNS renamed this one
+  mid-session — and it was being derived four different ways in four files (`os.uname()` in the launcher,
   `socket.gethostname()` in the board and the server), which can disagree on one machine.
   `tutorboard.machine.node_name()` is the only place allowed to answer, it prefers a pinned file over
   anything the network says, and `board start` pins it the first time. Never reach for
@@ -669,7 +659,8 @@ tutorboard/
   hub moves it. Never tie an assistant's lifetime to a terminal session, and never make the student
   start one.
 - **What a machine SPENDS is the machine's own business, and it is decided outside that order.**
-  The Mac mini teaches for nothing; the compute node holds the allowance and teaches with Claude.
+  A machine can be told it may not run a billed tutor at all; a compute node holding the allowance
+  is the opposite and must not be.
   Three of the four layers above arrive from somewhere else -- a course repository is a clone, so a
   line in its `tutorboard.json` is a sentence about another machine that lands here in a `git
   pull`; a `hosts` table is copied; a `--agent` is typed wherever somebody is sitting. So
@@ -773,9 +764,15 @@ tutorboard/
   not one of your allocations. Anything appended to `~/.bashrc` must be guarded
   on an interactive shell -- a login file that writes to stdout breaks `scp`,
   `sftp` and git-over-ssh, and the failure surfaces on the other machine as
-  something incomprehensible. `test/resume.py` holds all of it. This is a
-  workaround for having no always-on host; it is not the always-on design and
-  must not grow into a substitute for it.
+  something incomprehensible. `test/resume.py` holds all of it.
+- **`salloc` gives you a shell on the LOGIN node, and the machine it gave you
+  has nobody on it.** So the login hook fires there too, and hands the whole
+  resume to the node over ssh -- the node pulls, re-execs, bounces its own stale
+  boards and brings the lesson up, because everything that decides anything must
+  happen on the machine that will serve it. `--no-hop` is how the far end proves
+  it is the far end, and where ssh cannot get in the work goes inside a Slurm
+  step that holds itself open, because a step's cgroup is emptied the moment the
+  step ends, detached or not.
 - **No session ends without a handoff.** Sessions end by being abandoned — a switched course, a
   closed lid, an expired allocation — so the departing assistant gets one last turn, with no student
   attached, to write `HANDOFF.md` at the course root. `SIGTERM` starts that wrap-up; nothing may

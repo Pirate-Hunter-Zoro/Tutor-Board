@@ -24,12 +24,12 @@ from .. import paths
 #     Fatal Python error: init_sys_streams: can't initialize sys standard streams
 #     OSError: [Errno 9] Bad file descriptor
 #
-# which is what the Mac's follower log recorded on 7 September when it asked
-# that machine to hand its tutor over: the answer it got back was an interpreter
-# crash where a wrap-up should have been. Every hub tap that starts a course,
-# opens a chapter or wakes a tutor goes through these two functions, so on that
-# machine none of them could do anything -- and each returned a plausible
-# non-zero and was reported as an ordinary failure.
+# which is what a board started by a supervisor recorded when it was asked to
+# hand its tutor over: the answer it got back was an interpreter crash where a
+# wrap-up should have been. Every hub tap that starts a course, opens a chapter
+# or wakes a tutor goes through these two functions, so on such a machine none
+# of them could do anything -- and each returned a plausible non-zero and was
+# reported as an ordinary failure.
 #
 # `bin/tutor` already learned this where it forks the daemon (`agent_start`
 # passes DEVNULL); it simply never reached here.
@@ -63,7 +63,7 @@ def fresh_tutor(root, course):
 
 
 def tutor_cli(args, timeout=30):
-    """Drive the launcher from inside the server, for the agent handover.
+    """Drive the launcher from inside the server, to move the tutor.
 
     The assistant belongs to the course, not to this process and not to the
     terminal anyone happens to have open, so switching course has to move it.

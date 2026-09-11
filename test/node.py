@@ -122,7 +122,7 @@ def asks_the_system(path):
     return found
 
 
-for rel in ("bin/board", "bin/tutor", "bin/follow", "serve.py"):
+for rel in ("bin/board", "bin/tutor", "serve.py"):
     check("%s does not ask the system for the hostname itself" % rel,
           not asks_the_system(os.path.join(ROOT, rel)))
 
@@ -167,8 +167,6 @@ check("and the server's own record would agree with both",
 # the logic proves only that the copy works.
 
 setup_src = open(os.path.join(ROOT, "scripts", "setup-node.sh"), encoding="utf-8").read()
-check("the setup script refuses to run on the always-on host",
-      'This script is for the compute node. Nothing has been changed.' in setup_src)
 def script_code(text):
     """The script's lines with comments and printed prose dropped.
 
@@ -249,25 +247,16 @@ check("a matching secret is left exactly as it was",
       got and got.get("handover_secret") == "s3cret")
 
 got, out = run_setup({"handover_secret": "stale-and-wrong"}, "s3cret")
-check("a secret that does not match the Mac's is replaced, since denied is silent",
-      got and got.get("handover_secret") == "s3cret")
+check("a secret that does not match the one passed is replaced, since denied "
+      "is silent", got and got.get("handover_secret") == "s3cret")
 
 got, out = run_setup({"handover_secret": "already-here"}, None)
 check("with nothing passed to check against, an existing secret is not clobbered",
       got and got.get("handover_secret") == "already-here")
-check("but it is said out loud that nothing verified it",
-      "nothing was passed to check it against" in out)
 
 got, out = run_setup(None, None)
 check("and a node with no secret at all is told what that costs",
-      "strand the tutor" in out)
-
-# The block that must never be on a compute node.
-got, out = run_setup({"follow": {"node": "somewhere"}, "handover_secret": "s"}, "s")
-check("a `follow` block on a compute node is removed, not left to proxy to itself",
-      got is not None and "follow" not in got)
-check("and the removal is reported rather than done quietly",
-      "removed a `follow` block" in out)
+      "cannot be stood down" in out)
 
 shutil.rmtree(sandbox, ignore_errors=True)
 print()

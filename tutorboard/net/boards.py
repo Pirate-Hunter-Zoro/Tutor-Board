@@ -15,17 +15,16 @@ from . import socks, tailscale
 def board_health(host, port, timeout=2.0):
     """What is answering on this host:port, or None. `/health` is the honest test.
 
-    Here rather than in the follower because both machines need it now: the
-    follower asks "where is this course", and a board asks "is anybody else
-    already serving it" before it starts a second one.
+    A board asks it about itself -- is anybody already serving this course --
+    before it starts a second one for the same course somewhere else.
 
-    Two ways of asking, because the two machines are not alike. An ordinary
+    Two ways of asking, because two machines are not always alike. An ordinary
     socket, first, which is what a machine with a real tailscale interface uses;
     then the SOCKS proxy, which is the only way OUT of a machine running
-    tailscaled in userspace mode. Without the second one the compute node cannot
-    see the Mac at all, and every question it asks about the other machine gets
-    the answer "nobody is there" -- which is how a second board and a second
-    tutor for one course get started.
+    tailscaled in userspace mode. Without the second one a node cannot see the
+    other machine at all, and every question it asks about it gets the answer
+    "nobody is there" -- which is how a second board and a second tutor for one
+    course get started.
     """
     import urllib.request
     try:

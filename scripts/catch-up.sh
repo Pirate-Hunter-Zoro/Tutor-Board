@@ -9,18 +9,16 @@
 #      bash scripts/catch-up.sh --report     change nothing; just say where
 #                                            everything is
 #
-#  Written for the Mac mini, which is the machine that cannot be reached from
-#  the compute node's session -- so every fix shipped from over there sits on
-#  disk here until something restarts the processes holding the old code. That
-#  is three kinds of process and two kinds of repository, and remembering the
-#  list is not somebody's job:
+#  A fix shipped from somewhere else sits on disk here until something restarts
+#  the processes holding the old code. That is two kinds of process and two kinds
+#  of repository, and remembering the list is not somebody's job:
 #
 #    1. the tool, which every process reads once at startup;
 #    2. the course repositories, which hold the lessons;
-#    3. the boards, the tutors and the follower, which are long-lived.
+#    3. the boards and the tutors, which are long-lived.
 #
-#  It is machine-agnostic on purpose. Run it on either host; it works out what
-#  this one is.
+#  It is machine-agnostic on purpose. Run it anywhere; it works out what this
+#  machine is.
 #
 #  Nothing here destroys work that is not already pushed, and as of 2026-09-03
 #  that is true rather than merely intended:
@@ -219,11 +217,11 @@ fi
 
 # ------------------------------------------------------------- the processes
 if [ "$REPORT" -eq 0 ] && [ "$COURSES_ONLY" -eq 0 ]; then
-  say "the boards, the tutors and the follower"
+  say "the boards and the tutors"
   # `tutor restart --tutors` owns what is safe to touch: boards answering on this
-  # machine, the follower, and daemons that are not mid-turn. A board that comes
-  # back on the current code publishes itself on the tailnet, which is what makes
-  # the other machine able to see it at all.
+  # machine, and daemons that are not mid-turn. A board that comes back on the
+  # current code publishes itself on the tailnet, which is what makes another
+  # machine able to see it at all.
   "$TUTOR" restart --tutors 2>&1 | sed 's/^/   /'
 fi
 
@@ -270,9 +268,8 @@ for name in sorted(os.listdir(courses)):
     port = info.get("port")
     print("   %-24s http://%s:%s/" % (name, me, port))
 print()
-print("   the installed app's address is served by the follower, which points at")
-print("   whichever course was last chosen. The URLs above reach one board each,")
-print("   directly, whatever the follower is doing.")
+print("   the installed app's address serves the course that was last chosen on")
+print("   this machine. The URLs above reach one board each, directly.")
 PY
 
 say "what the hub will offer"
@@ -313,10 +310,9 @@ PY
 
 printf '\n'
 say "if the app still opens the wrong course"
-line "That is the follower's decision, and it writes down which board it chose"
-line "and why, every tick:"
+line "The address opens whichever board holds the tailnet name. A tap in the hub"
+line "takes it, and so does \`board vpn serve\` in a course:"
 line ""
-line "    tail -20 ~/Library/Logs/tutor-follow.log"
+line "    cd <course> && board vpn serve"
 line ""
-line "One line from that says more than anything else can, because the follower is"
-line "the only thing that can move the installed app's address."
+line "\`board net\` says where the name points now."

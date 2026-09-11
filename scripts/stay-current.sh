@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ===========================================================================
-#  stay-current.sh -- run this once on the always-on host and never go back.
+#  stay-current.sh -- run this once on a machine that stays on, and never go
+#  back to it.
 #
 #      bash scripts/stay-current.sh              install it, then do a round now
 #      bash scripts/stay-current.sh --status     is it installed, when did it run
@@ -8,12 +9,10 @@
 #      bash scripts/stay-current.sh --behind [d]  is this repository waiting on origin
 #      bash scripts/stay-current.sh --uninstall
 #
-#  The problem it exists for. Fixes to this tool are written on the compute
-#  node, which cannot reach the Mac -- and the Mac is the machine that holds the
-#  address and runs the follower, so until something over there restarts the
-#  processes holding the old code, half of every fix is on disk and none of it is
-#  in the lesson. `scripts/catch-up.sh` is the command that puts a machine right,
-#  and somebody has to be sitting at it to type that.
+#  The problem it exists for. A machine that nobody logs in to never restarts
+#  the processes holding the old code, so half of every fix is on its disk and
+#  none of it is in the lesson. `scripts/catch-up.sh` is the command that puts a
+#  machine right, and somebody has to be sitting at it to type that.
 #
 #  So: a timer that runs the catch-up, and that KEEPS ITSELF INSTALLED.
 #
@@ -23,7 +22,8 @@
 #  going back to the machine, which is the thing being abolished. Every round
 #  therefore re-asserts its own launchd definition from the repository it just
 #  pulled, and reloads it only if it actually differs. A future commit that
-#  changes how this is supervised lands by itself.
+#  changes how this is supervised lands by itself -- including one that says this
+#  machine should not be running a board at all; see `scripts/retire-host.sh`.
 #
 #  What it deliberately does NOT do is run the catch-up on a schedule. That
 #  restarts every board on the machine, and doing that every ten minutes to a
@@ -40,9 +40,6 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # a round can end in `catch-up.sh`, and `catch-up.sh` moves working trees.
 COURSES="${TUTORBOARD_COURSES:-$(dirname "$HERE")}"
 LABEL="com.tutorboard.current"
-LABEL_PULL="com.tutorboard.pull"        # superseded by this; see install()
-LABEL_FOLLOW="com.tutorboard.follow"
-LABEL_RESUME="com.tutorboard.resume"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG="$HOME/Library/Logs/tutor-current.log"
 BEAT="$HOME/.tutor-current.json"
@@ -119,8 +116,8 @@ loaded() {
 }
 
 # Write a file only if its content would change, and say whether it did. Every
-# reload of the follower costs the address a moment, so nothing is reloaded for
-# a file that is already correct.
+# reload costs whatever the job was doing, so nothing is reloaded for a file
+# that is already correct.
 write_if_changed() {   # write_if_changed <path> <content-on-stdin>
   local path="$1" tmp
   tmp="$(mktemp)"
@@ -163,34 +160,6 @@ install_timer() {
     line "no supervisor known for $(uname -s); run --run from whatever you use"
     return 1 ;;
   esac
-}
-
-# The always-on host's other jobs: the follower proxy and the warm-board resume.
-# Asserted rather than reinstalled -- `install-autostart.sh --always-on` unloads
-# the follower, and the follower is what holds the address, so it is not
-# something to do every ten minutes for no reason.
-ensure_always_on() {
-  [ -n "${TUTOR_CURRENT_NO_SUPERVISOR:-}" ] && return 0
-  [ "$(uname -s)" = "Darwin" ] || return 0
-  if loaded "$LABEL_FOLLOW" && loaded "$LABEL_RESUME"; then
-    return 0
-  fi
-  line "the follower or the warm board is not registered; installing them"
-  bash "$HERE/scripts/install-autostart.sh" --always-on 2>&1 | sed 's/^/   /'
-}
-
-# The old pull timer did half of this -- the tool, and none of the courses -- and
-# two timers pulling the same repository race each other into confusing logs for
-# no gain. This supersedes it.
-retire_pull_timer() {
-  [ -n "${TUTOR_CURRENT_NO_SUPERVISOR:-}" ] && return 0
-  [ "$(uname -s)" = "Darwin" ] || return 0
-  local p="$HOME/Library/LaunchAgents/$LABEL_PULL.plist"
-  if [ -f "$p" ] || loaded "$LABEL_PULL"; then
-    launchctl unload "$p" 2>/dev/null
-    rm -f "$p"
-    line "retired $LABEL_PULL — this does what it did, and the courses too"
-  fi
 }
 
 # ---------------------------------------------------------------------- a round
@@ -299,13 +268,26 @@ round() {
     exec bash "$HERE/scripts/stay-current.sh" --run --after-pull
   fi
 
-  # 2. The supervision, re-asserted from the repository as it now is. Silent and
+  # 2. Is this machine still meant to be a board host at all? The question is
+  #    asked out of the repository that just landed, which is the only channel
+  #    that reaches a machine nobody logs in to. It answers no on every machine
+  #    but the one it is written for, and says nothing while doing so.
+  #
+  #    Exit 9 means it retired this machine, and then there is nothing below
+  #    this line worth doing: the timer would be re-asserted for a script that
+  #    has just been deleted, and the course walk would be over a directory that
+  #    is gone. `PIPESTATUS`, because the pipe's own status is sed's.
+  bash "$HERE/scripts/retire-host.sh" 2>&1 | sed 's/^/   /'
+  if [ "${PIPESTATUS[0]}" = "9" ]; then
+    beat "retired this machine"
+    return 0
+  fi
+
+  # 3. The supervision, re-asserted from the repository as it now is. Silent and
   #    free when nothing about it changed, which is almost always.
   install_timer >/dev/null 2>&1
-  ensure_always_on >/dev/null 2>&1
-  retire_pull_timer >/dev/null 2>&1
 
-  # 3. The courses. A board only shows what is checked out beside it.
+  # 4. The courses. A board only shows what is checked out beside it.
   for dir in "$COURSES"/*/; do
     local root="${dir%/}"
     [ -d "$root/.git" ] || continue
@@ -325,7 +307,7 @@ round() {
     return 0
   fi
 
-  # 4. Something arrived. `catch-up.sh` is the one implementation of putting a
+  # 5. Something arrived. `catch-up.sh` is the one implementation of putting a
   #    machine right, and it stays the one implementation -- this decides WHEN,
   #    never HOW.
   echo "$(stamp) catching up:${why:- the tool}"
@@ -362,10 +344,6 @@ case "${1:-}" in
       else
         line "$LABEL is NOT loaded — run: bash $0"
       fi
-      for l in "$LABEL_FOLLOW" "$LABEL_RESUME"; do
-        loaded "$l" && line "$l is loaded" || line "$l is NOT loaded"
-      done
-      loaded "$LABEL_PULL" && line "$LABEL_PULL is still loaded (it should have been retired)"
       ;;
     Linux)
       systemctl --user is-active tutor-current.timer >/dev/null 2>&1 \
@@ -396,8 +374,6 @@ case "${1:-}" in
       systemctl --user daemon-reload 2>/dev/null
       line "removed tutor-current.timer" ;;
   esac
-  line "the follower and the warm board were left alone; "
-  line "bash scripts/install-autostart.sh --uninstall removes those too"
   exit 0
   ;;
 
@@ -409,8 +385,6 @@ esac
 
 # ------------------------------------------------------------------ installing
 say "putting this machine on a timer"
-ensure_always_on
-retire_pull_timer
 install_timer || exit 1
 line "log:    $LOG"
 line "check:  bash $0 --status"

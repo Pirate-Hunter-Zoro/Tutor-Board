@@ -518,8 +518,7 @@ into the course's own file, in the same turn:
 **You are allowed to compile, and it is your job, not the student's.** The
 course's permissions file grants `board`, its `scripts/build.sh`, and the LaTeX
 binaries themselves; `board hw build` finds the compiler wherever it is
-installed on this machine, which is not the same place on the Mac as on a
-compute node. So a finished sheet is compiled *before* you say it is finished.
+installed on this machine, which is not the same place on every machine. So a finished sheet is compiled *before* you say it is finished.
 Do not report a set as done and leave the PDF to somebody holding an iPad, and
 do not conclude from one refused command that compiling is beyond you — try
 `board hw build`, and if it genuinely fails, put the reason it printed on the

@@ -75,14 +75,12 @@ def main(argv):
     #
     # A board listens on loopback, deliberately: there is no authentication here
     # and the university LAN is not somewhere to put an unauthenticated page. The
-    # consequence went unnoticed for a week -- the OTHER machine could never see
-    # this one's boards. The always-on host's follower probes a course's ports on
-    # the compute node to decide where the address should point, every one of
-    # those probes was refused by a socket bound to 127.0.0.1, and so the address
-    # could only ever land on a board the Mac itself was running. From the iPad:
-    # "Galois Theory is the only option, and when I tap Probability I can't
-    # switch" -- and, when the Mac's own boards changed, the same sentence with
-    # the courses the other way round.
+    # consequence went unnoticed for a week -- another machine could never see
+    # this one's boards. Asking where a course is served means probing its ports
+    # on the machine that might be serving it, every one of those probes was
+    # refused by a socket bound to 127.0.0.1, and so a course could only ever be
+    # found on the machine doing the asking. From the iPad: "Galois Theory is the
+    # only option, and when I tap Probability I can't switch".
     #
     # The tailscale address is not the LAN: it is reachable only by machines on
     # this tailnet, which is the same trust boundary the iPad already crosses to

@@ -47,15 +47,14 @@ HOSTS_FRESH = 25.0
 # Machines this board has seen before, remembered on disk: the name, the port a
 # board answered on, and what that machine could teach.
 #
-# Discovery is a walk over ports DERIVED FROM COURSE NAMES, and the two machines
-# are not the same list -- five course repositories on the Mac, twelve on the
-# compute node. So a walk that knocks on the ports of the courses cloned HERE can
-# only find a peer that happens to be running a course this machine also has,
-# and on 9 September it was not: the node's one board was PSYCH-ASR, on 9171,
-# which the Mac has no clone of and therefore never knocked on. The node
-# disappeared out of the hub, the row of machines hid itself because one machine
-# is not a choice, and the report was "I don't see any options to go to the
-# compute node".
+# Discovery is a walk over ports DERIVED FROM COURSE NAMES, and two machines are
+# not the same list -- five course repositories on one, twelve on another. So a
+# walk that knocks on the ports of the courses cloned HERE can only find a peer
+# that happens to be running a course this machine also has, and once it was not:
+# the other machine's one board was PSYCH-ASR, on 9171, which this one had no
+# clone of and therefore never knocked on. That machine disappeared out of the
+# hub, the row of machines hid itself because one machine is not a choice, and
+# the report was "I don't see any options to go to the compute node".
 #
 # A machine's own course list is the answer to that, and it is already fetched
 # every time one is found. Written down, it tells the next walk which ports are
@@ -67,7 +66,7 @@ KNOWN = os.path.join(paths.STATE_DIR, "hosts.json")
 # that a machine genuinely gone stops being offered.
 KNOWN_KEEP = 14 * 86400
 # The ceiling on knocking, per machine. Same reasoning as PEER_WALK_LIMIT: a
-# socket timeout each, and the follower does this walk on every tick.
+# socket timeout each, and every question about where a course is does this walk.
 PORT_KNOCKS = 8
 # One writer at a time. The walk runs on a background thread and `/hello`
 # arrives on a request thread, and both read-modify-write this file.
@@ -469,12 +468,12 @@ def read_board_record(root):
 def chosen_target():
     """The course a person last asked for, and the port it is actually serving on.
 
-    The always-on host cannot read this machine's filesystem, so it cannot know
-    either of these things -- it can only knock on ports and take whichever
-    answers first, which is alphabetical order pretending to be a decision. So
-    every board publishes the answer: the choice comes from `chosen.json`, and
-    the port comes from that course's own board record, which is the only place
-    the truth lives once a port collision has moved a board off its usual number.
+    Another machine cannot read this one's filesystem, so it cannot know either
+    of these things -- it can only knock on ports and take whichever answers
+    first, which is alphabetical order pretending to be a decision. So every
+    board publishes the answer: the choice comes from `chosen.json`, and the port
+    comes from that course's own board record, which is the only place the truth
+    lives once a port collision has moved a board off its usual number.
     """
     rec = choice.chosen_course()
     name = rec.get("dir")
@@ -487,20 +486,15 @@ def chosen_target():
             port = (json.load(fh) or {}).get("port")
     except (OSError, ValueError):
         port = None
-    # `at` so the always-on host can tell this record from its OWN. The choice is
+    # `at` so another machine can tell this record from its OWN. The choice is
     # written on whichever machine was serving the hub when the course was
-    # tapped, so there are two records of it and only the times can say which is
-    # the person's latest word -- without that, a course tapped over here was
-    # invisible to a follower reading only its own file, and the tap did every
+    # tapped, so there can be two records of it and only the times can say which
+    # is the person's latest word -- without that, a course tapped on one machine
+    # was invisible to another reading only its own file, and the tap did every
     # correct thing while the address stayed put.
-    # And the HOST, which was the half that never left this machine. The hub can
-    # ask for a course ON a named machine, `wanted_host` in bin/follow is the
-    # rule that honours it -- and it reads the host off whichever record is
-    # newest, including the ones it gets by asking a board. This did not publish
-    # one, so a choice made anywhere but the follower's own machine arrived with
-    # the host silently blank and rule 0 could never fire: the person picked the
-    # node, the record said the node, and the address went to whichever machine
-    # `prefer` liked.
+    # And the HOST, because the hub can ask for a course ON a named machine. A
+    # record that did not publish one arrived with the host silently blank, and
+    # the machine the person actually picked could not be honoured.
     return {"dir": name, "port": port or ports.default_port(name),
             "at": rec.get("at") or 0, "host": rec.get("host") or ""}
 
@@ -514,23 +508,22 @@ RELAY_STALE = 600
 def announce_choice(repo, name, host, at):
     """Tell every machine that can hear it which course was just tapped.
 
-    The record a tap writes is the only thing both machines can read, and until
-    now each one wrote only its own copy: the other side found out by being asked
-    on the follower's next tick, up to thirty seconds later. From the iPad that
-    is a tap that does nothing, so you tap it again, and again -- reported in
-    exactly those terms, ten times for one switch.
+    The record a tap writes is the only thing two machines can both read, and
+    each one used to write only its own copy: the other side found out by being
+    asked, up to half a minute later. From the iPad that is a tap that does
+    nothing, so you tap it again, and again -- reported in exactly those terms,
+    ten times for one switch.
 
     Polling harder is the wrong fix. A tap is an event and it can simply be sent:
     one POST per machine, so every `chosen.json` on the tailnet changes within a
-    moment of the finger coming off the glass, and every follower's own
-    cheap file-watch fires. The relayed record keeps the ORIGINAL timestamp, so
-    one tap is one identical record everywhere and there is nothing for two
-    clocks to disagree about.
+    moment of the finger coming off the glass. The relayed record keeps the
+    ORIGINAL timestamp, so one tap is one identical record everywhere and there
+    is nothing for two clocks to disagree about.
 
     Best effort by construction. A machine that is asleep, older, or unreachable
-    simply does not get told, and the follower's tick still finds the choice the
-    slow way -- this makes the common case instant, it does not become something
-    the switch depends on.
+    simply does not get told, and the choice is still found the slow way -- this
+    makes the common case instant, it does not become something the switch
+    depends on.
     """
     names = [c["repo"] for c in sibling_courses(repo)]
     # The chosen course first: it is the one most likely to have a board up, and

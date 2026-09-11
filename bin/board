@@ -194,7 +194,7 @@ def free_port(root):
     Two courses used to be able to hash to the same number, and the second one to
     start just failed to come up -- "board failed to come up; see board.log", with
     the real reason four lines into a log nobody opens. The sequence is a pure
-    function of the name, so the always-on host can walk the same one looking for
+    function of the name, so another machine can walk the same one looking for
     this course without having to be told anything.
     """
     seq = ports.port_sequence(os.path.basename(root))
@@ -794,8 +794,8 @@ def hw_build(live, st):
     script = os.path.join(live.root, "scripts", "build.sh")
     # The same environment the built-in compile gets. A course's own build.sh
     # knows where TeX lives on the machine it was written on and nowhere else --
-    # Probability's prepends TinyTeX's Linux directory, which on the Mac does
-    # not exist, so a board started by a login agent (a PATH of /usr/bin:/bin
+    # Probability's prepends TinyTeX's own directory, which does not exist
+    # everywhere, so a board started by a supervisor (a PATH of /usr/bin:/bin
     # and nothing more) ran a script that could not find pdflatex and reported
     # the failure as the document's. `tex_bin_dirs` already knows every place a
     # TeX lives on either machine; there is no reason only half of this file
@@ -1676,16 +1676,13 @@ def port_answers(port):
 
 
 def serve_target(port):
-    """Where the tailnet HTTPS name should point.
+    """Where the tailnet HTTPS name should point: at the board on this machine.
 
-    On an always-on host the name points at the follower proxy, which forwards to
-    whichever machine is actually serving; pointing it at a board directly would
-    bypass the fallback the whole design exists to provide. Anywhere else the name
-    points at the board's own port.
+    `tailscale serve` only ever proxies to a LOCAL backend -- given a remote
+    tailnet address in its config it answers every request with a 502 -- so the
+    one name the iPad is installed against belongs to the machine holding it,
+    and the only question is which of that machine's boards it opens.
     """
-    if machine.machine_shape() == "always-on host":
-        follow = machine.follow_config()
-        return "http://" + (follow.get("listen") or "127.0.0.1:8844")
     return "http://127.0.0.1:%d" % port
 
 
@@ -2031,8 +2028,8 @@ def cmd_limit(live, args):
     The record is per machine rather than per course, because an allowance
     belongs to an account and every board here is equally unable to spend one.
     It is written by a tutor whose turn failed saying so, it expires by itself,
-    and it is published in `/health` -- which is how the always-on host knows to
-    hand the address to a compute node that still has one.
+    and it is published in `/health`, because only the machine that hit the
+    limit can know about it.
 
     `--clear` exists because a provider's reset time is a promise: an allowance
     that came back early should not have to wait out a guess. A turn going

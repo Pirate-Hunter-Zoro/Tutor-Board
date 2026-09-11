@@ -1,28 +1,21 @@
 #!/usr/bin/env bash
 # ===========================================================================
 #  tool-pull.sh -- keep this repository, and the processes running out of it,
-#  current on a machine that is always on.
+#  current on a machine that is always on. `scripts/stay-current.sh` does this
+#  and the courses too; this stays for a machine that still has the older timer
+#  loaded, which is the only channel that reaches it.
 #
-#  The pull on its own was not enough, twice over.
-#
-#  `bin/follow` is a long-lived process that read its code once, when launchd
-#  started it, so pulling a fix to the proxy put the new file on disk beside an
-#  old process and changed nothing at all. That was the first version of this
-#  script's discovery, and it is the same one a board makes about `serve.py`.
-#
-#  The second is that a board makes it too, and this script used to leave boards
-#  alone on purpose -- the argument being that bouncing somebody's lesson because
-#  a commit landed elsewhere was a person's decision. In practice nobody ever
-#  made that decision, so a fix shipped from the compute node reached the Mac's
-#  disk and never reached the lesson: the pages are served from disk and look new
-#  while the endpoints behind them are the old ones. `scripts/ship.sh` bounces
-#  boards and tutors on the machine a change is written on, and the machine that
-#  receives the change has to do the same or the change is not shipped, it is
-#  merely stored.
+#  The pull on its own was not enough. A board reads `serve.py` once, when it
+#  starts, so pulling a fix puts a new file on disk beside an old process and
+#  changes nothing at all: the pages are served from disk and look new while the
+#  endpoints behind them are the old ones. `scripts/ship.sh` bounces boards and
+#  tutors on the machine a change is written on, and the machine that receives
+#  the change has to do the same or the change is not shipped, it is merely
+#  stored.
 #
 #  So: pull, and if the pull actually moved HEAD, put this machine on the code
 #  that arrived. `tutor restart --tutors` owns what is safe to touch -- only
-#  boards answering on this node, the proxy, and never a tutor mid-turn.
+#  boards answering on this node, and never a tutor mid-turn.
 #
 #      bash scripts/tool-pull.sh
 # ===========================================================================
@@ -39,6 +32,11 @@ if ! out="$(git pull --ff-only 2>&1)"; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') pull did not run: $(printf '%s' "$out" | tail -1)"
   exit 0
 fi
+
+# Whether this machine should be a board host at all is asked out of the
+# repository that just landed, before anything is restarted onto it. It answers
+# no, silently, on every machine but the one it is written for.
+bash "$HERE/scripts/retire-host.sh" 2>&1 | sed 's/^/  /'
 
 after="$(git rev-parse HEAD 2>/dev/null)"
 if [ "$before" = "$after" ]; then

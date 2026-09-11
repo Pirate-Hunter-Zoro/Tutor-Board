@@ -118,7 +118,7 @@ def strip_reasoning(text, leading_only=False):
 # "I need to read the student's response... Hmm, wait. Let me re-read the
 # question... Actually, I think", cut off mid-sentence at the token ceiling,
 # written to the board as the lesson. No tags, no channels, no brackets: just a
-# model deliberating in plain prose in `content`, on the free chain the Mac falls
+# model deliberating in plain prose in `content`, on the free chain a board falls
 # back to when its allowance runs out. Every tag-shaped gate in this file looked
 # straight through it.
 #

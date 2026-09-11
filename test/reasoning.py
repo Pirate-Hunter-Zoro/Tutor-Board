@@ -12,8 +12,7 @@ On this board that is the worst leak there is, because the card IS the lesson,
 and there is no undo: it is written to disk, pushed to every device the student
 has open, and committed to the transcript.
 
-It happened once, on the always-on host, to somebody in the middle of a Galois
-proof. Two things had to be wrong at the same time and both are guarded here:
+It happened once, to somebody in the middle of a Galois proof. Two things had to be wrong at the same time and both are guarded here:
 
   - the reply came off the wire with the thinking still in it, and nothing
     looked;

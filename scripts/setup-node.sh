@@ -1,24 +1,21 @@
 #!/usr/bin/env bash
 # ===========================================================================
-#  setup-node.sh -- put a compute node on the same page as the always-on host.
+#  setup-node.sh -- put a compute node right, in one command.
 #
-#      bash scripts/setup-node.sh --secret <handover_secret> [--tailnet-name NAME]
+#      bash scripts/setup-node.sh [--secret <handover_secret>] [--tailnet-name NAME]
 #
-#  Everything a compute node needs in order to share one iPad address with the
-#  Mac mini, in the order it needs it. Run it in a session on the node; run it
-#  again whenever you are not sure, because every step is idempotent and says
-#  what it found rather than what it assumed.
+#  Everything a compute node needs in order to serve the iPad, in the order it
+#  needs it. Run it in a session on the node; run it again whenever you are not
+#  sure, because every step is idempotent and says what it found rather than
+#  what it assumed.
 #
 #  Why a script and not a checklist: every item here has been forgotten at least
-#  once, and each one fails silently. A missing handover secret answers `denied`
-#  and strands a tutor. A stale tailnet registration claws the address back off
-#  the Mac and the iPad quietly starts opening the wrong machine. A default agent
-#  naming a program this node has not got leaves a daemon that reads as
-#  *listening* and fails every turn into a log nobody opens.
+#  once, and each one fails silently. A stale tailnet registration means the
+#  iPad quietly opens the wrong machine. A default agent naming a program this
+#  node has not got leaves a daemon that reads as *listening* and fails every
+#  turn into a log nobody opens.
 #
 #  What it deliberately does NOT do:
-#    - add a `follow` block. That block is what marks a machine as the always-on
-#      host; a compute node with one would start proxying to itself.
 #    - pin the machine's name. On a cluster the name changes between allocations
 #      because it is a different machine, and every ownership check depends on
 #      that being true.
@@ -54,23 +51,16 @@ say "  $HERE"
 say
 
 # --- 0. is this the right kind of machine ----------------------------------
-# The `follow` block is what makes a machine the always-on host. Running this
-# there would be setting up the Mac to follow itself.
 shape="$(python3 -c 'import sys; sys.path.insert(0, "'"$HERE"'"); from tutorboard import machine; print(machine.machine_shape())' 2>/dev/null)"
 case "$shape" in
-  "always-on host")
-    say "This machine has a \`follow\` block, which makes it the always-on host."
-    say "This script is for the compute node. Nothing has been changed."
-    exit 1 ;;
   "compute node") good "shape: compute node (Slurm answers here)" ;;
   *)              warn "shape: $shape — no Slurm here; this may not be the node you meant" ;;
 esac
 
 # --- 1. catch up -----------------------------------------------------------
-# Nothing pulls this repository on a timer here: `--tool-pull` refuses to install
-# on a compute node, because nothing on one survives the allocation. So the pull
-# is a step, and it has to come first -- everything below is code that arrived in
-# it.
+# Nothing pulls this repository on a timer here, because nothing on a compute
+# node survives the allocation. So the pull is a step, and it has to come first
+# -- everything below is code that arrived in it.
 before="$(git rev-parse HEAD 2>/dev/null)"
 if out="$(git pull --ff-only 2>&1)"; then
   after="$(git rev-parse HEAD 2>/dev/null)"
@@ -81,7 +71,7 @@ if out="$(git pull --ff-only 2>&1)"; then
   fi
 else
   warn "pull did not run: $(printf '%s' "$out" | tail -1)"
-  say  "        starting from what is on disk; a handoff from the Mac may be missing"
+  say  "        starting from what is on disk; a handoff pushed elsewhere may be missing"
 fi
 
 # --- 2. the machine's name -------------------------------------------------
@@ -103,10 +93,10 @@ PY
 [ $? -eq 3 ] && problems=$((problems + 1))
 
 # --- 3. the handover secret ------------------------------------------------
-# The proxy now moves the address off this node by policy, not only when the node
-# dies. Without a matching secret /handover answers denied, the address moves
-# anyway (best effort, by design) and the tutor here is left teaching into a copy
-# nobody can reach.
+# What `tutor agent stop <course> --on <host>` presents when it asks another
+# machine to stand a tutor down. Two machines must carry the same value, which
+# on a shared home they do by construction; without one the endpoint answers
+# denied and a tutor on the machine you are not sitting at cannot be stopped.
 export TB_CFG="$CFG" TB_SECRET="$SECRET" TB_TSNAME="$TSNAME"
 python3 - <<'PY'
 import json, os, sys
@@ -130,12 +120,11 @@ if want:
         changed = True
         print("  ok    handover_secret written" + ("" if not have else " (replacing a different one)"))
 elif have:
-    print("  ----  handover_secret is set, but nothing was passed to check it against")
-    print("        it must be byte-identical to the Mac mini's, or /handover answers denied")
+    print("  ok    handover_secret is set")
 else:
-    print("  ----  no handover_secret: /handover will answer denied, and the proxy")
-    print("        moving the address will strand the tutor here without a handoff")
-    print("        pass it:  bash scripts/setup-node.sh --secret <value from the Mac>")
+    print("  ----  no handover_secret: /handover answers denied, so a tutor on")
+    print("        another machine cannot be stood down from here")
+    print("        set one:  bash scripts/setup-node.sh --secret <any long value>")
 
 # --- 4. which tutor this machine can actually run ---------------------------
 # `claude` is the default now. A node that has not got it must say so here, or
@@ -158,22 +147,12 @@ else:
         print("        install Claude Code and rerun this to teach with it")
 
 # --- 5. this node is the machine that is ALLOWED to spend --------------------
-# `free_only` is the Mac mini's setting: it is awake all day and answers every
-# time the iPad is picked up, which is the machine you do not want metered. This
-# one is the opposite -- it holds the allowance, and the proxy hands it the
-# lesson precisely when there is one to spend. A `free_only` here would mean
-# nothing on the tailnet ever uses the allowance at all, and the symptom would be
-# a board that answers perfectly well and teaches slightly worse for ever.
+# `free_only` says this machine may not run a billed tutor. On the node that
+# holds the allowance that is exactly backwards, and the symptom is a board that
+# answers perfectly well and teaches slightly worse for ever.
 if cfg.pop("free_only", None):
     changed = True
     print("  ok    free_only: removed — this node has an allowance and should use it")
-    print("        (that key belongs on the Mac mini; see scripts/setup-mac.sh)")
-
-# --- 6. the block that must not be here -------------------------------------
-if cfg.pop("follow", None) is not None:
-    changed = True
-    print("  ----  removed a `follow` block: that is what marks the always-on host,")
-    print("        and a compute node with one would proxy to itself")
 
 if changed:
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -190,15 +169,11 @@ PY
 # against, and a script that moves it silently is the exact failure this
 # repository has spent the most time on.
 ts_now="$(python3 -c 'import sys; sys.path.insert(0, "'"$HERE"'"); from tutorboard.net import tailscale; print(tailscale.tailnet_hostname())' 2>/dev/null)"
-if [ "$ts_now" = "board" ]; then
-  warn "tailnet name is 'board' — that belongs to the Mac mini permanently."
-  say  "        this node must keep its own, or it claws the iPad's address back:"
-  say  "          board vpn up --hostname ${TSNAME:-<node-name>}"
-elif [ -n "$TSNAME" ] && [ "$ts_now" != "$TSNAME" ]; then
+if [ -n "$TSNAME" ] && [ "$ts_now" != "$TSNAME" ]; then
   warn "tailnet name is '$ts_now', you said '$TSNAME'"
   say  "          board vpn up --hostname $TSNAME"
 else
-  good "tailnet name: $ts_now (its own, not 'board')"
+  good "tailnet name: $ts_now — this is the address the iPad app is installed against"
 fi
 
 # --- 7. put the running processes on the new code ---------------------------
@@ -215,8 +190,8 @@ say
 python3 "$HERE/bin/tutor" --agents
 say
 if [ "$problems" -eq 0 ]; then
-  say "This node is on the same page. The Mac mini serves any course it also holds;"
-  say "this one serves the rest, and is asked to hand over when the address moves."
+  say "This node is right. Its tailnet name serves whichever course was last chosen,"
+  say "and a tap in the hub moves that name to the course it opens."
 else
   say "$problems thing(s) above still need a person. Everything else is done."
 fi

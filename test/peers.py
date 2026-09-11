@@ -1,30 +1,28 @@
 #!/usr/bin/env python3
 """Which machines are worth knocking on, and why the answer must be short.
 
-The follower cannot see the other machine's filesystem, so it finds a lesson by
+A machine cannot see another machine's filesystem, so it finds a lesson by
 knocking: a course's ports are a pure function of its name, so it walks the
 tailnet and asks each machine whether it is serving the course that was chosen.
-That walk is the only way a board on the compute node is ever found, and it is
-also the most expensive thing the follower does -- four ports per machine, a
-socket timeout each, and again through the SOCKS proxy.
+That walk is the only way a board on another machine is ever found, and it is
+also the most expensive thing here -- four ports per machine, a socket timeout
+each, and again through the SOCKS proxy.
 
 So the list it walks is a correctness question, not a tidiness one, and it has
 been wrong twice in the same direction.
 
-  - Three iPads on this tailnet turned one tick into a minute of waiting. A
+  - Three iPads on this tailnet turned one walk into a minute of waiting. A
     phone does not run boards; the fix was to skip them by `OS`.
   - Then a Mullvad exit-node subscription put its entire fleet in the netmap as
     online peers -- 544 of them -- carrying no `OS` at all, so the phone filter
     waved every one through. Measured here: 6.1s to knock on one exit node, so
-    55 minutes for a single walk, while the follower is bounced every fifteen.
-    Not one tick ever finished. The address kept whatever course was seeded at
-    startup, a tap in the hub could not move it, and every board was healthy the
-    whole time -- because they were. Only the deciding was dead.
+    55 minutes for a single walk. Not one of them ever finished, a tap in the hub
+    could not move anything, and every board was healthy the whole time --
+    because they were. Only the deciding was dead.
 
 The second one is why this file exists, and why there is a ceiling as well as a
 filter: the filters are a list of surprises that have already happened, and the
-next one should cost a slow tick rather than a follower that never decides
-again.
+next one should cost a slow walk rather than a question nothing ever answers.
 """
 
 import os
@@ -106,7 +104,7 @@ check("a machine of one's own that offers to be an exit node is not infrastructu
 
 many = tailscale.tailnet_peers(status(*[
     peer("machine-%03d.ts.net" % i, os_="linux") for i in range(200)]))
-check("a netmap that grows without warning cannot freeze the follower again",
+check("a netmap that grows without warning cannot freeze the walk again",
       len(many) == tailscale.PEER_WALK_LIMIT)
 check("and the ceiling is a handful of machines, not a fleet",
       2 <= tailscale.PEER_WALK_LIMIT <= 24)
@@ -117,9 +115,9 @@ check("and the ceiling is a handful of machines, not a fleet",
 # name out of a config file and outlives the machine being awake. Knocking on it
 # is the most expensive way to learn nothing -- four ports, a socket timeout
 # each, then the SOCKS proxy, measured at 6.1s against this tailnet's sleeping
-# compute node -- and the follower does that walk three times a tick. A tap paid
-# for all of it: 18 seconds to move the address to a course on THIS machine,
-# because the answer had to come back from a node that was not there.
+# compute node -- and finding a course walks that three times over. A tap paid
+# for all of it: 18 seconds to open a course on THIS machine, because the answer
+# had to come back from a node that was not there.
 
 up = status(peer("compute-node.ts.net", os_="linux"))
 down = status(peer("compute-node.ts.net", online=False, os_="linux"))
@@ -146,10 +144,7 @@ check("nor is anything at all when there is no netmap to read",
 check("and a nameless host is nobody, rather than somebody who is up",
       tailscale.peer_is_down("", up) is None)
 
-check("the follower treats a node that has gone home as no node at all",
-      "if node and tailscale.peer_is_down(node):"
-      in open(os.path.join(ROOT, "bin", "follow"), encoding="utf-8").read())
-check("and a course is not looked for on a machine that is not there",
+check("a course is not looked for on a machine that is not there",
       "if tailscale.peer_is_down(host):"
       in open(os.path.join(ROOT, "tutorboard", "net", "boards.py"), encoding="utf-8").read())
 
@@ -162,15 +157,6 @@ try:
           == [])
 finally:
     del os.environ["BOARD_NO_TAILNET"]
-
-# `test/limit.py` reasons about which board wins by stubbing `follow.probe`. That
-# is not the only way out: `choose_target` also reaches the network through
-# `boards.locate_course`, and with the exit-node fleet in the netmap that made
-# `bash test/all.sh` stop dead on a unit test about arithmetic over `/health`
-# documents. The hatch above is the fix; this is what keeps it there.
-limit_src = open(os.path.join(HERE, "limit.py"), encoding="utf-8").read()
-check("and the suite that walks the tailnet by accident says so",
-      'os.environ["BOARD_NO_TAILNET"]' in limit_src)
 
 # ---- the machine that could not be found at all ----------------------------
 #
@@ -215,8 +201,8 @@ check("and only then at ours",
                     if p not in after[:2]])
 check("nothing is knocked on twice, however many lists name it",
       len(after) == len(set(after)))
-check("and the walk stays bounded, because a socket timeout each is what a "
-      "follower tick is made of",
+check("and the walk stays bounded, because a socket timeout each is what it "
+      "is made of",
       len(machines.candidate_ports("node.ts.net", ["C%02d" % i for i in range(40)]))
       <= machines.PORT_KNOCKS)
 

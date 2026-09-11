@@ -31,9 +31,7 @@ var els = {
   where: document.getElementById("where"),
   busy: document.getElementById("busy"),
   busyText: document.getElementById("busy-text"),
-  busySub: document.getElementById("busy-sub"),
-  busyAgain: document.getElementById("busy-again"),
-  busyStay: document.getElementById("busy-stay")
+  busySub: document.getElementById("busy-sub")
 };
 
 function plural(n, one, many) {
@@ -124,11 +122,10 @@ function paintHosts(doc) {
   els.hosts.innerHTML = "";
   /* Always drawn, whatever is in it. Hiding a row of one machine was meant as
      tidiness and read as "there is no other machine": on 9 September the only
-     board on the compute node was a course the Mac has no clone of, so the Mac
-     could not find the node, the row hid itself, and the report was "I don't
-     see any options to go to the compute node". A machine that is quiet is now
-     drawn as a machine that is quiet, and the row is somewhere you can always
-     look. */
+     board on another machine was a course this one has no clone of, so it could
+     not be found, the row hid itself, and the report was "I don't see any
+     options to go to the compute node". A machine that is quiet is now drawn as
+     a machine that is quiet, and the row is somewhere you can always look. */
   els.hostsWrap.hidden = !hosts.length;
   if (onHost !== null && !hosts.some(function (h) { return hostKey(h) === onHost; })) {
     onHost = null;          /* it went away while we were looking at it */
@@ -236,8 +233,8 @@ function paintCourses(list, host) {
 
 function switchTo(repo, host) {
   if (moving) return;                 /* one at a time; a second tap is a queue */
-  moving = lastAsked = { repo: repo, host: host || "" };
-  showBusy("moving the board to " + repo + "…", "asking", false);
+  moving = { repo: repo, host: host || "" };
+  showBusy("opening " + repo + "…", "asking");
   fetch("/switch", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -246,24 +243,33 @@ function switchTo(repo, host) {
     body: JSON.stringify({ repo: repo, host: host || "" })
   }).then(function (r) { return r.json(); }).then(function (res) {
     if (!res.ok) throw new Error(res.error || "switch failed");
+    /* A course on ANOTHER machine is not something this address can open: an
+       address only ever serves a board on the machine holding it. Waiting for
+       it to would be waiting for ever, so say where the lesson is instead. */
+    if (res.address === false) {
+      showBusy(repo + " is on " + String(host || "").split(".")[0],
+               res.detail || "open that machine's own address to use it");
+      moving = null;
+      return null;
+    }
     return waitForAddress(repo, host || "", Date.now());
   }).then(function (landed) {
-    if (landed) { location.href = "/"; return; }
-    /* Not landed, and saying nothing here is what made this look broken: the
-       old code reloaded regardless and put you back where you started. */
-    showBusy("still on the old board",
-             repo + " was asked for, but the address has not moved yet. It may "
-             + "be starting up — give it a moment, or ask again.", true);
-    moving = null;
+    if (landed === null) return;      /* nothing to wait for; already said so */
+    /* Landed or not, this goes to the lesson. The board serving this address
+       re-pointed it at the course before it answered, so by here the switch has
+       happened; the poll is only how we know not to reload too early. There is
+       nothing to ask a person about, and asking was worse than useless -- from
+       the iPad it read as a switch that could not be made. */
+    location.href = "/";
   }).catch(function (e) {
-    showBusy("could not move the board", e.message || String(e), true);
+    showBusy("could not move the board", e.message || String(e));
     moving = null;
   });
 }
 
 /* Which course, and which machine, is answering at this address RIGHT NOW.
-   The address is a proxy on the always-on host and it moves on its own clock,
-   so this is the only honest way to know a switch has landed. */
+   Asking is the only honest way to know a switch has landed: the name is
+   re-pointed by the machine serving it, and the page cannot see that happen. */
 function serving() {
   return fetch("/health?t=" + Date.now(), { cache: "no-store" })
     .then(function (r) { return r.json(); })
@@ -277,46 +283,42 @@ function sameHost(a, b) {
 
 /* Poll until the address actually serves what was asked for.
 
-   This is the whole of the fix for "I had to tap it ten times". `/switch`
-   records the choice and returns; the FOLLOWER on the always-on host is what
-   moves the address, and it does that a moment later. Reloading before then
-   lands on the board you were trying to leave, which reads exactly like a tap
-   that did nothing — so you tap again, and every one of those taps was working. */
+   This is the whole of the fix for "I had to tap it ten times": reloading the
+   instant `/switch` answers lands on the board you were trying to leave, which
+   reads exactly like a tap that did nothing — so you tap again, and every one
+   of those taps was working. A board that has just taken the name answers this
+   within a second or two; the ceiling is only there so a reload eventually
+   happens whatever the network did. */
 function waitForAddress(repo, host, began) {
   return serving().then(function (h) {
     if (h && h.dir === repo && sameHost(h.host, host)) return true;
     var waited = Math.round((Date.now() - began) / 1000);
     if (waited >= SWITCH_PATIENCE) return false;
-    showBusy("moving the board to " + repo + "…",
-             "waiting for the address to follow · " + waited + "s", false);
-    return new Promise(function (go) { setTimeout(go, 800); })
+    showBusy("opening " + repo + "…", waited > 2 ? "starting the board · "
+             + waited + "s" : "starting the board");
+    return new Promise(function (go) { setTimeout(go, 600); })
       .then(function () { return waitForAddress(repo, host, began); });
   });
 }
 
-var SWITCH_PATIENCE = 60;             /* seconds. A cold board start is slow. */
+var SWITCH_PATIENCE = 45;             /* seconds. A cold board start is slow. */
 var moving = null;
 
-function showBusy(text, sub, done) {
+/* One message, no questions. The overlay used to end in "ask again" / "stay
+   here", which is a dead end wearing the clothes of a choice: the switch had
+   in fact been made and the only thing wrong was that nothing had moved the
+   address. Tapping the overlay dismisses it; that is all it does. */
+function showBusy(text, sub) {
   els.busy.hidden = false;
   els.busyText.textContent = text;
   els.busySub.textContent = sub || "";
-  els.busyAgain.hidden = !done;
-  els.busyStay.hidden = !done;
 }
 
-els.busyStay.onclick = function () {
+els.busy.onclick = function () {
   els.busy.hidden = true;
   moving = null;
   refresh();
 };
-els.busyAgain.onclick = function () {
-  var again = lastAsked;
-  if (!again) { els.busy.hidden = true; return; }
-  moving = null;
-  switchTo(again.repo, again.host);
-};
-var lastAsked = null;
 
 /* ------------------------------------------------------------------ load */
 function refresh() {

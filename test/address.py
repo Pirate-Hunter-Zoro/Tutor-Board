@@ -120,20 +120,16 @@ def install(status, held_alive):
     board.ts = ts
 
 
-# serve_target is the one place the always-on host differs: it points the name
-# at the follower proxy, never at a board port directly.
-board.machine.follow_config = lambda: {"listen": "127.0.0.1:8844"}
-board.machine.machine_shape = lambda: "always-on host"
-if board.serve_target(8787) == "http://127.0.0.1:8844":
-    ok("on an always-on host the name points at the follower proxy")
-else:
-    fail("serve_target on an always-on host did not point at the proxy")
-
-board.machine.machine_shape = lambda: "standalone"
-if board.serve_target(8787) == "http://127.0.0.1:8787":
-    ok("and anywhere else it points at the board's own port")
-else:
-    fail("serve_target off the always-on host did not point at the board")
+# The name points at a board on THIS machine, whatever kind of machine it is.
+# `tailscale serve` only proxies to a local backend -- handed a remote tailnet
+# address it answers every request with a 502 -- so there is nowhere else for it
+# to point.
+for shape in ("standalone", "compute node"):
+    board.machine.machine_shape = lambda shape=shape: shape
+    if board.serve_target(8787) == "http://127.0.0.1:8787":
+        ok("on a %s the name points at the board's own port" % shape)
+    else:
+        fail("serve_target on a %s did not point at the board" % shape)
 
 
 held = ("https://board.tail0c6c62.ts.net/\n|-- proxy http://127.0.0.1:8787\n")
@@ -171,11 +167,10 @@ else:
 # happen at all.
 #
 # Boards bound 127.0.0.1 and nothing else, deliberately -- there is no
-# authentication here. The consequence went unseen for a week: the always-on
-# host's follower probes the compute node's ports to decide where the address
-# should point, and every one of those probes was refused by a loopback socket.
-# So the address could only ever land on a board the Mac itself was running, and
-# switching course could not work no matter how correct the arbitration was.
+# authentication here. The consequence went unseen for a week: asking another
+# machine where a course is served means probing its ports, and every one of
+# those probes was refused by a loopback socket. So a course could only ever be
+# found on the machine doing the asking.
 src_serve = open(os.path.join(ROOT, "tutorboard", "server", "app.py"),
                  encoding="utf-8").read()
 (ok if "for addr in tailscale.tailnet_addresses():" in src_serve else fail)(
@@ -191,11 +186,6 @@ src_board = open(os.path.join(ROOT, "bin", "board"), encoding="utf-8").read()
     "one that points at a port nothing answers on")
 (ok if 'if host == "0.0.0.0"' in src_serve else fail)(
     "but not on the LAN unless somebody asked for that")
-
-src_follow = open(os.path.join(ROOT, "bin", "follow"), encoding="utf-8").read()
-(ok if "boards.locate_course(want, skip_local=True" in src_follow else fail)(
-    "and the follower finds a course wherever it is, rather than only at a "
-    "hostname out of a config file that a new allocation invalidates")
 
 # Reaching, as well as being reached.
 #

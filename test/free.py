@@ -12,12 +12,13 @@ catalogue moves every few weeks. Anything that writes one down goes stale, and a
 stale chain is a board that stops teaching for a reason nobody at the board can
 see.
 
-**A machine's spending is not a course's business.** The Mac mini is awake all
-day and answers every time the iPad is picked up; the compute node holds the
-allowance. Three separate things can name a paid agent from further away than the
-Mac -- a course's `tutorboard.json`, which arrives by `git pull`; the `hosts`
-table; and a `--agent` typed by somebody who forgot which machine they were on --
-so `free_only` sits outside the resolution order rather than inside it.
+**A machine's spending is not a course's business.** A machine can be told it may
+not run a billed tutor at all; a compute node holding the allowance is the
+opposite case. Three separate things can name a paid agent from further away than
+the machine it would run on -- a course's `tutorboard.json`, which arrives by `git
+pull`; the `hosts` table; and a `--agent` typed by somebody who forgot which
+machine they were on -- so `free_only` sits outside the resolution order rather
+than inside it.
 """
 
 import importlib.machinery
@@ -392,18 +393,11 @@ check("and the marker line this file writes itself is not mistaken for a reason"
       tutor.failure_reason("!! exit 1\n", "exit 1") == "exit 1")
 
 # ---------------------------------------------------------------------------
-# The two machines are set up by two scripts, and neither undoes the other
+# A machine that holds an allowance is not a machine that may not spend
 # ---------------------------------------------------------------------------
-mac = open(os.path.join(ROOT, "scripts", "setup-mac.sh"), encoding="utf-8").read()
 node = open(os.path.join(ROOT, "scripts", "setup-node.sh"), encoding="utf-8").read()
-check("the Mac's script turns free_only on", 'cfg["free_only"] = True' in mac)
-check("and proves the machine can teach before it says it is done",
-      "bin/free" in mac and "--check" in mac)
 check("the node's script takes free_only off, so the allowance is used",
       'cfg.pop("free_only", None)' in node)
-check("and each refuses to run on the other's machine",
-      "This script is for the compute node" in node
-      and "setup-node.sh" in mac and "Nothing has been changed" in mac)
 
 shutil.rmtree(STATE, ignore_errors=True)
 shutil.rmtree(KEYDIR, ignore_errors=True)

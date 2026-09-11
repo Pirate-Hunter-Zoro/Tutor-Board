@@ -4,8 +4,8 @@
 #
 #   bash bootstrap.sh [--courses <file>] [--name <tailnet-name>] [--no-clone]
 #
-# Run it once on the machine that will run the board: an always-on desktop, a
-# laptop, a cluster node. It clones the course repositories, puts `tutor` and
+# Run it once on the machine that will run the board: a cluster node, a desktop,
+# a laptop. It clones the course repositories, puts `tutor` and
 # `board` on the path, reports what is missing, and tells you what remains.
 #
 # It does not use sudo, does not install anything system-wide, and does not

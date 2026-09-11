@@ -4,14 +4,12 @@
 #
 #   bash scripts/install-autostart.sh <course-directory> [agent]
 #   bash scripts/install-autostart.sh --login-hook      (cluster nodes)
-#   bash scripts/install-autostart.sh --tool-pull       (always-on host)
-#   bash scripts/install-autostart.sh --always-on       (always-on host)
 #   bash scripts/install-autostart.sh --uninstall
 #
-# An always-on machine is only always-on until it isn't: a power cut, a software
-# update, a cat. This registers the headless daemon with the system's own
-# supervisor so it comes back without anyone logging in to restart it, and gets
-# restarted if it dies.
+# A machine that stays on is only always-on until it isn't: a power cut, a
+# software update, a cat. This registers the headless daemon with the system's
+# own supervisor so it comes back without anyone logging in to restart it, and
+# gets restarted if it dies.
 #
 # macOS: a LaunchAgent under ~/Library/LaunchAgents.
 # Linux with systemd --user: a user unit under ~/.config/systemd/user.
@@ -32,9 +30,6 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TUTOR="$HERE/bin/tutor"
 LABEL="com.tutorboard.headless"
-LABEL_PULL="com.tutorboard.pull"
-LABEL_FOLLOW="com.tutorboard.follow"
-LABEL_RESUME="com.tutorboard.resume"
 
 BEGIN_MARK="# >>> tutor-board resume >>>"
 END_MARK="# <<< tutor-board resume <<<"
@@ -68,6 +63,9 @@ $BEGIN_MARK
 # allocation, and no timer can keep the tool current on a machine that ceases to
 # exist -- so \`tutor resume\` pulls this repository as well as the course, and
 # bounces whatever is still holding the old code.
+# This fires on a LOGIN NODE too, and that is the point of it being on every
+# shell: \`salloc\` hands you a shell here while the machine you were given is
+# over there with nobody on it, so the resume is handed to that node instead.
 # Interactive shells only: a login file that writes to stdout breaks scp, sftp
 # and git-over-ssh, and that failure is remote and baffling. Backgrounded, so a
 # slow network never delays a prompt. The resume command itself decides whether
@@ -98,13 +96,7 @@ if [ "${1:-}" = "--uninstall" ]; then
     Darwin)
       launchctl unload "$HOME/Library/LaunchAgents/$LABEL.plist" 2>/dev/null
       rm -f "$HOME/Library/LaunchAgents/$LABEL.plist"
-      launchctl unload "$HOME/Library/LaunchAgents/$LABEL_PULL.plist" 2>/dev/null
-      rm -f "$HOME/Library/LaunchAgents/$LABEL_PULL.plist"
-      launchctl unload "$HOME/Library/LaunchAgents/$LABEL_FOLLOW.plist" 2>/dev/null
-      rm -f "$HOME/Library/LaunchAgents/$LABEL_FOLLOW.plist"
-      launchctl unload "$HOME/Library/LaunchAgents/$LABEL_RESUME.plist" 2>/dev/null
-      rm -f "$HOME/Library/LaunchAgents/$LABEL_RESUME.plist"
-      echo "removed the LaunchAgents" ;;
+      echo "removed the LaunchAgent" ;;
     Linux)
       systemctl --user disable --now tutor-headless.service 2>/dev/null
       rm -f "$HOME/.config/systemd/user/tutor-headless.service"
@@ -114,135 +106,11 @@ if [ "${1:-}" = "--uninstall" ]; then
   exit 0
 fi
 
-if [ "${1:-}" = "--tool-pull" ]; then
-  # Keep this repository fresh on a machine that is always on. A person ships a
-  # board fix from a compute node and comes back to the Mac: the lesson here
-  # should be on the new code without anybody remembering to pull. `--ff-only`
-  # so a diverged branch is logged and left, never force-resolved; a session that
-  # starts a commit behind is still a session.
-  #
-  # A pull that moves HEAD is followed by `tutor restart --tutors`, because a
-  # board, a tutor and the proxy all hold the code they started with -- a pull
-  # that bounces nothing leaves the fix on disk and out of the lesson. See
-  # scripts/tool-pull.sh.
-  SH="$(command -v bash)"
-  case "$(uname -s)" in
-    Darwin)
-      PLIST="$HOME/Library/LaunchAgents/$LABEL_PULL.plist"
-      mkdir -p "$(dirname "$PLIST")"
-      {
-        echo '<?xml version="1.0" encoding="UTF-8"?>'
-        echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
-        echo '<plist version="1.0"><dict>'
-        echo "  <key>Label</key><string>$LABEL_PULL</string>"
-        echo '  <key>ProgramArguments</key><array>'
-        printf '    <string>%s</string>\n    <string>%s</string>\n' "$SH" "$HERE/scripts/tool-pull.sh"
-        echo '  </array>'
-        echo '  <key>StartInterval</key><integer>300</integer>'
-        echo '  <key>RunAtLoad</key><true/>'
-        echo "  <key>StandardOutPath</key><string>$HOME/Library/Logs/tutor-pull.log</string>"
-        echo "  <key>StandardErrorPath</key><string>$HOME/Library/Logs/tutor-pull.log</string>"
-        echo '  <key>EnvironmentVariables</key><dict>'
-        echo '    <key>GIT_TERMINAL_PROMPT</key><string>0</string>'
-        echo '    <key>GIT_ASKPASS</key><string>/bin/false</string>'
-        echo '  </dict>'
-        echo '</dict></plist>'
-      } > "$PLIST"
-      launchctl unload "$PLIST" 2>/dev/null
-      launchctl load "$PLIST" && echo "loaded $PLIST"
-      echo "logs: ~/Library/Logs/tutor-pull.log"
-      echo "stop: bash $0 --uninstall"
-      ;;
-    *)
-      echo "a periodic tool pull only makes sense on an always-on host;"
-      echo "on a compute node nothing survives, and the AI contract already"
-      echo "pulls at the start of every session."
-      exit 1 ;;
-  esac
-  exit 0
-fi
-
-if [ "${1:-}" = "--always-on" ]; then
-  # The always-on host runs three things: the follower proxy, which forwards the
-  # tailnet name to whichever machine is serving; a periodic resume, which keeps
-  # this machine's own board warm so the proxy has somewhere local to fall back to
-  # the moment the compute node goes away; and the tool pull, which keeps this
-  # repository -- and therefore the follower -- in step with the machine the
-  # fixes are written on. None of them names a course: the follower is told which
-  # one by the board serving it, and `tutor resume` decides from what was last
-  # worked in, so a new chapter does not mean a new plist.
-  #
-  # The pull belongs here rather than being a separate thing to remember. The
-  # follower and the boards it looks for have to agree about which port a course
-  # serves on; a Mac left a few commits behind looks for them in the wrong place
-  # and quietly serves its own warm board instead of the lesson on the node.
-  case "$(uname -s)" in
-    Darwin)
-      PY="$(command -v python3)"
-      FOL="$HOME/Library/LaunchAgents/$LABEL_FOLLOW.plist"
-      mkdir -p "$(dirname "$FOL")"
-      {
-        echo '<?xml version="1.0" encoding="UTF-8"?>'
-        echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
-        echo '<plist version="1.0"><dict>'
-        echo "  <key>Label</key><string>$LABEL_FOLLOW</string>"
-        echo '  <key>ProgramArguments</key><array>'
-        printf '    <string>%s</string>\n    <string>%s</string>\n' "$PY" "$HERE/bin/follow"
-        echo '  </array>'
-        echo '  <key>RunAtLoad</key><true/>'
-        echo '  <key>KeepAlive</key><true/>'
-        echo "  <key>WorkingDirectory</key><string>$HERE</string>"
-        echo "  <key>StandardOutPath</key><string>$HOME/Library/Logs/tutor-follow.log</string>"
-        echo "  <key>StandardErrorPath</key><string>$HOME/Library/Logs/tutor-follow.log</string>"
-        echo '  <key>EnvironmentVariables</key><dict>'
-        echo "    <key>PATH</key><string>$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>"
-        echo '  </dict>'
-        echo '</dict></plist>'
-      } > "$FOL"
-
-      RES="$HOME/Library/LaunchAgents/$LABEL_RESUME.plist"
-      {
-        echo '<?xml version="1.0" encoding="UTF-8"?>'
-        echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
-        echo '<plist version="1.0"><dict>'
-        echo "  <key>Label</key><string>$LABEL_RESUME</string>"
-        echo '  <key>ProgramArguments</key><array>'
-        printf '    <string>%s</string>\n    <string>%s</string>\n    <string>resume</string>\n    <string>--quiet</string>\n' "$PY" "$HERE/bin/tutor"
-        echo '  </array>'
-        echo '  <key>RunAtLoad</key><true/>'
-        echo '  <key>StartInterval</key><integer>180</integer>'
-        echo "  <key>WorkingDirectory</key><string>$HERE</string>"
-        echo "  <key>StandardOutPath</key><string>$HOME/Library/Logs/tutor-resume.log</string>"
-        echo "  <key>StandardErrorPath</key><string>$HOME/Library/Logs/tutor-resume.log</string>"
-        echo '  <key>EnvironmentVariables</key><dict>'
-        echo "    <key>PATH</key><string>$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>"
-        echo '  </dict>'
-        echo '</dict></plist>'
-      } > "$RES"
-
-      launchctl unload "$FOL" 2>/dev/null
-      launchctl load "$FOL" && echo "loaded $FOL"
-      launchctl unload "$RES" 2>/dev/null
-      launchctl load "$RES" && echo "loaded $RES"
-      bash "$0" --tool-pull
-      echo "logs: ~/Library/Logs/tutor-follow.log, tutor-resume.log, tutor-pull.log"
-      echo "stop: bash $0 --uninstall"
-      ;;
-    *)
-      echo "always-on hosting is what the Mac mini is for;"
-      echo "on a compute node nothing survives, so use --login-hook there instead."
-      exit 1 ;;
-  esac
-  exit 0
-fi
-
 COURSE="${1:-}"
 AGENT="${2:-}"
 [ -n "$COURSE" ] || {
   echo "usage: $0 <course-directory> [agent]"
   echo "       $0 --login-hook      on a cluster node, where nothing survives"
-  echo "       $0 --tool-pull       on an always-on host, keep this repo fresh"
-  echo "       $0 --always-on       the always-on host: follower proxy + warm board"
   echo "       $0 --uninstall"
   exit 1
 }

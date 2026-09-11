@@ -1187,8 +1187,28 @@ body.tools-out .annbar { bottom: calc(5.6rem + env(safe-area-inset-bottom)); }
   background: var(--note); border-color: var(--note); color: #fff; font-weight: 600;
 }
 
-/* The contents panel borrows the drawer the scratch list already uses. */
+/* The contents panel borrows the drawer the scratch list already uses -- the
+   panel. NOT the scroller inside it, which is a separate rule and was never
+   written: `#scratch-list`, `#papers-list`, `#history-list` and `#review-list`
+   each carry the two declarations that make the middle of a drawer the part
+   that moves, and this one carried neither.
+   A drawer is a fixed panel from the top of the glass to the bottom with a head
+   and a foot that do not move, so the list between them has to be told to take
+   the space that is left and to scroll inside it. Untold, it lays out at its
+   full height and runs off the bottom edge, where there is nothing to scroll
+   and no way to reach it -- and the entries that fall off are the ones at the
+   end. Probability's eleven chapters reach the bottom of an iPad on their own,
+   which put every problem set past it: "the bar showing the contents and the
+   Problem Sets is not scrollable, so I can't reach the problem sets." */
 #contents { }
+#contents-list {
+  flex: 1; overflow-y: auto; padding: .5rem;
+  /* The lesson behind must not take over when the list reaches its end, and a
+     drag down the list is the list moving: there is nothing in here a pinch or
+     a double-tap wants. */
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
 #contents-list .group {
   font-family: var(--ui); font-size: .66rem; font-weight: 700;
   letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3);

@@ -42,9 +42,9 @@ def tailnet_hostname():
     """What this machine calls itself on the tailnet.
 
     Defaults to `board`, which is what makes the address survive moving between
-    compute nodes on a shared home. A second machine -- an always-on Mac beside
-    an occasional cluster node -- needs its own name, or the two fight over one
-    identity. Set once with `board vpn up --hostname <name>`.
+    compute nodes on a shared home. A second machine that is up at the same time
+    needs its own name, or the two fight over one identity. Set once with `board
+    vpn up --hostname <name>`.
     """
     env = os.environ.get("BOARD_TAILNET_NAME")
     if env:
@@ -78,9 +78,9 @@ TS_CACHE_TTL = 3.0
 def _ts_status():
     """The netmap, as `tailscale status --json` gives it.
 
-    Cached for a few seconds. One tick of the follower asks who is up, who the
-    node is, and what this machine is called; that was three subprocesses for
-    one answer that cannot meaningfully change in between.
+    Cached for a few seconds. Finding out where a course is served asks who is
+    up, who the node is, and what this machine is called; that was three
+    subprocesses for one answer that cannot meaningfully change in between.
     """
     now = time.time()
     if _TS_CACHE[1] is not None and now - _TS_CACHE[0] < TS_CACHE_TTL:
@@ -105,8 +105,8 @@ def peer_is_down(name, status=None):
     Asked before knocking, because knocking on a machine that is not there is
     the most expensive way to learn nothing: four ports, a socket timeout each,
     and again through the SOCKS proxy -- 6.1s measured against this tailnet's
-    compute node while it was asleep. The follower does that walk three times a
-    tick, so a node that had gone home turned every re-decision into twenty
+    compute node while it was asleep. Finding a course walks that three times
+    over, so a machine that had gone home turned every such question into twenty
     seconds, and a tap on the iPad waited all of it.
 
     Tailscale already knows. It is the one question it can answer instantly.
@@ -134,9 +134,9 @@ def tailnet_addresses():
     """This machine's own tailscale addresses, if it is on a tailnet.
 
     A board binds these as well as loopback: the tailnet is the trust boundary
-    the iPad already crosses, and without them the other machine cannot see this
-    one's boards at all -- which is a follower that can only ever point the
-    address at itself.
+    the iPad already crosses, and without them another machine cannot see this
+    one's boards at all -- so a course served here can only ever be found from
+    here.
     """
     prefix, _ = tailscale_cli()
     if not prefix:
@@ -171,8 +171,7 @@ def publish_board(port, timeout=20):
     where it is most needed: a machine with no administrator rights runs
     tailscaled in USERSPACE mode, where the address exists but no interface
     carries it, and `bind()` returns "cannot assign requested address". Measured
-    on the compute node, which is exactly the machine the always-on host has to
-    be able to see.
+    on the compute node, which is exactly the machine that has to be reachable.
 
     `tailscale serve --tcp` is the mechanism that works in both modes: tailscaled
     itself accepts the connection on the tailnet and forwards it to loopback. One
@@ -212,11 +211,11 @@ def unpublish_board(port, timeout=20):
 def tailnet_peers(status=None):
     """Every machine on this tailnet that is online, as something to knock on.
 
-    The follower used to look for the compute node at ONE hostname, out of the
-    config. A compute node's hostname is an allocation -- it was `compute302`
-    today and something else last week -- so that name goes stale, and when it
-    does the follower can see no board anywhere but its own. From the iPad that
-    is: "Galois Theory is the only option, and when I tap Probability I can't
+    A compute node used to be looked for at ONE hostname, out of the config. A
+    compute node's hostname is an allocation -- it was `compute302` today and
+    something else last week -- so that name goes stale, and when it does no
+    board can be seen anywhere but this machine's own. From the iPad that is:
+    "Galois Theory is the only option, and when I tap Probability I can't
     switch", for ever, because the only machine it can find is the one it is on.
 
     So the configured name is a hint, not the answer. If it does not lead
@@ -234,21 +233,19 @@ def tailnet_peers(status=None):
         if not peer.get("Online"):
             continue
         # A phone is not a machine that runs boards, and knocking on one costs a
-        # timeout per port: three iPads on this tailnet turned a follower tick
-        # into a minute of waiting. Ask the ones that could plausibly answer.
+        # timeout per port: three iPads on this tailnet turned one walk into a
+        # minute of waiting. Ask the ones that could plausibly answer.
         if (peer.get("OS") or "").lower() in ("ios", "android", "tvos", "watchos"):
             continue
         # Nor is a tagged device. That is the same lesson as the iPads, at a
-        # scale that stops being a slow tick and becomes a follower that never
-        # decides anything again: a Mullvad exit-node subscription puts its whole
-        # fleet in the netmap as online peers -- 544 of them here -- and they
-        # carry no `OS`, so the filter above waved every one of them through.
-        # Measured on this machine: 6.1s to knock on one exit node across the
-        # four ports, so 55 minutes for one walk, while the follower is bounced
-        # every fifteen. Not one tick ever finished. The address kept whatever
-        # course was seeded at startup, a tap in the hub could not move it, and
-        # the board looked healthy throughout -- because it was. Only the
-        # deciding was dead.
+        # scale that stops being a slow walk and becomes a question that is never
+        # answered: a Mullvad exit-node subscription puts its whole fleet in the
+        # netmap as online peers -- 544 of them here -- and they carry no `OS`,
+        # so the filter above waved every one of them through. Measured on this
+        # machine: 6.1s to knock on one exit node across the four ports, so 55
+        # minutes for one walk. Not one of them ever finished, a tap in the hub
+        # could not move anything, and the board looked healthy throughout --
+        # because it was. Only the deciding was dead.
         #
         # Tags are the right test rather than `ExitNodeOption`: a person's own
         # machine may advertise itself as an exit node and still be the machine
@@ -263,8 +260,8 @@ def tailnet_peers(status=None):
         if name:
             out.append(name)
     # And a ceiling, because the filters above are a list of surprises that have
-    # already happened and the next one should cost a slow tick rather than a
-    # follower that never decides again.
+    # already happened and the next one should cost a slow walk rather than a
+    # question that is never answered.
     return out[:PEER_WALK_LIMIT]
 
 

@@ -51,23 +51,18 @@ def get(h, repo, path):
 
     if path == "/health":
         # `dir` so a caller can confirm it reached the course it meant --
-        # ports are derived from names and derivation is not proof. `chosen`
-        # so the always-on host can follow a decision instead of a race.
-        # `limited` so it can follow an allowance too: a board answering
-        # perfectly well whose tutor has been told it is out of quota is
-        # still up, and is still the wrong machine to hand a lesson to.
-        # Only the machine serving can know that -- the limit is written by
-        # its own tutor into its own state directory -- so it is published
-        # here for the same reason the choice is.
-        # `tutor` so the follower can prefer a board that actually has one.
-        # Two machines can end up with a board for the same course -- a tap
-        # in a hub used to start one wherever the tap landed -- and between
-        # a board with a tutor listening and a board with nobody behind it
-        # there is no contest: the second one is a lesson that cannot answer.
-        # `host` so a CLIENT can tell which machine it reached. The hub
-        # waits for a switch to actually land before it reloads, and "the
-        # right course" is not the whole question when both machines have a
-        # clone of it.
+        # ports are derived from names and derivation is not proof, and the
+        # hub checks this before it reloads into a lesson. `chosen` so a
+        # decision can be read off a board rather than raced for. `limited`
+        # so an allowance can be too: a board answering perfectly well whose
+        # tutor has been told it is out of quota is still up, and is still
+        # the wrong place to send a lesson. Only the machine serving can know
+        # that -- the limit is written by its own tutor into its own state
+        # directory -- so it is published here for the same reason the choice
+        # is. `tutor` because between a board with a tutor listening and a
+        # board with nobody behind it there is no contest: the second one is
+        # a lesson that cannot answer. `host` so a CLIENT can tell which
+        # machine it reached.
         agent = state.load_agent(repo) or {}
         return h.send_json({"ok": True, "root": repo.root,
                                "dir": os.path.basename(repo.root),
@@ -82,8 +77,8 @@ def post(h, repo, path):
     if path == "/chose":
         # A choice made on another machine, relayed here the moment it was
         # made. It records and nothing else: no board is started, no address
-        # is moved, no tutor is spawned. The follower does all of that, and
-        # the only thing it was ever short of was knowing.
+        # is moved, no tutor is spawned. Knowing what was chosen is the whole
+        # of what one machine needs from another.
         try:
             payload = json.loads(h.read_body().decode("utf-8") or "{}")
         except Exception:
@@ -105,8 +100,8 @@ def post(h, repo, path):
         except (TypeError, ValueError):
             mine_at = 0.0
         # Already recorded: a no-op, and say so rather than rewriting the
-        # file, because the file's modification time is what wakes the
-        # follower and there is nothing here to wake it for.
+        # file, because the file's modification time is a signal in its own
+        # right and there is nothing here to signal.
         if have.get("dir") == want and mine_at >= at:
             return h.send_json({"ok": True, "kept": want,
                                    "detail": "already recorded"})
@@ -211,7 +206,7 @@ def post(h, repo, path):
                                   status=500)
         # The choice belongs to the machine the person is looking at, and it
         # has already been recorded there; this records it here as well, so
-        # whichever machine the follower asks gets the same answer.
+        # whichever machine is asked gives the same answer.
         rec_at = time.time()
         choice.remember_chosen(match["repo"], target,
                                  host=payload.get("host") or "", at=rec_at)
@@ -230,10 +225,13 @@ def post(h, repo, path):
         on_host = (payload.get("host") or "").strip()
 
         # A course on another machine. The person picked the host in the hub,
-        # so this is not a guess to be made here: record the pair, ask that
-        # machine to bring the course up, and let the follower point the
-        # address at it. Nothing is started here -- starting a second clone of
-        # somebody else's course is the thing that made a mess of an evening.
+        # so this is not a guess to be made here: record the pair and ask that
+        # machine to bring the course up. Nothing is started here -- starting a
+        # second clone of somebody else's course is the thing that made a mess
+        # of an evening -- and nothing about THIS machine's address changes,
+        # because an address can only ever point at a board on the machine that
+        # holds it. The lesson is then at that machine's own address, which is
+        # what the answer says.
         if on_host and on_host != (tailscale.tailnet_self() or ""):
             # Where that machine answers, if it does. The hub can offer a
             # machine it has merely SEEN before -- that is deliberate, a machine
@@ -257,9 +255,8 @@ def post(h, repo, path):
                 }, status=503)
             rec_at = time.time()
             choice.remember_chosen(want, "", host=on_host, at=rec_at)
-            # Every machine, not only the one being asked to start it. The
-            # follower lives on whichever machine holds the address, and
-            # that is not always either of these two.
+            # Every machine, not only the one being asked to start it: a
+            # decision is not the property of the machine that heard it.
             machines.announce_later(repo, want, on_host, rec_at)
             # `entry`, not `h`, in the lookup above. `h` is the REQUEST HANDLER,
             # and a `for h in ...` leaves the loop variable bound after the loop,
@@ -273,9 +270,13 @@ def post(h, repo, path):
                                           {"repo": want, "host": on_host},
                                           timeout=60)
             h.server.hub.worker.dirty.set()
+            # `address: False` is the whole of what the hub needs to know: this
+            # address is not going to start serving that course, so waiting for
+            # it to would be waiting for ever. The lesson is on that machine, at
+            # that machine's own name.
             return h.send_json({
-                "ok": True, "repo": want, "host": on_host,
-                "detail": ("%s is bringing %s up; the address follows"
+                "ok": True, "repo": want, "host": on_host, "address": False,
+                "detail": ("%s is bringing %s up, at its own address"
                            % (on_host.split(".")[0], want))
                 if started and started.get("ok")
                 else ("asked for %s on %s" % (want, on_host.split(".")[0])),
@@ -292,102 +293,82 @@ def post(h, repo, path):
             return h.send_json({"ok": False, "error": "unknown course"}, status=404)
         target = os.path.join(os.path.dirname(repo.root), match["repo"])
 
-        # A tap in the hub is a person saying which course they mean, and
-        # that -- the RECORD -- is the whole of what moves the address. It is
-        # written first and unconditionally, because on a pair of machines it
-        # is the only thing both of them can read.
+        # A tap in the hub is a person saying which course they mean. The
+        # record is written first and unconditionally, because it is the only
+        # thing another machine can read and the only thing that survives this
+        # board being restarted.
         rec_at = time.time()
         choice.remember_chosen(match["repo"], target,
                                  host=tailscale.tailnet_self() or "", at=rec_at)
         machines.announce_later(repo, match["repo"], tailscale.tailnet_self() or "", rec_at)
 
-        # What this machine does about it depends on whether this machine is
-        # the one that decides.
+        # THE ADDRESS IS MOVED HERE, IN THIS REQUEST, BY THE MACHINE SERVING.
         #
-        # It used to do all of it, everywhere: start the course's board here,
-        # take the tailnet name for it here, and start a tutor for it here --
-        # whichever machine happened to be serving the hub. On one machine
-        # that is exactly right. On two it is the cause of an evening's worth
-        # of damage reported on 1 September 2026:
+        # A course has its own port, so the one name the iPad is installed
+        # against has to be re-pointed at the board being opened or the tap
+        # lands nowhere: the hub asks the address which course it is serving
+        # before it reloads, the answer is still the old one, and after a
+        # minute of that the page can only say so. From the iPad that is a
+        # switch that cannot be made, reported as "whenever I want to switch
+        # courses... I can hit it, but it never seems to work."
         #
-        #   - two boards for one course, one on each machine, so the follower
-        #     had a choice to make that should never have existed;
-        #   - two TUTORS for one course, both blocked on the same inbox,
-        #     both answering every message -- cards contradicting each other,
-        #     answers invented, one run archiving the other's chapter
-        #     mid-exercise. The handoff of that evening says it plainly:
-        #     "Two headless sessions have been firing on the same inbox
-        #     messages all evening, and the other one is unreliable";
-        #   - and a tug-of-war over the tailnet name, because `vpn serve`
-        #     here re-points it here while the always-on host's follower
-        #     re-points it there, every tick. From the iPad that is "every
-        #     time I tap Probability I get bumped back to Galois Theory".
-        #
-        # So: on a machine that owns its own name, do the lot. On a machine
-        # that does not, record the choice and let the follower place the
-        # address -- it reads the record off both machines and points at
-        # whichever one is actually serving that course.
-        shape = machine.machine_shape()
+        # `board vpn serve` is deliberate about this where `ts_repoint` is
+        # careful: a start does not steal a name that a live board is holding,
+        # because `tutor restart` walks every course on the machine and would
+        # otherwise leave the address wherever the alphabet finished. A tap in
+        # the hub is the opposite case -- it is a person naming the course they
+        # want -- so it takes the name, and it is the only thing here that does.
         mine = processes.board_is_running(
             (machines.read_board_record(target) or {}).get("pid"), target)
-        # Is anybody else already serving it? Asked, not assumed.
-        #
-        # The first version of this rule went by the machine's ROLE -- a
-        # compute node never starts a course, the always-on host decides --
-        # and that was wrong in the one way that matters: if the other
-        # machine cannot be reached (and until boards listened on the tailnet
-        # they never could be), a tap did nothing at all and the course could
-        # not be opened from anywhere. A probe is the honest question, and
-        # when it finds nothing the answer is to start it here rather than to
-        # wait for a machine that may not be listening.
+        # Is anybody else already serving it? Asked, not assumed: if that
+        # machine cannot be reached, a tap that deferred to it would do nothing
+        # at all and the course could not be opened from anywhere. A probe is
+        # the honest question, and when it finds nothing the answer is to start
+        # it here.
         elsewhere = None if mine else boards.locate_course(
             match["repo"], skip_local=True, timeout=1.5)
-        started = ""
+        started, moved = "", False
         if mine or not elsewhere:
             code, out = spawn.board_cli(target, ["start"])
             if code != 0:
                 return h.send_json({"ok": False, "error": out.strip()[-300:]},
                                       status=500)
             started = out.strip()
-            if shape == "standalone":
-                spawn.board_cli(target, ["vpn", "serve"])
+            vcode, _ = spawn.board_cli(target, ["vpn", "serve"])
+            moved = vcode == 0
             # The assistant follows the course, and only where the course is
-            # actually being served. Starting one from a tap on the other
-            # machine is how a lesson ends up with two.
+            # actually being served. Starting one from a tap on another machine
+            # is how a lesson ends up with two.
             acode, aout = spawn.tutor_cli(["agent", "start", match["repo"]])
         else:
-            acode, aout = 0, ("%s is serving this course; the address follows the "
-                              "choice rather than starting a second one"
+            acode, aout = 0, ("%s is serving this course, at its own address"
                               % elsewhere[0])
-        return h.send_json({"ok": True, "repo": match["repo"],
+        return h.send_json({"ok": True, "repo": match["repo"], "address": moved,
                                "detail": started or aout,
                                "agent": aout.strip() if acode == 0 else None,
                                "agent_error": None if acode == 0 else aout.strip()[-300:]})
 
     if path == "/handover":
-        # The always-on host asks an outgoing board to wrap up before it
-        # moves the proxy: the assistant gets its one turn to write the
-        # handoff, rather than being cut off mid-lesson. Gated on a shared
-        # secret, because a board on the tailnet otherwise has no identity
-        # to trust and the iPad must never be able to stop a lesson.
+        # One machine asks another to wrap up before the course moves off it:
+        # the assistant gets its one turn to write the handoff, rather than
+        # being cut off mid-lesson. Gated on a shared secret, because a board
+        # on the tailnet otherwise has no identity to trust and the iPad must
+        # never be able to stop a lesson.
         secret = machines.handover_secret()
         given = h.headers.get("X-Handover") or ""
         if not secret or given != secret:
             return h.send_json({"ok": False, "error": "denied"}, status=403)
         # A PERSON NAMING THE MACHINE IS A DECISION, NOT A WOBBLE.
         #
-        # `in_use` exists to stop MACHINERY ending a live sitting: the follower
-        # re-deciding where an address points must not stand down a board
-        # somebody is being taught on. It was never meant to stop the owner of
-        # the course saying which machine owns it -- which is the same
-        # distinction Rule 0 in `choose_target` already makes, where a host
-        # picked in the hub is the answer rather than a preference to be
-        # weighed.
+        # `in_use` exists to stop MACHINERY ending a live sitting: nothing
+        # automatic may stand down a board somebody is being taught on. It was
+        # never meant to stop the owner of the course saying which machine owns
+        # it, and a host picked by a person is an answer rather than a
+        # preference to be weighed.
         #
         # It is only reachable with the shared secret, so it is not something
-        # the iPad can do, and `bin/follow` deliberately never sends it: a
-        # proxy that could force this would be back to where the evening
-        # started. `tutor agent stop <course> --on <host>` is what sends it.
+        # the iPad can do. `tutor agent stop <course> --on <host>` is what
+        # sends it.
         forced = (h.headers.get("X-Handover-Force") or "").strip() not in ("", "0")
         busy = None if forced else in_use(repo)
         if busy:
@@ -415,18 +396,14 @@ IN_USE_FOR = 600
 def in_use(repo):
     """Why this board must not be stood down right now, or None.
 
-    A handover assumes the machine it is leaving becomes unreachable, and that
-    is only true of readers who arrive through the proxy. This node publishes
-    its OWN tailnet name as well -- `compute-node.<tailnet>.ts.net`, which is
-    what the app on the iPad is installed against -- and a reader on that
-    address does not notice the proxy moving at all. So the always-on host,
-    re-deciding where `board.<tailnet>.ts.net` points, can stop the tutor of a
-    lesson that is running and reachable and that it is not serving.
-
-    That is what happened on 7 September: the student sent their working at
-    18:09:17, the proxy moved eight seconds later, `/handover` arrived, and the
-    daemon answered that one turn and left -- "stopped after 1 turn(s)", in the
-    middle of exercise 3.11.
+    A handover assumes the machine it is leaving stops being read, and that is
+    not something the asking machine can know. A board publishes its own tailnet
+    name, and a reader on that address carries on reading the lesson whatever
+    anybody else has decided -- so an automatic handover can stop the tutor of a
+    lesson that is running, reachable and being taught. It has: the student sent
+    their working, the request arrived eight seconds later, and the daemon
+    answered that one turn and left -- "stopped after 1 turn(s)", in the middle
+    of exercise 3.11.
 
     Two questions, both answered off this machine:
 

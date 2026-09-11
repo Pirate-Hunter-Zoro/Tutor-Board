@@ -12,13 +12,11 @@ person writing on it. Reported as "Galois-Theory tutor session up and crashed".
             tracked file in it.  The board had made that directory once, when
             the process started, and went on holding the path.
 
-  18:09:25  `/handover` arrives from the always-on host, which has just moved
-            `board.<tailnet>.ts.net` somewhere else, and stops the tutor.  The
-            student is not reading the board through that address: this node
-            publishes its own, `compute-node.<tailnet>.ts.net`, which is what
-            the app on the iPad is installed against and which did not move.
-            The daemon answered the turn already in flight, wrote its handoff
-            and left -- "stopped after 1 turn(s)", mid-exercise.
+  18:09:25  `/handover` arrives from another machine and stops the tutor.  The
+            student is reading this board at its own tailnet name, which is what
+            the app on the iPad is installed against, and nothing about it had
+            changed.  The daemon answered the turn already in flight, wrote its
+            handoff and left -- "stopped after 1 turn(s)", mid-exercise.
 
 So: the directories are re-asserted before anything writes, and a handover is
 refused while somebody is being taught -- and refused in a way the caller comes
@@ -260,11 +258,6 @@ status, doc = post(PORT, "/handover", headers={"X-Handover-Force": "1"})
 check("but the override is not a way past the shared secret",
       status == 403 and not stopped)
 
-fsrc_early = open(os.path.join(ROOT, "bin", "follow"), encoding="utf-8").read()
-check("and the follower never sends it -- a proxy that could force this is "
-      "where the evening started",
-      "X-Handover-Force" not in fsrc_early)
-
 tsrc = open(os.path.join(ROOT, "bin", "tutor"), encoding="utf-8").read()
 check("`tutor agent stop <course> --on <host>` is what does send it",
       "X-Handover-Force" in tsrc and 'where = _flag(args, "--on")' in tsrc)
@@ -300,6 +293,30 @@ check("and says which machine is bringing it up",
 check("having asked that machine's own board to start it, on its own port",
       asked_start == [("elsewhere.example", 4242, "/start")])
 
+# ---------------------------------------------------------------------------
+# 2d. switching to a course on THIS machine, which has to move the address
+# ---------------------------------------------------------------------------
+# A course has its own port, so opening one means re-pointing the one name the
+# iPad app is installed against -- and nothing else is going to do it. Without
+# that the hub asks the address which course it is serving, gets the old answer
+# for a minute, and can only say so: "I can hit it, but it never seems to work.
+# It just gives me the options to 'ask again' or 'stay here'."
+ran = []
+machines_route.spawn.board_cli = lambda repo, args, timeout=90: (
+    ran.append(list(args)) or (0, "board up (pid 1)"))
+machines_route.boards.locate_course = lambda name, skip_local=True, timeout=1.5: None
+machines_route.processes.board_is_running = lambda pid, root: False
+
+status, doc = post(PORT, "/switch",
+                   json.dumps({"repo": "Galois-Theory",
+                               "host": "here.example"}).encode())
+check("tapping a course this machine serves starts its board",
+      status == 200 and doc.get("ok") and ["start"] in ran)
+check("and takes the tailnet name for it, in the same request",
+      ["vpn", "serve"] in ran and ran.index(["start"]) < ran.index(["vpn", "serve"]))
+check("and says so, so the hub knows there is something to wait for",
+      doc.get("address") is True)
+
 # And the machine that is offered but not there. The hub now lists a machine it
 # has merely SEEN before -- deliberately, because a machine missing from the row
 # is a machine nobody can reach -- so the tap is where the honest answer about
@@ -320,7 +337,7 @@ check("a course on a machine with no board answering is refused, in words that "
       "say what to do about it",
       status == 503 and not doc.get("ok")
       and "no board answering" in (doc.get("error") or ""))
-check("and nothing is recorded, so no follower is left chasing a machine that "
+check("and nothing is recorded, so nothing is left chasing a machine that "
       "cannot answer",
       recorded_far == [] and asked_start == [])
 
@@ -332,87 +349,12 @@ check("the request handler is never used as a loop variable",
 
 
 # ---------------------------------------------------------------------------
-# 3. the caller comes back
-# ---------------------------------------------------------------------------
-# A refusal is only useful if it is asked again. `handover` was called once, at
-# the instant the address moved, so a board that said no was a board that was
-# never asked a second time -- and its tutor was orphaned for good, which is
-# the outcome the handover exists to prevent.
-spec = importlib.util.spec_from_loader(
-    "followcli_keeping",
-    importlib.machinery.SourceFileLoader(
-        "followcli_keeping", os.path.join(ROOT, "bin", "follow")))
-follow = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(follow)
-
-replies = {"code": 409}
-
-
-class Stub(BaseHTTPRequestHandler):
-    def do_POST(self):
-        body = json.dumps({"ok": replies["code"] == 200,
-                           "detail": "somebody was working here 8 seconds ago"
-                           if replies["code"] == 409 else "wrapping up"}).encode()
-        self.send_response(replies["code"])
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, *a):
-        pass
-
-
-SPORT = free_port()
-stub = ThreadingHTTPServer(("127.0.0.1", SPORT), Stub)
-stub.daemon_threads = True
-threading.Thread(target=stub.serve_forever, daemon=True).start()
-follow.probe = lambda host, port, timeout=2.0: {"ok": True}
-
-said = []
-check("a board that says it is in use is not treated as done with",
-      follow.handover("127.0.0.1", SPORT, SECRET, said.append) is False)
-check("and the reason is written to the log rather than swallowed",
-      any("keeps its tutor" in m for m in said))
-
-replies["code"] = 200
-check("a board that wraps up is done with",
-      follow.handover("127.0.0.1", SPORT, SECRET, said.append) is True)
-
-follow.probe = lambda host, port, timeout=2.0: None
-check("and a machine that is not answering has no tutor to wrap up",
-      follow.handover("127.0.0.1", SPORT, SECRET, said.append) is True)
-
-# ---------------------------------------------------------------------------
-# 3b. a blank is not a decision about a machine
-# ---------------------------------------------------------------------------
-# The record the person's finger wrote, and the record the machine being TOLD
-# writes a tenth of a second later. The second one says nothing about the host
-# because nothing about a resume, a login hook or `remember_course` knows which
-# machine anybody meant -- and it was winning on recency, so `want_host` came
-# back empty, Rule 0 never fired, `prefer` decided instead, and the two boards
-# traded the address between them with a `handover` on every trade.
-tapped = {"dir": "Galois-Theory", "at": 1788826019.325,
-          "host": "compute-node.tail0c6c62.ts.net"}
-told = {"dir": "Galois-Theory", "at": 1788826019.433, "host": ""}
-check("a newer record that names no machine cannot erase one that does",
-      follow.wanted_host(tapped, told) == "compute-node.tail0c6c62.ts.net")
-check("whichever order they are read in",
-      follow.wanted_host(told, tapped) == "compute-node.tail0c6c62.ts.net")
-check("and the newest record that DOES name one still wins",
-      follow.wanted_host(tapped, dict(told, host="board.tail0c6c62.ts.net"))
-      == "board.tail0c6c62.ts.net")
-check("with nobody naming a machine it is still 'wherever it is'",
-      follow.wanted_host(told, {"dir": "Galois-Theory", "at": 9.0}) == "")
-
-
-# ---------------------------------------------------------------------------
 # 3c. a server has no standard input
 # ---------------------------------------------------------------------------
-# The Mac's follower log, asked to hand its tutor over, recorded an interpreter
-# crash where a wrap-up should have been: "can't initialize sys standard
-# streams", "OSError: [Errno 9] Bad file descriptor". A board detached by
-# `board start` has fd 0 closed and every child python3 inherited it.
+# A board asked to hand its tutor over recorded an interpreter crash where a
+# wrap-up should have been: "can't initialize sys standard streams", "OSError:
+# [Errno 9] Bad file descriptor". A board detached by `board start` has fd 0
+# closed and every child python3 inherited it.
 import subprocess as _sub                                        # noqa: E402
 
 _probe = os.path.join(TMP, "probe.py")
@@ -440,15 +382,6 @@ for mod, why in (("server/spawn.py", "the hub's own commands"),
           all("stdin" in src.split(ln)[1].split(")")[0] or "stdin" in ln
               for ln in spawns))
 
-
-fsrc = open(os.path.join(ROOT, "bin", "follow"), encoding="utf-8").read()
-loop = fsrc.split("def follower(")[1]
-check("the follower carries a machine it still owes a wrap-up to",
-      "owed = None" in loop and "owed = (was[0], was[1])" in loop)
-check("and asks it again on the ticks after the address moved",
-      "if handover(owed[0], owed[1], secret, log):" in loop)
-check("while an address that comes back to it cancels the obligation",
-      "# The address came back to it. Nothing to stand down." in loop)
 
 
 shutil.rmtree(TMP, ignore_errors=True)

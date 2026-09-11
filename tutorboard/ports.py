@@ -1,6 +1,6 @@
 """A course's port is a pure function of its directory name.
 
-That is what lets the always-on host find a board on the compute node without
+That is what lets one machine find a board on another without
 being able to read its filesystem: both machines derive the same number from
 the same name, so nothing has to be published anywhere for a course to be
 findable.
@@ -10,8 +10,8 @@ import os
 
 
 # Ports are a pure function of the directory name, so the same course answers on
-# the same port on every machine -- which is what lets the always-on host find a
-# board on the compute node without being able to read its filesystem.
+# the same port on every machine -- which is what lets one machine find a board
+# on another without being able to read its filesystem.
 PORT_BASE = 8780
 PORT_SPAN = 512
 PORT_TRIES = 4

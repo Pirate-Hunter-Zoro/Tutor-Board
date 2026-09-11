@@ -284,6 +284,38 @@ decl(draw, 'top') === null
   }
 }
 
+// --- a drawer's list is the part that moves --------------------------------
+//
+// Every drawer is the same shape: a fixed panel down the right of the glass,
+// with a head and a foot that stay put and a list between them. The list is
+// therefore the scroller, and being inside a scrolling panel does not make it
+// one -- it has to take the room that is left (`flex: 1`) and scroll inside it
+// (`overflow-y`). Without both it lays out at its full height, runs off the
+// bottom of a panel that is pinned to the bottom of the window, and the entries
+// that fall off the end are unreachable: there is nothing to scroll, and the
+// page behind takes the drag instead.
+//
+// `#contents-list` was the one that had neither, and the end of the contents is
+// where the problem sets are. Reported as "the bar showing the contents and the
+// Problem Sets is not scrollable, so I can't reach the problem sets."
+[['#scratch-list', 'the scratch drawer'],
+ ['#papers-list', 'the documents drawer'],
+ ['#history-list', 'past lessons'],
+ ['#review-list', 'the review picker'],
+ ['#contents-list', 'the contents']].forEach(([sel, what]) => {
+  const b = block(sel);
+  if (b === null) return fail(sel + ' has no rule of its own — ' + what
+                              + ' cannot scroll');
+  const grows = /^1\b|^1 |^1$/.test(decl(b, 'flex') || '')
+                || decl(b, 'flex-grow') === '1';
+  const scrolls = /auto|scroll/.test(decl(b, 'overflow-y') || decl(b, 'overflow') || '');
+  grows && scrolls
+    ? ok(what + ' takes the room between the head and the foot, and scrolls')
+    : fail(what + ' (' + sel + ') '
+           + (grows ? 'does not scroll' : 'does not take the space it is given')
+           + ' — its last entries fall off the bottom of the drawer');
+});
+
 console.log(errors.length ? '\n' + errors.length + ' FAILURES'
                           : '\nevery bar is where it belongs');
 process.exit(errors.length ? 1 : 0);

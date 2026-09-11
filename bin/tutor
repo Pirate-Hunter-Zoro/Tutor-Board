@@ -38,6 +38,7 @@ which one it is; see `tutor --agents`.
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -180,26 +181,18 @@ DEFAULT_CONFIG = {
     # It is a per-MACHINE fact and it has to override every one of those,
     # including the two that come from further away than this machine. A course
     # repository is a clone: `"agent": "claude"` written in one is a sentence
-    # about a compute node that arrives on the Mac mini with the next `git pull`
-    # and takes effect there silently. `--agent claude` typed here is the same
-    # mistake made in person. Neither is a reason for this machine to start
-    # billing, so neither wins.
+    # about the machine it was written on, and it arrives everywhere else with
+    # the next `git pull` and takes effect there silently. `--agent claude` typed
+    # here is the same mistake made in person. Neither is a reason for this
+    # machine to start billing, so neither wins.
     #
     # A refusal is never silent and never leaves the board empty: the ask is
     # reported, and the turn goes to `fallback_agent`, which must itself be free
     # or there is nothing to fall back to.
     #
-    # Set on the Mac mini, which teaches for nothing. Off on a compute node,
-    # which has an allowance and is where the paid tutor belongs -- see
-    # `scripts/setup-node.sh`, which asserts exactly that.
+    # Off on a compute node, which has an allowance and is where the paid tutor
+    # belongs -- see `scripts/setup-node.sh`, which asserts exactly that.
     "free_only": False,
-    # How long a tutor that has just run out of allowance holds the student's
-    # message before answering it on the fallback. Long enough for the always-on
-    # host's proxy to notice (it re-decides every 30s) and hand the lesson to a
-    # compute node that still has an allowance, which is a better answer than
-    # this machine can now give. Nobody is kept waiting who was not already
-    # waiting: the turn they are owed has already failed.
-    "takeover_grace": 45,
     "headless_timeout": 900,
     # How long the wrap-up turn gets. It is one turn, but it writes files.
     "handoff_timeout": 600,
@@ -611,24 +604,6 @@ def read_costs(root):
         except OSError:
             pass
         return out
-
-
-def wait_for_takeover(running, seconds):
-    """Hold still long enough for another machine to be handed the lesson.
-
-    The proxy on the always-on host re-decides where the address points on a
-    fixed tick, and a move ends by asking the machine it is leaving to hand
-    over -- which stops this daemon. So "did anybody take this lesson?" is a
-    question we can simply wait for the answer to, and this wait is the only
-    thing standing between a student and a free-model answer to a question a
-    paid tutor on another machine was a few seconds from picking up.
-
-    True if we were stopped while waiting, which means somebody did.
-    """
-    end = time.time() + max(0.0, float(seconds or 0))
-    while running["go"] and time.time() < end:
-        time.sleep(1)
-    return not running["go"]
 
 
 def resolve_agent(cfg, course, override=None, interactive=False, say=None):
@@ -1106,8 +1081,8 @@ def sync(root, quiet=False):
     """Pull whatever another machine pushed, before the session starts.
 
     The point of the handoff is that a course can be picked up somewhere else,
-    and a handoff written on the Mac mini is worth nothing to a compute node
-    that never fetched it. So every session begins by catching up.
+    and a handoff written on the machine you left is worth nothing to the one
+    you arrive on until it is fetched. So every session begins by catching up.
 
     Fast-forward only, and never fatal. A session that will not start because a
     branch diverged is worse than a session that starts a commit behind and says
@@ -1164,12 +1139,10 @@ def sync(root, quiet=False):
 # The tool pulls itself.
 #
 # `sync` above catches a COURSE up -- the lesson, the handoff, the chapters
-# another machine taught. Nothing ever caught up the *board*. On the always-on
-# host a launchd timer does it (`scripts/tool-pull.sh`), and `--tool-pull`
-# deliberately refuses to install on a compute node, because a timer on a machine
-# that ceases to exist is not a plan. So the node had nothing at all: a fix
-# shipped from the Mac sat on GitHub until somebody remembered to pull it by
-# hand, and remembering by hand is the thing this repository keeps failing at.
+# taught before this one. Nothing ever caught up the *board*, and no timer can:
+# a compute node ceases to exist, so a schedule on one is not a plan -- and a fix
+# pushed from anywhere sat on GitHub until somebody remembered to pull it by
+# hand, which is the thing this repository keeps failing at.
 #
 # The only moment a compute node gets is the moment you log in to it, which is
 # already where `tutor resume` runs. So the pull goes there, and the launcher
@@ -1182,7 +1155,6 @@ def sync(root, quiet=False):
 #             that arrived -- what is still holding the old code must be bounced;
 #   "done"    pulled, or there was nothing to pull. Do not pull again.
 TOOL_SYNC = "TUTOR_TOOL_SYNC"
-FOLLOW_LABEL = "com.tutorboard.follow"
 
 
 def tool_pull(root=None):
@@ -1232,42 +1204,12 @@ def tool_pull(root=None):
     return True, "  pulled the board: %s -> %s" % (before[:8], after[:8])
 
 
-def restart_follower():
-    """Bounce the always-on host's proxy, which is a process like any other.
-
-    It is the one process here that has to agree with the OTHER machine: it
-    derives the ports a course serves on and reads the choice a board publishes,
-    so a stale one looks for boards where they are no longer and quietly serves
-    the local warm board instead of the lesson on the node.
-
-    Only the one launchd owns. An ad-hoc `bin/follow` on another port is
-    somebody's experiment and is not ours to kill.
-    """
-    if sys.platform != "darwin":
-        return False
-    target = "gui/%d/%s" % (os.getuid(), FOLLOW_LABEL)
-    try:
-        seen = subprocess.run(["launchctl", "print", target],
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if seen.returncode != 0:
-            return False
-        done = subprocess.run(["launchctl", "kickstart", "-k", target],
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except OSError:
-        return False
-    if done.returncode == 0:
-        print("  restarted %s on the new code" % FOLLOW_LABEL)
-        return True
-    print("  could not restart %s; it is still on the old code" % FOLLOW_LABEL)
-    return False
-
-
 def tool_reexec():
     """Replace this process with the version of it that was just pulled.
 
     `bin/tutor` was read into memory when this process started, exactly the way a
-    board reads `serve.py` and the proxy reads `bin/follow`. Pulling a fix to the
-    launcher and then carrying on inside the launcher that was there before the
+    board reads `serve.py`. Pulling a fix to the launcher and then carrying on
+    inside the launcher that was there before the
     pull is the same bug this repository keeps relearning, one level further in --
     and it is the one that would be hardest to see, because the version that
     reports what it did would be the old one.
@@ -1690,17 +1632,15 @@ def agent_stop_elsewhere(cfg, course, host):
     """Ask another machine to stand this course's tutor down, and mean it.
 
     `/handover` refuses while somebody is being taught on the board it is asked
-    about -- see `in_use` -- because the caller it was built for is the
-    follower, and a proxy re-deciding where an address points must not end a
-    live sitting. A person is not that caller. Somebody typing this has decided
-    which machine owns the course, which is the one thing `in_use` was never
-    meant to argue with, so this carries the override.
+    about -- see `in_use` -- because machinery must not end a live sitting. A
+    person is not machinery: somebody typing this has decided which machine owns
+    the course, which is the one thing `in_use` was never meant to argue with,
+    so this carries the override.
 
     It exists because saying which machine owns a course used to mean being sat
-    at the one that had to give it up. On a Mac with Remote Login switched off
-    that means being in the room: the board is the only door that machine opens
-    to the tailnet, and `/handover` is the only thing behind it that stops a
-    tutor.
+    at the machine that had to give it up. The board is the only door a machine
+    opens to the tailnet, and `/handover` is the only thing behind it that stops
+    a tutor.
 
     Reached the way everything else reaches a peer's board -- an ordinary
     socket first, then the SOCKS proxy, which is the only way out of a machine
@@ -1912,9 +1852,9 @@ def headless(cfg, course, agent_name, session):
         # The transcript is versioned so a lesson survives the host it was taught
         # on. Push it on a beat -- pulling first, so whichever machine is active
         # stays caught up with the other. This is what makes a course read the
-        # same on the compute node and the Mac mini without anyone remembering to
-        # push, and it is what makes an allocation dying mid-lesson cost one beat
-        # of work rather than the evening.
+        # same on whichever node it is picked up on without anyone remembering
+        # to push, and it is what makes an allocation dying mid-lesson cost one
+        # beat of work rather than the evening.
         while running["go"]:
             sync_transcript(root, log)
             end = time.time() + 90
@@ -2078,24 +2018,11 @@ def headless(cfg, course, agent_name, session):
                 # the beat we have no time for.
                 sync_transcript(root, log)
 
-                # Now the order, which is the whole point of this branch. This
-                # machine's /health has just started saying it is out, so the
-                # always-on host's proxy will hand the address to a compute node
-                # that still has one -- and that move ends in `/handover`, which
-                # stops this daemon. So: wait one tick before answering. A
-                # compute node on the paid tutor is a better answer than this
-                # machine on a free model, and the wait is the only thing that
-                # lets it win the race.
-                if wait_for_takeover(running, cfg.get("takeover_grace", 45)):
-                    log.write("-- another machine has taken the lesson over\n")
-                    break
-
-                # Nobody took it -- no node is up, or the node has run out too.
-                # A free tutor is now the best this address can do, and it is a
-                # great deal better than a board where nobody answers.
+                # A free tutor is now the best this address can do, and it is
+                # a great deal better than a board where nobody answers.
                 alt = fallback_agent(cfg, agent_name)
                 if alt:
-                    log.write("-- no machine took it over; falling back to '%s'\n" % alt)
+                    log.write("-- no allowance left; falling back to '%s'\n" % alt)
                     agent_name, spec = alt, cfg["agents"][alt]
                     recipe, carried = spec.get("headless"), 0
                     agent_state(live, agent=agent_name, fallback=True)
@@ -2156,12 +2083,10 @@ def headless(cfg, course, agent_name, session):
         agent_state(live, state="wrapping up")
         log.write("\n=== %s handoff ===\n" % time.strftime("%H:%M:%S"))
         # The handoff is the one turn that must not be skipped -- it is the only
-        # continuity the machine taking over has -- and a tutor stopped because
-        # its allowance ran out cannot write it. So whatever this machine can
-        # run for free writes it instead. A handoff in the free tutor's words is
-        # worth incomparably more than no handoff at all, and this is the exact
-        # moment `/handover` produces: the address has moved, and the last thing
-        # asked of the machine being left is the one thing it can no longer do.
+        # continuity the next session has -- and a tutor stopped because its
+        # allowance ran out cannot write it. So whatever this machine can run
+        # for free writes it instead. A handoff in the free tutor's words is
+        # worth incomparably more than no handoff at all.
         if limits.limited_until():
             alt = fallback_agent(cfg, agent_name)
             if alt:
@@ -2216,8 +2141,7 @@ def cmd_restart(cfg, args):
 
     Only boards that are actually answering on this node are touched -- a record
     on a shared filesystem may belong to another machine, and stopping a stranger's
-    process is worse than leaving a stale one. The always-on host's proxy is
-    bounced too, for the same reason the boards are; `--tutors` adds the daemons.
+    process is worse than leaving a stale one. `--tutors` adds the daemons.
     """
     host = this_host()
     touched, skipped = [], []
@@ -2246,14 +2170,6 @@ def cmd_restart(cfg, args):
         print("no boards were running on %s" % host)
     for s2 in skipped:
         print("  left alone: %s" % s2)
-
-    # The proxy on the always-on host is a long-lived process out of this same
-    # repository, and "restart every board here on the current code" has to mean
-    # it too: it derives the ports a course serves on, so a follower a few commits
-    # behind the boards it is looking for knocks in the wrong place and quietly
-    # serves the local warm board instead of the lesson. A no-op anywhere there is
-    # no follower, which is every machine but one.
-    restart_follower()
 
     if "--tutors" not in args:
         return 0
@@ -2441,6 +2357,183 @@ def prune_dead_records(cfg, host):
     return swept
 
 
+def allocation_nodes():
+    """The compute nodes this user holds, best first.
+
+    `machine.slurm_nodes()` answers the set question -- is the node in that
+    record still mine -- and a set has no order. This one has to choose a machine
+    to hand work to, so it is ordered, and the order is three rules deep:
+
+    1. The node a board is already on. A lesson that is up is the answer to
+       "which machine", and moving one that is alive is exactly what `tutor
+       resume` refuses to do.
+    2. The allocation this shell belongs to. `salloc` puts its job id in the
+       environment of the shell it starts, so that is the allocation the person
+       asked for a moment ago.
+    3. Everything else, newest allocation first.
+    """
+    order = list(hostnames(os.environ.get("SLURM_JOB_NODELIST")
+                           or os.environ.get("SLURM_NODELIST")))
+    for _, nodes, _jid in _running_jobs():
+        order += nodes
+
+    seen, out = set(), []
+    for n in order:
+        n = n.split(".")[0].lower()
+        if n and n not in seen:
+            seen.add(n)
+            out.append(n)
+    return out
+
+
+def hop_to_allocation(cfg, rest):
+    """Run this resume on the compute node, from the login node that holds it.
+
+    `salloc` hands you a shell ON THE LOGIN NODE and holds the allocation from
+    there. The compute node itself gets no login at all, so the one moment a
+    node was said to get -- the moment you log in to it -- did not happen unless
+    somebody went and made it happen, by opening a terminal on the node and
+    leaving it open. That is the ceremony: the allocation exists, the machine is
+    yours, the board is not running, and the thing standing between them is a
+    person typing on a second machine.
+
+    So the login node hands the whole job over. It is the same command on the
+    other end -- the node pulls, re-execs onto what it pulled, bounces whatever
+    is holding the old code, starts the board, re-points the tailnet name and
+    attaches a tutor -- and nothing about the decision is made here. This
+    machine only knows which node to knock on.
+
+    Returns an exit code when it tried, or None when there is nothing to hand
+    the work to, in which case the caller carries on as before.
+    """
+    if "--no-hop" in rest or os.environ.get("TUTOR_BOARD_NO_HOP"):
+        return None
+    if "--force" in rest:
+        # `--force` has one meaning already -- take the board off a machine that
+        # is still alive -- and it is aimed at THIS machine. Leave it there.
+        return None
+    mine = machine.slurm_nodes()
+    if mine is None or not mine:
+        return None                       # not a cluster, or nothing allocated
+    host = this_host()
+    if host in mine:
+        return None                       # this IS the allocation; resume here
+
+    where = {}
+    course = last_board(cfg)
+    if course:
+        where = board_record(course["root"]) or {}
+    order = ([where["node"]] if where.get("node") else []) + allocation_nodes()
+    target = next((n for n in order if n in mine and n != host), None)
+    if not target:
+        return None
+
+    remote = [sys.executable, os.path.realpath(__file__), "resume", "--no-hop"]
+    remote += [a for a in rest if a != "--no-hop"]
+    line = " ".join(shlex.quote(a) for a in remote)
+
+    # One line either way, and it is printed even under `--quiet`. Quiet is for
+    # a login that had nothing to do; this one crossed a machine, and it is the
+    # only trace of that anywhere.
+    def tell(msg):
+        print("%s: %s" % (target, msg))
+
+    # ssh first, because it leaves nothing behind on this machine: the board ends
+    # up in the node's own user session, exactly where it sits when somebody
+    # opens a terminal there, and it needs no process here to stay alive.
+    try:
+        p = subprocess.run(["ssh", "-n", "-o", "BatchMode=yes",
+                            "-o", "ConnectTimeout=10", "-o", "LogLevel=ERROR",
+                            "-o", "StrictHostKeyChecking=accept-new",
+                            target, line],
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           stdin=subprocess.DEVNULL, timeout=300)
+        out, code = p.stdout.decode("utf-8", "replace"), p.returncode
+    except subprocess.TimeoutExpired:
+        out, code = "", 255
+    except OSError as exc:
+        out, code = str(exc), 255
+
+    if code != 255:
+        for l in out.splitlines():
+            if l.strip():
+                tell(l.strip())
+        if not out.strip():
+            tell("nothing to do")
+        return code
+
+    # ssh could not get in. On a cluster that is usually a credential this shell
+    # does not have rather than anything being wrong with the node, and Slurm
+    # will run something there without one -- so ask it to. The step has to
+    # OUTLIVE the command: everything a step starts is in the step's cgroup, and
+    # that cgroup is emptied the moment the step ends, detached or not. So it
+    # holds itself open, which ties the board's life to the allocation's -- which
+    # is the truth about a compute node anyway.
+    job = os.environ.get("SLURM_JOB_ID") or ""
+    if not job:
+        for when, nodes, jid in _running_jobs():
+            if target in nodes:
+                job = jid
+                break
+    if not job:
+        tell("ssh could not get in, and no job id to hand it to Slurm with")
+        return 1
+    log = open(os.path.expanduser("~/.tutor-resume.log"), "a", buffering=1)
+    step = ["srun", "--overlap", "--jobid", job, "--nodes=1", "--ntasks=1",
+            "--nodelist", target, "bash", "-c", line + "; exec sleep 31536000"]
+    try:
+        subprocess.Popen(step, stdout=log, stderr=subprocess.STDOUT,
+                         stdin=subprocess.DEVNULL, start_new_session=True)
+    except OSError as exc:
+        tell("ssh could not get in, and neither could srun: %s" % exc)
+        return 1
+    tell("ssh could not get in; started inside job %s instead, which holds the "
+         "board open for as long as the allocation" % job)
+    return 0
+
+
+def hostnames(spec):
+    """Expand a Slurm nodelist -- `compute[303-305]` -- into names.
+
+    Slurm writes a set of machines as one string, and a name tested against that
+    string with `in` is a substring match: `compute30` is in `compute[301,305]`
+    and is not one of them. `scontrol` is the only thing entitled to read this
+    notation, so it does.
+    """
+    spec = (spec or "").strip()
+    if not spec:
+        return []
+    try:
+        p = subprocess.run(["scontrol", "show", "hostnames", spec],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                           timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if p.returncode != 0:
+        return []
+    return [l.strip() for l in p.stdout.decode("utf-8", "replace").splitlines()
+            if l.strip()]
+
+
+def _running_jobs():
+    """(start time, node names, job id) per running allocation, newest first."""
+    out = []
+    try:
+        p = subprocess.run(["squeue", "-h", "-u", os.environ.get("USER", ""),
+                            "-t", "RUNNING", "-o", "%S|%N|%i"],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                           timeout=10)
+        if p.returncode != 0:
+            return []
+        for line in p.stdout.decode("utf-8", "replace").splitlines():
+            bits = line.split("|")
+            if len(bits) == 3 and bits[1].strip():
+                out.append((bits[0].strip(), hostnames(bits[1]), bits[2].strip()))
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    return sorted(out, reverse=True)
+
+
 def cmd_resume(cfg, args):
     """Take the board over on this machine. Safe to run from a login hook.
 
@@ -2484,8 +2577,7 @@ def cmd_resume(cfg, args):
     # course last worked in -- exactly one of them -- so any other board that
     # fell over while nobody was sitting at this machine stayed down until a
     # person noticed and said so. From the iPad that is a course in the hub that
-    # will not open, on a machine that is otherwise perfectly healthy, and the
-    # whole point of the always-on host is that nobody has to be here.
+    # will not open, on a machine that is otherwise perfectly healthy.
     #
     # Three conditions, and each one is a thing that must NOT be started: only
     # where a record exists, so a course nobody has ever opened is not brought up
@@ -2526,9 +2618,8 @@ def cmd_resume(cfg, args):
 
     # Catch up before anything else, on every resume and not only the one that
     # starts a fresh board: a handoff or a pushed chapter written on the machine
-    # you just left is the whole point of writing it down, and the always-on
-    # host's periodic resume is what keeps its warm board from going stale.
-    # Fast-forward only and never fatal, so it is cheap to run on a timer.
+    # you just left is the whole point of writing it down. Fast-forward only and
+    # never fatal, so it is cheap to run on every login.
     sync(root, quiet=True)
 
     if on == host and processes.board_is_running(info.get("pid"), root):
@@ -2541,25 +2632,14 @@ def cmd_resume(cfg, args):
         return 0
 
     if on and on != host and not force:
-        # The always-on host is the exception, and deliberately: a course cloned
-        # here is taught here. It does not share a filesystem with the compute
-        # node, so a record naming that node is not something this machine can
-        # check at all -- and deferring to one would leave the machine that holds
-        # the repository and never sleeps permanently unable to host it. Bringing
-        # a board up here does not stop the other one; the proxy asks it to hand
-        # its tutor over as the address moves, which is the other half of this.
-        if machine.machine_shape() == "always-on host":
-            say("%s is recorded on %s; this machine holds the repository, so it "
-                "comes up here" % (course["dir"], on))
-        else:
-            # A record from another node proves nothing on a shared filesystem, so
-            # ask Slurm whether that machine is still a machine you hold. Unknown --
-            # no squeue at all -- is not the same as gone, and is left alone.
-            nodes = machine.slurm_nodes()
-            if nodes is None or on in nodes:
-                say("%s is on %s, which is still yours; leaving it there "
-                    "(--force to move it here)" % (course["dir"], on))
-                return 0
+        # A record from another node proves nothing on a shared filesystem, so
+        # ask Slurm whether that machine is still a machine you hold. Unknown --
+        # no squeue at all -- is not the same as gone, and is left alone.
+        nodes = machine.slurm_nodes()
+        if nodes is None or on in nodes:
+            say("%s is on %s, which is still yours; leaving it there "
+                "(--force to move it here)" % (course["dir"], on))
+            return 0
 
     # Not every machine you log in to is a machine you should start a board on.
     # A login node is shared, is not yours, and is where long-running processes
@@ -2843,6 +2923,13 @@ def main(argv):
 
     if args and args[0] == "resume":
         rest = argv[argv.index("resume") + 1:]
+        # A login node holding an allocation does none of this itself. It hands
+        # the whole command to the node, which is the machine that should be
+        # pulling, re-execing and bouncing its own boards -- so the hop comes
+        # before the pull, not after it.
+        hopped = hop_to_allocation(cfg, rest)
+        if hopped is not None:
+            return hopped
         # Before anything, and before the course is caught up: this is what a
         # login hook runs, and on a compute node it is the only moment there is.
         tool_sync(cfg, quiet="--quiet" in rest)

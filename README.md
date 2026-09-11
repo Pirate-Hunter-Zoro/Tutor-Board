@@ -45,7 +45,57 @@ now: one interface, one method, whether the exercises are proofs or functions.
 >   board that is answering) but it is worth confirming: the port the HTTPS name points at should
 >   be the course they are working in.
 >
-> ### Where this is right now, 11 September 2026
+> ### Where this is right now, 11 September 2026 (later)
+>
+> **One machine serves the board.** Its tailnet name is the one origin the iPad app is installed
+> against, and it opens whichever course was last chosen on it — `board net` prints the address.
+> `tailscale serve` only ever proxies to a port on the machine running it, so there is no
+> arrangement in which one origin serves two machines; a second machine that teaches gets a name and
+> an icon of its own. Everything under
+> [One address, and the machine holding it](#one-address-and-the-machine-holding-it) follows from
+> that one sentence.
+>
+> **Three things reported from the iPad, all of them somebody unable to get where they were going.**
+>
+> **The contents drawer could not be scrolled, so the problem sets could not be reached.** *"I'm in
+> Probability right now, and the bar showing the contents and the Problem Sets is not scrollable, so
+> I can't reach the problem sets."* Every drawer on this page is the same shape — a fixed panel from
+> the top of the glass to the bottom, a head and a foot that do not move, and a list between them —
+> so the list is the part that scrolls, and being *inside* a panel does not make it a scroller. Four
+> of the five lists carry the two declarations that say so. `#contents-list` carried neither, laid
+> out at its full height, and ran off the bottom edge where there is nothing to scroll and no way to
+> reach it. Probability's eleven chapters reach the bottom of an iPad on their own, which put every
+> problem set past it. `test/chrome.js` now asserts the rule for all five rather than for the one
+> that happened to be reported.
+>
+> **`salloc` is the whole of it now.** *"I don't want to have to have an open VSCode session on my
+> laptop ssh'ed into a compute node."* `salloc` hands you a shell on the LOGIN node and leaves the
+> machine it gave you with nobody on it — so "the only moment a compute node gets is the moment you
+> log in to it" was a moment that only ever arrived because somebody kept a second session alive by
+> hand. The login hook fires on the login node too, and `tutor resume` there hands the whole command
+> to the node: it pulls, re-execs onto what it pulled, bounces what is holding the old code, brings
+> the board up, re-points the name and attaches a tutor. ssh first, because it leaves no process
+> behind on the login node; a Slurm step that holds itself open where ssh cannot get in. See
+> [`salloc` is the whole of it](#salloc-is-the-whole-of-it). `test/resume.py` holds the rules for
+> which node, both ways in, and the two escapes.
+>
+> **Switching course in the hub could not be made to work.** *"whenever I want to switch courses on
+> a host, when I have the switch option, I can hit it, but it never seems to work. It just gives me
+> the options to 'ask again' or 'stay here'."* A course has its own port, so opening one means
+> re-pointing the one name the app is installed against — and nothing did it. The hub asked the
+> address which course it was serving, got the old answer for a minute, and then had nothing to say
+> but that. So `/switch` takes the name itself, in the same request, on the machine that starts the
+> board: a tap is a person naming the lesson they want, which is exactly the case `ts_repoint` holds
+> a name *for* rather than against. The overlay asks nothing now — a tap dismisses it — and a course
+> on another machine says where it is instead of waiting for an address that will never serve it.
+> `test/hub.js` drives the tap in a real DOM; `test/choice.py` holds the rule. Shell version
+> `board-shell-v90`.
+>
+> **Still to do, and it is one line:** `scripts/retire-host.sh` and `scripts/tool-pull.sh` exist only
+> to reach a machine nobody can log in to, through the round that pulls this repository. Once the
+> machine they are aimed at has answered, both go.
+>
+> ### Where this was earlier on 11 September 2026
 >
 > **A regression, and the latent defect underneath it that made both symptoms.** Reported
 > immediately after the last ship: *"Now zooming on the writing board is fucked up!!! One finger
@@ -2335,9 +2385,6 @@ push with no assistant attribution; Tailscale in userspace mode with HTTPS; the 
   knobs are `SMOOTH` and `RESAMPLE` at the top of `web/slate-core.js`.
 - *How it looks.* There is no browser on the machine this was written on. Every visual judgement
   in here is inference.
-- *macOS.* No longer unverified: this is now written and tested **on** the Mac mini, which is the
-  always-on host. The platform paths in `tutorboard/`, `bootstrap.sh` and the LaunchAgent are
-  exercised every time the suite runs here.
 - *Headless mode.* `tutor headless` has never been run against a real agent end to end. The
   `headless` recipes in the config are best guesses at each tool's non-interactive flags. The
   wrap-up turn that writes `HANDOFF.md` rides on that path and is equally unexercised.
@@ -2346,11 +2393,9 @@ push with no assistant attribution; Tailscale in userspace mode with HTTPS; the 
   the match is under test; the match itself is only confirmed the first time an allowance really
   runs out. If it turns out to say something else, that is one list in the config and no code —
   and the failure mode of a miss is the old behaviour, a turn that failed, rather than anything new.
-- *Always-on hosting.* Built and running. The Mac mini is the always-on host — it has the `follow`
-  block, `bin/follow` proxies the one tailnet address to whichever machine is serving, and it
-  teaches for nothing so that being awake all day costs nothing (see [the machine that may not
-  spend](#the-machine-that-may-not-spend)). The compute node holds the allowance and gets the
-  lesson when there is one to spend.
+- *macOS.* The platform paths in `tutorboard/`, `bootstrap.sh` and the LaunchAgent are written
+  from the documentation rather than from use. Everything this repository is actually run on is
+  Linux.
 
 ### Things that broke, and must not break again
 
@@ -2390,7 +2435,7 @@ these tests fail, the test is right.
 | A headless tutor was refused the card write it was woken to make, and exited 0 — the board showed silence | `test/agents.py`, and `board start` writes the course's permissions |
 | The machine renamed itself from the network mid-session, so a running board became another node's and could not be restarted | `test/node.py` |
 | A whole machine vanished from the hub, because it was looked for at the ports of the courses cloned on the machine doing the looking — and the row of machines hid itself when it was left with one | `test/peers.py`, `test/hub.js` |
-| The proxy moved the address off a live compute node without asking it to wrap up, stranding a tutor that went on teaching into a copy nobody could reach | `test/choice.py` |
+| A board was asked to stand its tutor down while somebody was being taught on it, and the daemon answered the turn in flight, wrote its handoff and left — mid-exercise | `in_use` in the machines route; `test/keeping.py` |
 | A restart brought back the tutor that was running rather than the one the config named, so a changed default never reached a course | `test/agents.py` |
 | The default agent's command was not installed, so the daemon read as *listening* and failed every turn into a log | `test/agents.py` |
 | A board whose node had died read as a tutor who had not written yet — same words, and a dot the size of a full stop for a difference | `test/link.js` |
@@ -2421,8 +2466,7 @@ these tests fail, the test is right.
 | Annotation ink was faceted and jagged next to the slate's: the layer joined raw pointer samples with straight lines, redrew every stroke inside the pointer handler, and never asked for the samples the Pencil actually took | `test/link.js` |
 | A `begin` signal sent while no tutor was attached was invisible for ever: `board wait` took the unread count at start as a baseline and returned only when it grew, so the first tap did nothing and the second one woke it | `test/begin.py` |
 | A resumed turn was told to re-read the contract, the method, the handoff and every card — about fourteen thousand tokens it was already carrying, plus a round trip per card | `test/tokens.py` |
-| A board that was merely running captured the one address off a machine mid-lesson: the follower weighed "the board serving the chosen course" and "some board that answered over there" as if they were the same kind of claim, so `prefer` and the allowance rule decided between a lesson and a stranger | `test/choice.py` |
-| A course tapped in a hub served by the other machine recorded the choice *over there*, where the follower never read it — the tap started the board, moved nothing, and looked broken | `test/choice.py`, and `/health` now publishes when the choice was made |
+| A course tapped in the hub started its board and moved nothing: the one address the app is installed against went on opening the course before it, which reads as a tap that did nothing | the machine serving takes the tailnet name for the course it opens, in the request; `test/choice.py`, `test/hub.js` |
 | A refresh landed in another course, and tapping the right one in the hub changed nothing: `agent_start` spawns `tutor headless <course>`, which recorded a *person's* course choice — and its callers are all timers, one of which loops over every course, so each tick handed the address to whichever course the loop finished on, and `tutor resume` then re-elected it from the record it had just written | `test/choice.py` |
 | The tutor's own thinking was written onto the board as the lesson: the free chain's models reason in the first person about the student, and the reply was taken from `message.content` and used whole | `test/reasoning.py`, and `tutorboard.reasoning.strip_reasoning` on the wire and again at `board write` |
 | And it was the whole card rather than a preamble to it, because the front-matter parser was anchored at position zero — anything in front of the opening `---` sent the reply down the branch that makes the entire text the body | `test/reasoning.py` |
@@ -2474,7 +2518,7 @@ these tests fail, the test is right.
 | A written answer was shown twice: a frozen picture of the ink under the question, and the board carrying the same ink under the feedback — one of them dead, and the dead one was the one you met first scrolling back up. The freezing was right when the slate was ONE surface that got written over, because then the picture was the only copy of what had been handed in; it stopped being right when every question got a page that is never wiped | the board is the answer; the turn keeps its heading and one line pointing at it, and the picture returns wherever there is no board — a filed lesson, a past one, a browser that never held the page; `test/feedback.js`, `test/interactive.js` |
 | Getting an exercise RIGHT deleted every writing board in the lesson. The boards were painted only while an answer was *owed*, and a `correct` card owes nothing — so finishing a problem left the transcript as frozen pictures of what had been sent, with no surface under any earlier question to add a line to. A picture is a record of an answer, not a place to write one | the boards are painted for the whole live lesson; the one question that goes without a picture is the one the real surface is sitting under; `test/feedback.js` |
 | Pressing *type* did nothing on a question already answered in ink. `panelKind` read the question's history before anything else, and a sent ink turn answered "write" whatever the tabs were told — so the press set the remembered kind, repainted, and was overruled on the way back. Which is every question worth typing about: you write the proof, the tutor asks what you meant by a line of it, and the answer to that is a sentence | `pickedKind`, recorded against the question the tab was pressed on and read before the history — the same rule as `chosen.json`, that a decision outranks an inference; `test/feedback.js` |
-| The compute node never pulled the board. Every session pulled the *course*, and the always-on host had a timer for the tool, but `--tool-pull` refuses to install one on a node — so the node ran whatever it was last pulled by hand, indefinitely, while the Mac moved on. And the timer that did run bounced only the proxy on purpose, so the Mac's own boards and tutors went on serving the old code after every pull: a fix reached the disk of both machines and the lesson of neither | `tutor` and `tutor resume` pull this repository, re-exec onto it, and then `tutor restart --tutors`; `scripts/tool-pull.sh` does the same; `test/resume.py` |
+| The node never pulled the board. Every session pulled the *course*, and no timer can keep a machine that ceases to exist current — so a node ran whatever it was last pulled by hand, indefinitely. And a pull that bounces nothing leaves the boards and tutors serving the old code: a fix reaches the disk and not the lesson | `tutor` and `tutor resume` pull this repository, re-exec onto it, and then `tutor restart --tutors`; `test/resume.py` |
 | ...and the first version of that fix could not say it had happened: `execve` throws away whatever is sitting in the process's buffers, and stdout is a pipe or a log file every time this runs for real — so the one line explaining why the board changed under somebody's lesson was dropped on the way out | a flush before the exec; `test/resume.py` drives a real clone and reads what it printed |
 | A deploy dropped somebody mid-proof into a different course: starting a board claimed the tailnet name unconditionally, and `tutor restart` restarts every board on the machine one after another — so the address ended up wherever the course list happened to end. The installed app has one URL baked into it and no way to say which lesson it wanted | `ts_repoint` will not take a name from a board that is still answering; `board vpn serve` is the one command that does, because that is a person asking; `test/address.py` |
 | An evening's homework was written up and could not be typeset. Two causes wearing one face. A course's `.claude/settings.local.json` was written the first time its board started and never touched again, so a course created before the LaTeX grant existed was never going to get it — and the tutor, refused the compiler, reasonably concluded the machine was the problem. Underneath that, `board hw build` handed the course's own `scripts/build.sh` whatever `PATH` the board process happened to have: that script prepends TinyTeX's *Linux* directory, and on the Mac, started by a login agent with `/usr/bin:/bin` and nothing else, there was no `pdflatex` to find. The sheet was complete and correct the whole time | the grant covers `pdflatex`, `latexmk`, the course's build script and the rest of the toolchain, and `install_permissions` now tops an existing file up instead of skipping it — appending only what is missing, so a course's own list survives intact; the build runs under `tutorboard.tex.tex_env()`, which already knew every place a TeX gets installed on either machine; `test/agents.py`, `test/homework.py` |
@@ -2664,12 +2708,11 @@ and is the practical one on iOS, where dragging a file onto a web page is awkwar
 
 ## Setting up a second machine
 
-The natural arrangement is an always-on host for the daemon and whatever other machines you
-happen to work on. One script does the whole setup:
+Every machine that teaches is set up the same way, and one script does the whole of it:
 
 ```
 git clone https://github.com/<you>/Tutor-Board ~/Tutor-Board
-cd ~/Tutor-Board && bash bootstrap.sh --name mac-mini
+cd ~/Tutor-Board && bash bootstrap.sh --name desk
 ```
 
 It installs `tutor` and `board`, clones the course repositories, turns on the commit-attribution
@@ -2695,7 +2738,7 @@ for d in ~/*/; do git -C "$d" remote get-url origin 2>/dev/null; done
 
 The tailnet identity is one machine that moves, which is what keeps the address stable across
 compute nodes on a shared home. Two hosts cannot both answer to `board`, so give the second its
-own name — `bootstrap.sh --name`, or `board vpn up --hostname mac-mini` later. Each gets its own
+own name — `bootstrap.sh --name`, or `board vpn up --hostname desk` later. Each gets its own
 `*.ts.net` address; install the board on the iPad from each, and you have two icons with no
 ambiguity about which machine you are talking to.
 
@@ -2739,6 +2782,41 @@ What it is careful about is when *not* to act:
 - no Slurm at all means *unknown*, not *gone*, and is also left alone;
 - a machine Slurm does not list as yours — a login node — gets no board at all.
 
+### `salloc` is the whole of it
+
+**The machine you were given has nobody on it.** `salloc` grants an allocation and hands you a shell
+on the **login node**; the compute node itself never gets a login, so "the only moment a compute
+node gets" was a moment that never arrived unless somebody opened a terminal on the node by hand and
+left it open. That is the ceremony: the allocation exists, the machine is yours, the board is not
+running, and the thing standing between them is a person keeping a second session alive on a laptop.
+
+So the login node hands the whole command over. `tutor resume` on a machine that holds an allocation
+it is not part of runs the same command on the node instead, and everything that decides anything
+happens over there — the node pulls this repository, re-execs onto what it pulled, bounces whatever
+is holding the old code, starts the board for the course you were last in, re-points the tailnet
+name and attaches a tutor. The login node only ever decides which node to knock on.
+
+Which node, in three rules: the one a board is already on, because a live board is never moved; then
+the allocation this shell belongs to, since `salloc` puts its job id in the environment of the shell
+it starts; then the newest allocation. Only ever a node Slurm says is yours.
+
+It goes in over **ssh**, which leaves nothing behind on the login node: the board ends up in the
+node's own session, exactly where it sits when somebody opens a terminal there. Where ssh cannot get
+in — a cluster whose credentials do not reach the nodes — the work goes into a **Slurm step**
+instead, which needs no credential of its own and which holds itself open for the life of the
+allocation. That last part is not decoration: everything a step starts lives in the step's cgroup,
+and that cgroup is emptied the moment the step ends, detached or not.
+
+```
+salloc …                     and nothing else
+tutor resume --no-hop        do it here, wherever here is
+TUTOR_BOARD_NO_HOP=1         the same, for a shell
+```
+
+One line lands in `~/.tutor-resume.log` either way, naming the node and what it said. That is
+deliberate even under `--quiet`: quiet is for a login with nothing to do, and this one crossed a
+machine.
+
 To make it automatic:
 
 ```
@@ -2746,8 +2824,10 @@ bash scripts/install-autostart.sh --login-hook
 bash scripts/install-autostart.sh --uninstall
 ```
 
-That appends a marked block to `~/.bashrc`, which the shared home puts on every node. It is what
-keeps the node current: a fix shipped from the Mac is pulled, the launcher re-execs onto it, and
+That appends a marked block to `~/.bashrc`, which the shared home puts on every node **and on the
+login node** — which is the point of it being on every shell rather than only on the ones you open
+on a compute node. It is what keeps the node current: a fix shipped from anywhere is pulled, the
+launcher re-execs onto it, and
 anything still running the old code is bounced — see
 [Every session starts by catching up](#every-session-starts-by-catching-up). It runs in
 **interactive shells only** — a login file that writes to stdout breaks `scp`, `sftp` and
@@ -2755,13 +2835,12 @@ git-over-ssh with a remote error nobody can read — takes a lock so five termin
 backgrounds itself so no prompt ever waits on the network. `~/.tutor-resume.log` has whatever it
 said; `export TUTOR_BOARD_NO_RESUME=1` turns it off for one shell.
 
-This is a workaround for not having an always-on machine, not a substitute for one. It still means
-the board is up only when you are logged in somewhere. The Mac mini design under
-[Not yet built](#always-on-with-the-machine-that-holds-the-repository-preferred) is the real answer.
+The board is up for as long as the allocation is, which is the honest ceiling on a cluster: nothing
+on a node outlives the job that gave it to you.
 
 ### Surviving a reboot
 
-An always-on machine is always on until it isn't.
+A machine that stays on is always on until it isn't.
 
 ```
 bash scripts/install-autostart.sh Galois-Theory opencode
@@ -2822,10 +2901,10 @@ and exits:
 `{prompt}` is substituted. Continuity across turns is the agent's own business; the flag that
 resumes its session belongs in the recipe. Output goes to `live/agent.log`.
 
-**This needs a machine that stays on.** On a cluster node your processes live and die with your
-allocation, so the daemon dies when the job ends — headless there is only useful for as long as
-you hold the node. An always-on machine is the right home for it: a Mac mini already on your
-tailnet, with its own clones of the course repositories, kept in step by pushing.
+**It lives as long as the machine does.** On a cluster node your processes live and die with your
+allocation, so the daemon goes when the job ends — which is the same ceiling everything else here
+has, and the reason a session's continuity is written to a file and pushed rather than held in a
+process.
 
 ### What a session costs, and why that is a design question
 
@@ -3000,7 +3079,7 @@ tutor where
 ```
 
 ```
-this machine: mac-mini
+this machine: compute301
 
   Galois Theory            board:up :8787   agent:opencode listening
   Probability              board:-          agent:-
@@ -3033,9 +3112,11 @@ The tailnet identity is one machine that moves, so `board.<tailnet>.ts.net` poin
 host currently holds it, and `board vpn up` refuses to start a second daemon against the same
 state. That is the right behaviour for one machine at a time.
 
-If you want an always-on host *and* an occasional cluster node live together, give them separate
-identities — a different `--hostname` and a different `TS_DIR` on the second — and install the
-board on the iPad from each address. Two apps, two icons, no ambiguity about which is which.
+If you want two machines live at once, give them separate identities — a different `--hostname`
+and a different `TS_DIR` on the second — and install the board on the iPad from each address. Two
+apps, two icons, no ambiguity about which is which. An address only ever opens a board on the
+machine that holds it: `tailscale serve` will not proxy to a remote backend, and answers every
+request with a 502 if you ask it to.
 
 ### Which assistant runs is configuration
 
@@ -3094,8 +3175,7 @@ turn, which exhausts the free tiers; a tutoring turn is three small steps and th
 those. `raw_prompt` hands the script the raw inbox instead of the instruction prompt, and its
 interactive `cmd` is opencode, so a person asking for a terminal session still gets one.
 
-It is the default on the Mac mini and it is the floor everywhere else: when the paid tutor's
-allowance runs out and no compute node can pick the lesson up, this is what answers — see [when the
+It is the floor: when the paid tutor's allowance runs out, this is what answers — see [when the
 allowance runs out](#when-the-allowance-runs-out).
 
 #### The chain finds its own models
@@ -3174,13 +3254,13 @@ particular assistant regardless of where it runs. Four layers settle it, most sp
 |---|---|---|
 | `--agent opencode` | the command line | this once |
 | `"agent": "opencode"` | the course's `tutorboard.json` | this course, on every machine |
-| `"hosts": { "mac-mini": "deepseek" }` | the config, by short hostname | this machine, every course |
+| `"hosts": { "desk": "deepseek" }` | the config, by short hostname | this machine, every course |
 | `"default_agent"` | the config | everything else |
 
 ```json
 {
   "default_agent": "claude",
-  "hosts": { "mac-mini": "deepseek", "compute301": "claude" },
+  "hosts": { "desk": "deepseek", "compute301": "claude" },
   "agents": {
     "claude":   { "cmd": ["claude"], "prompt": "argv",
                   "headless": ["claude", "-p", "{prompt}", "--continue"] },
@@ -3197,23 +3277,22 @@ and "opencode with something else" are two names in this file and nothing in the
 **`fallback_agent` is not a fifth layer either.** The four above answer *which assistant this course
 wants*; the fallback answers *what to do when the one it wants has nothing left to spend*. It is one
 name — `free` by default, `null` to turn the whole thing off — and it is used only after a turn has
-failed on a usage limit and no other machine has taken the lesson over. Nothing falls back from it,
-which is the point of it being the free one.
+failed on a usage limit. Nothing falls back from it, which is the point of it being the free one.
 
 ### The machine that may not spend
 
-The Mac mini teaches for nothing. The compute node teaches with Claude. That is one line of
-configuration and it is deliberately **outside** the four-layer order above rather than another
-entry in it:
+A machine can be told it may not run a billed tutor at all. That is one line of configuration and it
+is deliberately **outside** the four-layer order above rather than another entry in it:
 
 ```json
 { "free_only": true, "fallback_agent": "free" }
 ```
 
 Three of those four layers can reach a machine from somewhere else. A course repository is a clone,
-so `"agent": "claude"` written in one is a sentence about a compute node that arrives on the Mac
-with the next `git pull` and takes effect there silently. A `hosts` table is written once and
-copied. A `--agent claude` is the same mistake made in person, on the wrong machine. **None of those
+so `"agent": "claude"` written in one is a sentence about the machine it was written on, and it
+arrives everywhere else with the next `git pull` and takes effect there silently. A `hosts` table is
+written once and copied. A `--agent claude` is the same mistake made in person, on the wrong
+machine. **None of those
 is a reason for this machine to start billing**, so none of them wins: the resolved agent is checked
 against what it costs, and a paid one is replaced by whatever this machine runs for nothing.
 
@@ -3249,17 +3328,9 @@ A refusal is never silent and never leaves the board empty. The swap is reported
 goes to `fallback_agent` — which is itself verified free, because a config naming a paid fallback on
 a free-only machine is a mistake worth refusing rather than obeying.
 
-The two machines are set up by two scripts, and neither undoes the other:
-
-```
-bash scripts/setup-mac.sh      # free_only on, pins the name, writes the follow block,
-                               # and proves the free chain answers before saying it is done
-bash scripts/setup-node.sh --secret <…>   # free_only off — this is where the allowance lives
-```
-
-Each refuses to run on the other's machine, decided from what is actually true — Slurm answering
-means a compute node, a `follow` block means the always-on host — rather than from a hostname.
-`test/free.py` holds the whole arrangement.
+A compute node is the machine that holds the allowance, and `scripts/setup-node.sh` asserts exactly
+that: it takes `free_only` off, because a node that will not spend is a node whose allowance nothing
+ever uses. `test/free.py` holds the arrangement.
 
 ### The assistant belongs to the course, not to the terminal
 
@@ -3316,20 +3387,19 @@ acts on the repository it is standing in — and the launcher never makes you ru
 ### Every session starts by catching up
 
 Before the board comes up and before an assistant is launched, the launcher runs a
-fast-forward-only `git pull` in the course. A handoff written on the Mac mini is worth nothing to a
-compute node that never fetched it, and the whole point of writing it down is that the work moves
-between machines.
+fast-forward-only `git pull` in the course. A handoff written on the machine you left is worth
+nothing to the one you arrive on until it is fetched, and the whole point of writing it down is that
+the work moves between machines.
 
 It is deliberately never fatal. No remote, no network, or a branch that has diverged: it says so in
 one line and the session starts anyway on what is on disk. Somebody holding an iPad cannot resolve
 a merge, and a session that refuses to start is worse than a session that starts a commit behind.
 
 **And the board pulls itself, on the same beat.** The course was only ever half of it: `tutor` and
-`tutor resume` also fast-forward *this* repository, under the same never-fatal rule. The always-on
-host had a timer for that and a compute node had nothing at all — `--tool-pull` refuses to install
-one there, because a timer on a machine that ceases to exist is not a plan — so a fix shipped from
-the Mac sat on GitHub until somebody remembered to `git pull` by hand on the node. Remembering by
-hand is the thing this repository keeps failing at, and a login is the only moment a node gets.
+`tutor resume` also fast-forward *this* repository, under the same never-fatal rule. No timer can do
+it on a compute node, because a schedule on a machine that ceases to exist is not a plan — so a fix
+sat on GitHub until somebody remembered to `git pull` by hand. Remembering by hand is the thing this
+repository keeps failing at, and a login is the only moment a node gets.
 
 Two things follow from the pull, and neither is optional:
 
@@ -3338,8 +3408,8 @@ Two things follow from the pull, and neither is optional:
   launcher that was there before the pull is the same defect one level further in — and the hardest
   version of it to see, because the code reporting what it did would be the code that was replaced.
 - **Then it bounces what is still holding the old code**, which is `tutor restart --tutors`: the
-  boards answering on this machine, the tutors that are not mid-turn, and the proxy if this is the
-  always-on host. This is `scripts/ship.sh` seen from the other end. Shipping bounces the machine a
+  boards answering on this machine and the tutors that are not mid-turn.
+  This is `scripts/ship.sh` seen from the other end. Shipping bounces the machine a
   change is *written* on; without the same act on the machine that *receives* it, the fix is on
   disk and nowhere else, and the pages look new while the endpoints behind them are the old ones.
 
@@ -3347,130 +3417,58 @@ Only the two commands that begin a session do this. `tutor restart` does not, be
 calls it seconds after its own push and a second fetch there is a network round trip that finds
 nothing.
 
-### Always-on, with the machine that holds the repository preferred
+### One address, and the machine holding it
 
 **The goal.** Open the app on the iPad, pick a course, get a session. No command anywhere, ever.
 Nothing about how that is arranged is visible to the person holding the iPad.
 
-**Which machine serves is now decided by who has the clone.** A course cloned on the Mac mini is
-taught on the Mac mini; the compute node is for a course the Mac has not got. That is the reverse of
-how this started, and the reason it reversed is that the tutor moved: the node used to win because
-that is where the data and the hardware are, which mattered when the thing doing the teaching needed
-them. It does not any more — the tutor is Claude, reached over the network — so the better host is
-the machine that is always awake and already holds the repository, and does not take an allocation
-with it when it dies.
+**The one address is the machine's, and it opens one board at a time.** `tailscale serve` proxies
+the tailnet HTTPS name to a port on the machine it is running on; handed a remote tailnet address it
+answers every request with a 502, so there is no arrangement in which one origin serves two
+machines. Which board it opens is therefore a decision this machine makes, and it makes it twice:
 
-It is one word of configuration, `follow.prefer`, and `"node"` puts the original arrangement back.
+- **a tap in the hub takes the name for the course it opens.** `/switch` records the choice, starts
+  the board, and re-points the name in the same request — a tap is a person saying which lesson they
+  mean, and nothing else is going to move an address on their behalf. The hub then waits until the
+  address really is serving that course before it reloads, because reloading sooner lands on the
+  board being tapped away from, which is indistinguishable from a tap that did nothing.
+- **a start does not take it.** `ts_repoint` leaves a name alone while it points at a board that is
+  up and answering, because `tutor restart` walks every course on the machine one after another and
+  would otherwise leave the address wherever the alphabet finished — which once dropped somebody
+  halfway through a Galois proof into a different lesson. What takes a name is a tap, an explicit
+  `board vpn serve`, or the name pointing at nothing.
 
-**Preference settles a tie and nothing else.** A live board beats a dead one in either direction:
-an address with nothing listening behind it is the one outcome worse than the wrong machine. So the
-proxy still serves the node when only the node has a board up, whatever the preference says.
-
-**Nor is it a tie when a machine has nothing left to spend.** A tutor whose usage limit has been
-reached is the strangest kind of broken: the board answers, the machine is healthy, the network is
-fine, the agent is installed, and no lesson can be taught. Preference is about which machine is the
-better host, and a machine that cannot teach is not a host at all — so it stands aside, and gets the
-address straight back when the allowance returns. That gives one order, best to worst:
-
-```
-the Mac mini on Claude   →   a compute node on Claude   →   the Mac mini on whatever is free
-```
-
-Each step is taken only when the one above it cannot be. The first two are the proxy's doing and the
-last is the tutor's own; the section below is how the three fit together.
-
-**Moving the address off a live machine is not free, and is why `/handover` finally has a caller.**
-The proxy used to leave the compute node only when the node had died, and a dead machine needs no
-telling. A *preference* moves the address off a node that is alive and mid-lesson — which strands
-the tutor there: still waiting on `board wait`, still writing cards into a copy nobody can reach,
-and never given the one turn that writes `HANDOFF.md`. So the follower now asks the machine it is
-leaving to wrap up, on the transition and only on the transition. The endpoint was built for this
-moment and had no caller until there was a policy that could create it.
-
-#### The design, and the one discovery that shaped it
-
-The obvious approach is that the tailnet identity `board` *moves*: whichever machine is serving
-claims it, the way it moves between compute nodes today. That cannot extend to the Mac mini — the
-ownership record lives in a shared home the Mac does not see, and macOS runs its own system
-Tailscale that cannot also be `board` in userspace mode. So it is inverted: **the Mac mini owns
-`board` permanently and proxies.** A compute node keeps its own ordinary name, and the Mac forwards
-the iPad's traffic to whichever machine is actually serving — its own board for a course it holds,
-the node for one it does not. The iPad's single baked-in origin never changes.
-
-The first draft of this assumed the proxy was a re-point of `tailscale serve` at the node. **It is
-not: `tailscale serve` accepts a remote tailnet backend in its config and then answers every
-request with a 502** — it only proxies to a local backend. So the Mac runs a small local reverse
-proxy instead, and points `tailscale serve` at that.
-
-The pieces:
-
-- **`bin/follow`** — the reverse proxy and the follower in one. A raw byte pipe (so the SSE stream
-  and uploads pass through unmodified) that probes both machines' `/health` and flips its upstream
-  between them, preferring its own board (`follow.prefer`, default `"local"`). It acts only when the
-  target actually changes, which is what makes asking the outgoing machine to hand over a single
-  request rather than one every thirty seconds. `--node`/`--listen`/`--prefer` override the config;
-  an ad-hoc instance on another port never steals `tailscale serve`.
-- **`scripts/install-autostart.sh --always-on`** — the course-less form, registering three
-  LaunchAgents: `com.tutorboard.follow` (KeepAlive proxy), `com.tutorboard.resume`
-  (StartInterval `tutor resume --quiet`, the warm board it falls back to), and
-  `com.tutorboard.pull` (`scripts/tool-pull.sh`, which keeps this repository current and, when the
-  pull moves HEAD, runs `tutor restart --tutors` — the boards, the tutors and the follower all hold
-  the code they started with, and the follower in particular has to agree with the compute node
-  about where courses live). The periodic resume pulls by the same route a login on the node does;
-  whichever of the two gets there first does the same thing.
-- **`/handover`** in `serve.py` — a secret-gated way for one machine to ask the other to wrap up
-  its tutor before the proxy moves. `bin/follow` is its caller, on the transition off a remote
-  machine and only there.
-- **`tutorboard.machine.machine_shape()`** — "always-on host" (a `follow` config block), "compute node"
-  (Slurm answers), or "standalone". `board doctor` prints it, and `bin/board` uses it so that on
-  the always-on host the HTTPS name points at the proxy, never at a board port directly.
-
-#### Setting a machine up for this
-
-**Two names, and they are not the same name.** The *tailnet* name is the service — `board`, the one
-origin the iPad app is installed against. The *machine* name is who wrote a record — `mac-mini`,
-`compute301`. Conflating them is how this went wrong: Tailscale's DNS made `uname -n` answer
-`board`, the machine stopped recognising boards it had written as `mac-mini`, and a live board
-became unrestartable while still answering perfectly.
+**Two names, and they are not the same name.** The *tailnet* name is the service — the one origin
+the iPad app is installed against. The *machine* name is who wrote a record — `compute301`.
+Conflating them is how this went wrong once: Tailscale's DNS made `uname -n` answer the service
+name, the machine stopped recognising boards it had written under its own, and a live board became
+unrestartable while still answering perfectly.
 
 - **`board node`** — what this machine calls itself, and whether that is pinned. `board start` pins
-  it the first time, before anything writes a record carrying it. `board node <name>` corrects a
-  wrong one. Pinned means the network cannot rename the machine underneath a running board: a Mac
-  with no `HostName` set takes its name from whatever DNS says that day.
-- **The tailnet names are decided once and never move.** The Mac mini is `board`, permanently. Its
-  `~/.config/tutor-board/config.json` carries:
+  it the first time, before anything writes a record carrying it, on a machine whose name comes from
+  the network and must not. `board node <name>` corrects a wrong one.
+- **Do not pin the machine's name on a cluster node.** There the name is *supposed* to change
+  between allocations, because it is a different machine each time and every ownership check depends
+  on that being true: pin `compute301` and the next allocation calls itself `compute301` while Slurm
+  says you hold `compute309`, so `tutor resume` refuses to start a board on a machine it thinks is
+  not yours. `board start` will not pin where Slurm answers, and `board node --unpin` undoes one set
+  by mistake.
+- **`board vpn up --hostname <name>`** sets the tailnet name, once. It moves the one origin the app
+  is installed against, so nothing does it for you.
 
-  ```json
-  "follow": { "node": "compute-node", "listen": "127.0.0.1:8844", "prefer": "local" }
-  ```
-
-  `node` is the compute node's tailnet name, `listen` is the local proxy port, and `prefer` decides
-  which machine wins when both have a board — `"local"`, a course cloned here is taught here.
-- **A compute node keeps its own name — not `board`.** Its `board vpn up` must be told that name
-  once, or the stale state in the shared home re-registers it as `board` and claws the identity
-  back from the Mac.
-
-> **If you are a tutor working on the compute node, there is one command. Ask the person for the
-> Mac mini's `handover_secret` and the name this node should keep, then run:**
+> **If you are a tutor putting a compute node right, there is one command:**
 >
 > ```
-> bash scripts/setup-node.sh --secret <the Mac's handover_secret> --tailnet-name <node-name>
+> bash scripts/setup-node.sh [--tailnet-name <node-name>]
 > ```
 >
-> It pulls, checks the machine's name, writes the secret, picks the tutor this machine can actually
-> run, removes a `follow` block if it finds one, and restarts the boards and tutors so they are on
+> It pulls, checks the machine's name is not pinned, picks the tutor this machine can actually run,
+> takes `free_only` off so the allowance is used, and restarts the boards and tutors so they are on
 > the code it just pulled. Every step is idempotent and reports what it found, so running it again
 > when you are unsure costs nothing.
 >
-> The one thing it will not do for you is `board vpn up --hostname <node-name>`. That moves the one
-> origin the iPad app is installed against, so it stays a person's decision; the script tells you
-> when it is needed.
->
-> **Do not pin the machine's name here.** `board node <name>` is for the always-on Mac, whose name
-> comes from the network and must not. On a cluster the name is *supposed* to change between
-> allocations, because it is a different machine each time and every ownership check depends on
-> that being true — `board start` will not pin on a host where Slurm answers, and `board node
-> --unpin` undoes one that was set by mistake.
+> The one thing it will not do for you is `board vpn up --hostname <node-name>`, for the reason
+> above; it tells you when it is needed.
 
 #### When the allowance runs out
 
@@ -3479,10 +3477,9 @@ the agent says so, exits non-zero, and every turn after it does the same until a
 rolls over. Treated as an ordinary broken turn it is invisible in the worst way — the board shows a
 tutor listening, the student sends again, and nothing comes back for four hours.
 
-It is also the one failure with a genuinely better machine to run to, which is why it is worth
-detecting at all. There are three moves, and they are taken in order.
+There are two moves, and they are taken in order.
 
-**1. Notice, and say so where the other machine can hear it.** A turn that has already failed has
+**1. Notice, and say so somewhere it can be read.** A turn that has already failed has
 its output read back for the phrases a provider uses. Only a *failed* turn — reading every
 successful one for the words "rate limit" finds them in the lesson, because a course on queueing
 theory says them in earnest. What a limit looks like is `usage_limit_says` in the config, a list of
@@ -3496,44 +3493,26 @@ is an hour. A limit that has to be cleared by hand is a limit that outlives itse
 demotes a machine for days.
 
 `/health` publishes it, for exactly the reason `/health` publishes the chosen course: only the
-machine that hit the limit can know about it, and the Mac cannot read the compute node's filesystem.
-A board too old to publish the field is not assumed to be exhausted — silence is an allowance.
+machine that hit the limit can know about it. A board too old to publish the field is not assumed to
+be exhausted — silence is an allowance.
 
-**2. Let a compute node take the lesson, if one is up with an allowance of its own.** The follower
-passes over a preferred machine that has none, and the move ends the way every move between machines
-now does: with `/handover`, so the outgoing tutor gets the turn that writes `HANDOFF.md` instead of
-being orphaned. That call used to fire in one direction only, because the address only ever left the
-node when the node had died and a dead machine needs no telling. An allowance moves it off a machine
-that is alive and mid-lesson, so both directions now carry a live tutor — and `handover` declines to
-bother a host that is not answering, which is what stops a dead node costing a request timeout on
-every move away from it.
+**2. Then teach with what is free.** The tutor pushes the transcript first — the message it has just
+failed to answer is in there, and the beat that would have carried it is the beat there is no time
+for — and then falls back to `fallback_agent`, `free` by default, and answers the message it was
+holding. A free-model answer beats a board where nobody is home.
 
-**3. Only then, teach with what is free.** The tutor whose allowance ran out does not answer straight
-away. It pushes the transcript — the message it has just failed to answer is in there, and the beat
-that would have carried it is the beat there is no time for — and then waits one proxy tick
-(`takeover_grace`, 45s; the follower re-decides every 30) to see whether it gets stopped. If it does,
-a compute node has the address and that is the better outcome; the wait is the only thing that lets
-it win the race. If nothing takes the lesson, it falls back to `fallback_agent` — `free` by default —
-and answers the message it was holding. A free-model answer beats a board where nobody is home.
-
-What is *not* claimed here: that the message crosses the wire with the address. It goes into the
-repository, and the node pulls on its own 90-second beat, so whether the node's `board wait` wakes on
-it or the student sends again is the same open question an allocation dying mid-lesson has always
-had. The address moving is the part that is certain.
-
-Coming back up is the same three steps in reverse and nobody types anything. The limit expires, or a
+Coming back up is the same two steps in reverse and nobody types anything. The limit expires, or a
 turn goes through and proves the allowance is back before the clock said it would; the tutor climbs
-out of the fallback at the top of its next turn, `/health` stops saying it is exhausted, and the
-address comes home on the following tick.
+out of the fallback at the top of its next turn and `/health` stops saying it is exhausted.
 
 ```
 board limit              has the allowance here run out, and until when
 board limit --clear      it came back early; stop waiting out the guess
 ```
 
-`board doctor` names it too. The one thing worth knowing: if both machines run the same account,
-they run out together, and step 2 is skipped every time — the node publishes a limit of its own and
-the proxy keeps the address here. That is correct and it is also the whole reason step 3 exists.
+`board doctor` names it too. The handoff is the one turn that must not be skipped, and a tutor with
+no allowance cannot write it — so whatever the machine can run for nothing writes it instead. A
+handoff in the free tutor's words is worth incomparably more than no handoff at all.
 
 #### Exit nodes, which are invisible until they are not
 
@@ -3577,26 +3556,24 @@ the entire path.
 
 #### Which course the address opens
 
-The proxy has to pick a board, and it used to pick by knocking on every course's port in sorted
-order and taking the first that answered. That is not a decision, it is the alphabet — and with two
-boards up it was permanent. Tapping *Probability* in the hub did every correct thing and changed
-nothing anybody could see: the switch worked, the board started, the agent moved, and the address
-went on opening Galois Theory, because G sorts before P. The only way out was to stop the other
-board, which is the opposite of what the hub is for.
+Whichever course was last chosen on the machine holding the name. What that must never be is a race:
+picking by knocking on every course's port in sorted order and taking the first that answered is not
+a decision, it is the alphabet — and with two boards up it is permanent. Tapping *Probability* in the
+hub did every correct thing and changed nothing anybody could see, because G sorts before P.
 
-So the boards are asked instead of raced:
+So it is recorded, published and checked:
 
 - **`chosen.json`** in `~/.config/tutor-board/` records the course a *person* named. `tutor <course>`
   writes it and so does a tap in the hub. It is a decision, and a decision cannot be derived from
   file times — resuming a course touches its files, so "most recently used" is self-reinforcing.
 - **`/health` publishes it**, along with the port that course is genuinely serving on, read from its
-  own board record. Only the serving machine can read either of those things; the Mac cannot see
-  that filesystem at all. One board answering is enough for the proxy to learn where to go.
-- **`/health` also says which course this board is**, and the proxy hands the address to nobody
-  whose name does not match the course it went looking for. Ports are derived from names, and
-  derivation is not proof: a hash can put two courses on one number, and a start whose port was busy
-  moves to the next in its sequence. Without the check, a wrong number becomes a wrong lesson
-  silently — somebody opens a Galois proof and is shown a problem set.
+  own board record. Only the serving machine can read either of those things, which is why a board
+  answers for them rather than anybody guessing.
+- **`/health` also says which course this board is**, and nothing is offered the address whose name
+  does not match the course that was asked for. Ports are derived from names, and derivation is not
+  proof: a hash can put two courses on one number, and a start whose port was busy moves to the next
+  in its sequence. Without the check, a wrong number becomes a wrong lesson silently — somebody
+  opens a Galois proof and is shown a problem set.
 
 Several boards may be up at once and each keeps its own assistant. A listening tutor is blocked on
 `board wait` and costs nothing while nobody is asking it anything, so exclusivity bought nothing and
@@ -3606,11 +3583,11 @@ this, and it is worth reading before changing any of it.
 
 #### What only real hardware can settle
 
-- Whether the iPad app's SSE stream reconnects cleanly when the proxy's upstream flips underneath
-  it, or whether it needs a nudge. The service worker caches the shell and nothing live, so the
-  risk is a hung stream rather than a stale lesson.
-- How long a reclaim actually takes after an allocation dies, and whether that gap is short enough
-  to be invisible or wants a "reconnecting" state on the board.
+- Whether the iPad app's SSE stream reconnects cleanly when the address changes which board it
+  serves underneath it, or whether it needs a nudge. The service worker caches the shell and nothing
+  live, so the risk is a hung stream rather than a stale lesson.
+- How long taking the board over on a new node actually takes after an allocation dies, and whether
+  that gap is short enough to be invisible or wants a "reconnecting" state on the board.
 
 ### Why there is no registry
 
@@ -3627,9 +3604,7 @@ the machine, by itself:
 
 - serving from a compute node with every repository cloned into the shared home, the app offers
   every subject;
-- serving from a Mac mini with four of them cloned, the app offers four;
-- and when the mini is proxying to a compute node, the hub you get is *that node's*, listing that
-  node's repositories, which is right — it is the machine that would have to run the board.
+- serving from a laptop with four of them cloned, the app offers four.
 
 There is no list to edit and nothing that can disagree with reality. To put a subset on a second
 machine, clone a subset: `~/.config/tutor-board/courses.txt` is what `bootstrap.sh` reads, and it
@@ -4535,7 +4510,7 @@ wrapper.
 ## Layout
 
 ```
-bin/board          the command line (also: tutor, follow, free)
+bin/board          the command line (also: tutor, free)
 serve.py           the entry point, and nothing else
 TEACHING.md        how to teach on this board -- copied into every course's live/
 tutorboard/        the board itself, organised by what a thing is about:
@@ -4910,7 +4885,7 @@ python3 test/paper.py    that both documents can be READ on the board and SAVED 
                          by reading the client, that the write-up's record reaches the
                          banner from the payload rather than being invented for one frame
 python3 test/teaching.py that the teaching method reaches every course
-python3 test/choice.py   that the address follows the course a person chose
+python3 test/choice.py   that the address opens the course a person chose
 python3 test/limit.py    that a lesson moves to a machine with an allowance to teach it
 python3 test/tokens.py   what a turn is allowed to read, what it must not run, and that
                          what it cost is measured rather than argued about

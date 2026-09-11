@@ -56,8 +56,8 @@ def slurm_nodes():
 #
 # It moved because nothing had pinned it. A Mac with no `HostName` set derives
 # its name from the network, so Tailscale's DNS renamed this machine from
-# `mac-mini` to `board` between one board starting and the next command asking
-# who was running it. Worse, the name was being *derived* in four places in four
+# `desk` to `board` between one board starting and the next command asking who
+# was running it. Worse, the name was being *derived* in four places in four
 # files -- `os.uname()` in the launcher, `socket.gethostname()` in the board and
 # the server -- which can disagree with each other on the same machine.
 #
@@ -69,8 +69,8 @@ NODE_NAME_FILE = os.path.join(paths.STATE_DIR, "nodename")
 def _normal_node(name):
     """One form for one machine.
 
-    First label, lowercased: `board.tail0c6c62.ts.net` and `Mac-mini` and
-    `mac-mini` must not be three machines, because a record written under one
+    First label, lowercased: `board.tail0c6c62.ts.net` and `Compute304` and
+    `compute304` must not be three machines, because a record written under one
     spelling has to be believed under another.
     """
     return (name or "").strip().split(".")[0].lower() or "unknown"
@@ -146,30 +146,16 @@ def pin_node_name(name=None):
     return name
 
 
-def follow_config():
-    """The `follow` block of the config, or {} when there is none.
-
-    The block is what marks a machine as the always-on host, so both the server
-    and the launcher read it through this one place.
-    """
-    try:
-        with open(paths.CONFIG, "r", encoding="utf-8") as fh:
-            cfg = json.load(fh) or {}
-    except (OSError, ValueError):
-        return {}
-    return cfg.get("follow") or {}
-
-
 def machine_shape():
-    """What this machine is for: always-on host, compute node, or standalone.
+    """What this machine is: a compute node, or a standalone machine.
 
     Guessing this from the hostname is how it gets subtly wrong, so it is
-    decided from what is actually true: an always-on host is configured to
-    follow, a compute node is where Slurm answers, and everything else is a
-    standalone machine.
+    decided from what is actually true: a compute node is where Slurm answers,
+    and everything else is a standalone machine. The difference is whether this
+    machine can be taken away -- an allocation ends and the node stops being
+    yours, which is why a board here is brought back by a login rather than by a
+    supervisor.
     """
-    if follow_config():
-        return "always-on host"
     if slurm_nodes() is not None:
         return "compute node"
     return "standalone"

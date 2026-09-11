@@ -48,8 +48,21 @@ check('nothing in the row is pushed to the right edge any more',
       !/margin-left:\s*auto/.test(metaBlock));
 
 // ---- the structure the fix depends on --------------------------------------
+// A switch that lands ends in `location.href = "/"`, and jsdom has nowhere to
+// navigate to -- it reports that as a jsdomError on the virtual console, which
+// is noise rather than a failure. Everything else still comes through.
+let virtualConsole;
+try {
+  const { VirtualConsole } = require('jsdom');
+  virtualConsole = new VirtualConsole();
+  virtualConsole.on('jsdomError', () => {});
+  ['log', 'warn', 'info', 'error'].forEach((k) => {
+    virtualConsole.on(k, (...a) => console[k === 'error' ? 'error' : 'log'](...a));
+  });
+} catch (e) { virtualConsole = undefined; }
 const dom = new JSDOM(fs.readFileSync(path.join(WEB, 'home.html'), 'utf8'), {
   runScripts: 'outside-only', pretendToBeVisual: true, url: 'https://board.test/',
+  virtualConsole: virtualConsole,
 });
 const { window } = dom;
 // The slate asks for its saved pages before it can say how many it has,
@@ -89,10 +102,20 @@ const hostsDoc = {
   ],
 };
 const posted = [];
+const asked = [];                  /* every /health the page polled for */
+// What `/switch` answers, and what the address says it is serving. Both are
+// what the page has to reason about: `address: false` means this address is
+// never going to open that course, because it is on another machine.
+let answer = { ok: true, address: false };
+let serving = { dir: 'Galois Theory', host: 'compute-node.tail0c6c62.ts.net' };
 window.fetch = (url, opts) => {
   if (url === '/switch') {
     posted.push(JSON.parse(opts.body));
-    return Promise.resolve({ json: () => Promise.resolve({ ok: true }) });
+    return Promise.resolve({ json: () => Promise.resolve(answer) });
+  }
+  if (/^\/health/.test(String(url))) {
+    asked.push(String(url));
+    return Promise.resolve({ json: () => Promise.resolve(serving) });
   }
   return Promise.resolve({
     json: () => Promise.resolve(
@@ -169,8 +192,8 @@ setTimeout(() => {
   // same way. The row is furniture worth keeping: it is the only place the
   // other machine is ever mentioned.
   // The tap above left a switch in flight, and a refresh is deliberately a
-  // no-op while the address is moving. "stay here" is what the person taps.
-  window.document.getElementById('busy-stay').onclick();
+  // no-op while the address is moving. A tap on the overlay is what clears it.
+  window.document.getElementById('busy').onclick();
   hostsDoc.hosts = [hostsDoc.hosts[0]];
   window.dispatchEvent(new window.Event('focus'));
   setTimeout(() => {
@@ -201,9 +224,56 @@ setTimeout(() => {
             /no board answering/.test(
               window.document.querySelector('#hosts-wrap .hint').textContent));
 
-      console.log(errors.length ? '\n' + errors.length + ' FAILURES'
-                                : '\nthe course list stays inside its card');
-      process.exit(errors.length ? 1 : 0);
+      // ------------------------------------------- opening a course, and the
+      // dead end that used to be offered instead.
+      //
+      // "whenever I want to switch courses on a host... I can hit it, but it
+      // never seems to work. It just gives me the options to 'ask again' or
+      // 'stay here'". Both halves of that: the address is moved by the machine
+      // serving it, in the request, so a landed switch reloads into the lesson
+      // -- and there is nothing here to ask a person about.
+      check('the overlay asks nothing: no buttons at all',
+            !window.document.querySelector('#busy button'));
+
+      // A course on another machine: this address will not serve it, so the
+      // page must not sit waiting for it to.
+      const before = asked.length;
+      window.document.getElementById('busy').onclick();
+      hostsDoc.hosts[1].courses = MAC;
+      answer = { ok: true, address: false, detail: 'compute-node is bringing it up' };
+      window.dispatchEvent(new window.Event('focus'));
+      setTimeout(() => {
+        const other = window.document.querySelectorAll('#hosts button')[1];
+        other.onclick();
+        window.document.querySelector('#others li button, #past li button').onclick();
+        setTimeout(() => {
+          const said = window.document.getElementById('busy-text').textContent;
+          const went = String((posted[posted.length - 1] || {}).host).split('.')[0];
+          check('a course on another machine says which machine it is on',
+                !!went && said.indexOf(went) !== -1 && !/opening/.test(said));
+          check('and the address is not polled for something it cannot serve',
+                asked.length === before);
+
+          // And the ordinary case: this machine takes the name, so the page
+          // waits for the address to say so and then goes to the lesson.
+          window.document.getElementById('busy').onclick();
+          answer = { ok: true, address: true };
+          serving = { dir: 'Galois-Theory', host: 'node.ts.net' };
+          window.dispatchEvent(new window.Event('focus'));
+          setTimeout(() => {
+            window.document.querySelector('#hosts button').onclick();
+            const row = window.document.querySelector('#others li button, #past li button');
+            row.onclick();
+            setTimeout(() => {
+              check('opening a course here asks the address what it is serving',
+                    asked.length > before);
+              console.log(errors.length ? '\n' + errors.length + ' FAILURES'
+                                        : '\nthe course list stays inside its card');
+              process.exit(errors.length ? 1 : 0);
+            }, 60);
+          }, 40);
+        }, 60);
+      }, 40);
     }, 30);
   }, 30);
 

@@ -58,7 +58,8 @@ conf = tempfile.mkdtemp(prefix="tutor-resume-conf-")
 tutor.CONFIG_DIR = conf
 # The record of what a person chose is one file with one reader, in boardlib --
 # the launcher writes it, the board writes it when the hub is tapped, and the
-# always-on host's proxy follows it. Point that one place at the sandbox.
+# and the hub writes it when a course is tapped. Point that one place at the
+# sandbox.
 paths.CONFIG_DIR = conf
 paths.CHOSEN = os.path.join(conf, "chosen.json")
 tutor.CHOSEN = paths.CHOSEN
@@ -161,9 +162,8 @@ try:
         calls["agent"].append(course["dir"]) or (0, "started"))
     tutor.this_host = lambda: "compute301"
     # What kind of machine this is decides which rule applies, and the real
-    # answer depends on whether the machine running the tests happens to have a
-    # `follow` block of its own. Pin it: everything below is the cluster rule,
-    # and the always-on rule gets its own case at the end.
+    # answer depends on whether Slurm answers where the tests are being run.
+    # Pin it: everything below is the cluster rule unless it says otherwise.
     machine.machine_shape = lambda: "compute node"
 
     def reset():
@@ -220,10 +220,10 @@ try:
     # behind naming a pid that is gone -- and nothing ever looked. This command
     # restores the course last worked in, which is exactly one of them, so any
     # other board that fell over stayed down until a person noticed and said so.
-    # On the always-on host that is precisely backwards: its whole purpose is
-    # that nobody has to be here, and from the iPad it is a course in the hub
-    # that will not open on a machine that is otherwise perfectly healthy.
-    machine.machine_shape = lambda: "always-on host"
+    # On a machine that is not a compute node that is precisely backwards:
+    # nobody has to be sitting at one, and from the iPad it is a course in the
+    # hub that will not open on a machine that is otherwise perfectly healthy.
+    machine.machine_shape = lambda: "standalone"
     machine.slurm_nodes = lambda: None
     make_course("Crashed", node="compute301", pid=44, when=200)
     processes.board_is_running = lambda pid, root: pid != 44
@@ -275,23 +275,6 @@ try:
     tutor.cmd_resume(cfg, ["Newer", "--quiet", "--force"])
     check("and --force is how you move it anyway", calls["start"] == ["Newer"])
 
-    # --- the always-on host hosts what it holds -----------------------------
-    # A course cloned on the Mac is taught on the Mac. That machine does not
-    # share a filesystem with the compute node, so a record naming the node is
-    # not something it can check -- and the rule above, written for two cluster
-    # nodes on one home directory, left the machine that never sleeps and holds
-    # the repository permanently unable to host it. It does not stop the other
-    # board: the proxy asks that one to hand its tutor over as the address moves.
-    machine.machine_shape = lambda: "always-on host"
-    reset()
-    tutor.cmd_resume(cfg, ["Newer", "--quiet"])
-    check("the always-on host brings up a course it holds, whatever a record "
-          "from the compute node says", calls["start"] == ["Newer"])
-    check("and points the one address the iPad has at it", calls["link"] == ["Newer"])
-    check("and attaches a tutor, or there is a board with nobody on it",
-          calls["agent"] == ["Newer"])
-    machine.machine_shape = lambda: "compute node"
-
     # --- a login node is not a machine to start a board on ------------------
     # This runs from a login hook, so it gets invited to try on every machine
     # you touch. A login node is shared, is not yours, and is where a
@@ -309,6 +292,131 @@ try:
     check("a machine Slurm does not say is yours starts nothing",
           not calls["start"])
     tutor.this_host = lambda: "compute301"
+
+    # --- salloc on the login node: hand the whole command to the node -------
+    #
+    # `salloc` gives you a shell on the LOGIN node and holds the allocation from
+    # there. The compute node gets no login at all, so "the only moment a compute
+    # node gets is the moment you log in to it" was a moment that never arrived
+    # unless somebody opened a terminal on the node by hand and left it open.
+    # The login node knocks on the node instead, and everything that decides
+    # anything happens over there.
+    real_sp = tutor.subprocess
+    try:
+        class FakeSP(object):
+            PIPE = real_sp.PIPE
+            STDOUT = real_sp.STDOUT
+            DEVNULL = real_sp.DEVNULL
+            TimeoutExpired = real_sp.TimeoutExpired
+
+            def __init__(self):
+                self.ssh = []
+                self.steps = []
+                self.ssh_code = 0
+                self.ssh_out = b"Newer is up here, at https://board.example.ts.net/\n"
+                self.jobs = b"2026-09-11T12:43:54|compute303|77\n" \
+                            b"2026-09-11T12:09:27|compute304|66\n"
+
+            class Done(object):
+                def __init__(self, code, out):
+                    self.returncode, self.stdout = code, out
+
+            def run(self, cmd, **kw):
+                if cmd[0] == "scontrol":
+                    # One name or a bracketed set; the test only ever asks for
+                    # what it wrote itself.
+                    spec = cmd[-1]
+                    names = spec.replace("compute[", "").replace("]", "")
+                    out = "\n".join("compute" + n if not n.startswith("compute")
+                                    else n for n in names.split(","))
+                    if spec.startswith("compute") and "[" not in spec:
+                        out = spec
+                    return FakeSP.Done(0, out.encode() + b"\n")
+                if cmd[0] == "squeue":
+                    return FakeSP.Done(0, self.jobs)
+                if cmd[0] == "ssh":
+                    self.ssh.append(cmd)
+                    return FakeSP.Done(self.ssh_code, self.ssh_out)
+                return FakeSP.Done(0, b"")
+
+            def Popen(self, cmd, **kw):
+                self.steps.append(cmd)
+                return None
+
+        sp = FakeSP()
+        tutor.subprocess = sp
+        machine.slurm_nodes = lambda: {"compute303", "compute304"}
+        tutor.this_host = lambda: "submit0"
+        os.environ["SLURM_JOB_NODELIST"] = "compute303"
+
+        code = tutor.hop_to_allocation(cfg, ["Newer", "--quiet"])
+        check("a login node holding an allocation hands the resume to the node",
+              code == 0 and len(sp.ssh) == 1)
+        cmd = " ".join(sp.ssh[0]) if sp.ssh else ""
+        check("to the node this shell's own allocation holds",
+              "compute303" in (sp.ssh[0][-2] if sp.ssh else ""))
+        check("running the same command there, with the course it was given",
+              "resume --no-hop Newer" in cmd or "resume --no-hop" in cmd and "Newer" in cmd)
+        check("and it cannot hop again, whatever that machine decides",
+              "--no-hop" in cmd)
+
+        # A board that is already up decides which node, over any allocation --
+        # the same rule as everywhere else: a live board is not moved.
+        sp.ssh = []
+        try:
+            os.remove(tutor.CHOSEN)      # no name given: the files decide
+        except OSError:
+            pass
+        make_course("OnNode", node="compute304", pid=55, when=99000)
+        tutor.hop_to_allocation(cfg, ["--quiet"])
+        check("but the node a board is already on wins, since a live board is "
+              "never moved", sp.ssh and "compute304" in sp.ssh[0][-2])
+        shutil.rmtree(os.path.join(tmp, "OnNode"), ignore_errors=True)
+
+        # Nothing to hand it to, and no harm done: a login shell on a machine
+        # with no allocation behaves exactly as it did before.
+        sp.ssh = []
+        machine.slurm_nodes = lambda: set()
+        check("a login node with no allocation hops nowhere",
+              tutor.hop_to_allocation(cfg, ["--quiet"]) is None and not sp.ssh)
+        machine.slurm_nodes = lambda: None
+        check("and neither does a machine with no Slurm at all",
+              tutor.hop_to_allocation(cfg, ["--quiet"]) is None and not sp.ssh)
+
+        # On the node itself there is nothing to hop to. This is the case that
+        # runs on every login to every allocation, so it must cost nothing.
+        machine.slurm_nodes = lambda: {"compute303", "compute304"}
+        tutor.this_host = lambda: "compute303"
+        check("a node that is part of the allocation resumes where it stands",
+              tutor.hop_to_allocation(cfg, ["--quiet"]) is None and not sp.ssh)
+
+        # The two escapes.
+        tutor.this_host = lambda: "submit0"
+        check("--force is aimed at this machine, so it never hops",
+              tutor.hop_to_allocation(cfg, ["--quiet", "--force"]) is None)
+        check("and --no-hop is how the far end proves it is the far end",
+              tutor.hop_to_allocation(cfg, ["--quiet", "--no-hop"]) is None)
+
+        # ssh is how it gets there when it can. When it cannot -- a cluster where
+        # the credential does not reach the nodes -- Slurm will run something
+        # inside an allocation without one. The step has to OUTLIVE the command,
+        # because everything a step starts is in the step's cgroup and that
+        # cgroup is emptied the moment the step ends, detached or not.
+        sp.ssh, sp.ssh_code = [], 255
+        code = tutor.hop_to_allocation(cfg, ["--quiet"])
+        check("ssh that cannot get in falls back to a Slurm step", code == 0
+              and len(sp.steps) == 1)
+        step = " ".join(sp.steps[0]) if sp.steps else ""
+        check("inside the job that holds the node, sharing its resources",
+              "--overlap" in step and "--jobid" in step)
+        check("and the step holds itself open, or the board dies with it",
+              "sleep" in step)
+    finally:
+        tutor.subprocess = real_sp
+        os.environ.pop("SLURM_JOB_NODELIST", None)
+        tutor.this_host = lambda: "compute301"
+        machine.slurm_nodes = lambda: {"compute301"}
+        processes.board_is_running = lambda pid, root: pid == 33
 
     # --- a machine where nothing has ever run -------------------------------
     empty = tempfile.mkdtemp(prefix="tutor-resume-empty-")
@@ -433,7 +541,7 @@ try:
         shutil.rmtree(gits, ignore_errors=True)
 
     # The half that matters more than the pull. A board read `serve.py` when it
-    # started, a tutor read `bin/tutor`, and the proxy read `bin/follow`: a pull
+    # started and a tutor read `bin/tutor`: a pull
     # that bounces nothing leaves the fix on disk and out of the lesson, which is
     # the most expensive misunderstanding this repository has produced. And the
     # launcher itself is one of those processes, so it re-execs -- otherwise the
@@ -646,10 +754,10 @@ check("a restart skips a record with no pid rather than dying on it",
 
 # One command to put a machine right.
 #
-# The Mac mini cannot be reached from the compute node's session, so every fix
-# shipped from over there sits on its disk until something restarts the processes
-# holding the old code -- three kinds of process and two kinds of repository, and
-# remembering that list is not somebody's job.
+# A machine nobody is sitting at never restarts the processes holding the old
+# code, so every fix shipped from elsewhere sits on its disk -- two kinds of
+# process and two kinds of repository, and remembering that list is not
+# somebody's job.
 script = os.path.join(ROOT, "scripts", "catch-up.sh")
 check("there is a script that catches a machine up in one command",
       os.path.isfile(script))
@@ -666,7 +774,7 @@ check("a course whose history diverged is TAGGED before it is reset, so nothing 
 check("and only the board's own scratch is cleaned, never a person's untracked "
       "work elsewhere in a course",
       "clean -fdq -- live" in src_c)
-check("it restarts the boards, the tutors and the follower",
+check("it restarts the boards and the tutors",
       'restart --tutors' in src_c)
 check("and then says what is actually true: what is running, how to reach each "
       "board directly, and what the hub will offer",
