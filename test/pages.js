@@ -17,8 +17,8 @@ const vm = require('vm');
 const WEB = path.join(__dirname, '..', 'web');
 const PAGES = [
   ['home.html', ['home.js']],
-  ['board.html', ['macros.js', 'slate-core.js', 'board.js']],
-  ['slate.html', ['slate-core.js', 'slate.js']],
+  ['board.html', ['macros.js', 'ink-clip.js', 'slate-core.js', 'board.js']],
+  ['slate.html', ['ink-clip.js', 'slate-core.js', 'slate.js']],
 ];
 
 let fails = 0;

@@ -27,6 +27,13 @@ var els = {
   annbar: document.getElementById("annbar"),
   annPen: document.getElementById("ann-pen"),
   annErase: document.getElementById("ann-erase"),
+  annSelect: document.getElementById("ann-select"),
+  annClip: document.getElementById("ann-clip"),
+  annCopy: document.getElementById("ann-copy"),
+  annCut: document.getElementById("ann-cut"),
+  annPaste: document.getElementById("ann-paste"),
+  annDel: document.getElementById("ann-del"),
+  annSay: document.getElementById("ann-say"),
   annUndo: document.getElementById("ann-undo"),
   annRedo: document.getElementById("ann-redo"),
   annClear: document.getElementById("ann-clear"),
@@ -2423,6 +2430,10 @@ if (window.Annotate) {
     paintAnnTools();
     paintNotesSend();
   });
+  /* The clipboard is shared with both writing surfaces, so it fills up without
+     anything on the lesson being touched: copying on the slate is what makes
+     Paste worth offering on a card. */
+  if (window.InkClip) window.InkClip.onChange(function () { paintAnnTools(); });
   /* A closing tab must not take the last stroke with it -- or the last sentence
      still being typed. */
   window.addEventListener("pagehide", function () { saveNotes(false); });
@@ -2447,12 +2458,24 @@ els.annotate.onclick = function () {
    available but does nothing is worse than one that is plainly disabled. */
 function paintAnnTools() {
   if (!window.Annotate) return;
-  var erasing = window.Annotate.tool() === "erase";
-  els.annPen.classList.toggle("on", !erasing);
-  els.annErase.classList.toggle("on", erasing);
+  var mode = window.Annotate.tool();
+  els.annPen.classList.toggle("on", mode === "pen");
+  els.annErase.classList.toggle("on", mode === "erase");
+  els.annSelect.classList.toggle("on", mode === "lasso");
   els.annUndo.disabled = !window.Annotate.canUndo();
   els.annRedo.disabled = !window.Annotate.canRedo();
   els.annClear.disabled = !window.Annotate.marked().length;
+  /* The clip controls exist while they can do something: with a loop drawn
+     round something, or with ink on the clipboard and a card to put it on. A
+     Paste that is offered with an empty clipboard is a button that answers
+     "nothing copied yet", which is not an answer worth a tap. */
+  var picked = window.Annotate.picked();
+  var held = !!(window.InkClip && window.InkClip.has());
+  els.annClip.hidden = !(picked || held);
+  els.annCopy.disabled = !picked;
+  els.annCut.disabled = !picked;
+  els.annDel.disabled = !picked;
+  els.annPaste.disabled = !held;
   Array.prototype.forEach.call(document.querySelectorAll(".ann-ink"), function (b) {
     b.style.background = b.dataset.ink;
     b.classList.toggle("on", b.dataset.ink === window.Annotate.colour());
@@ -2461,6 +2484,48 @@ function paintAnnTools() {
 
 els.annPen.onclick = function () { window.Annotate.setTool("pen"); paintAnnTools(); };
 els.annErase.onclick = function () { window.Annotate.setTool("erase"); paintAnnTools(); };
+els.annSelect.onclick = function () { window.Annotate.setTool("lasso"); paintAnnTools(); };
+/* A word in the bar that did the thing, because copying has no visible result
+   and a control with no visible result reads as a broken one. */
+var annSayTimer = null;
+
+function annSay(text) {
+  if (!els.annSay) return;
+  els.annSay.textContent = text;
+  els.annSay.hidden = !text;
+  clearTimeout(annSayTimer);
+  if (text) {
+    annSayTimer = setTimeout(function () {
+      els.annSay.hidden = true;
+      els.annSay.textContent = "";
+    }, 2800);
+  }
+}
+
+/* Why nothing happened, when nothing happened: either there is no loop, or the
+   loop holds more ink than the clipboard will carry. A control that answers
+   neither reads as a broken one. */
+function annWhyNot() {
+  return window.Annotate.picked() ? "that is more ink than the clipboard will carry"
+                                  : "loop round something first";
+}
+
+els.annCopy.onclick = function () {
+  var n = window.Annotate.copy();
+  annSay(n ? n + " copied — paste it on a card or on your own board" : annWhyNot());
+  paintAnnTools();
+};
+els.annCut.onclick = function () {
+  var n = window.Annotate.cut();
+  annSay(n ? n + " cut" : annWhyNot());
+  paintAnnTools();
+};
+els.annPaste.onclick = function () {
+  var n = window.Annotate.paste();
+  annSay(n ? n + " pasted — drag it where you want it" : "nothing copied yet");
+  paintAnnTools();
+};
+els.annDel.onclick = function () { window.Annotate.erase(); paintAnnTools(); };
 els.annUndo.onclick = function () { window.Annotate.undo(); paintAnnTools(); };
 els.annRedo.onclick = function () { window.Annotate.redo(); paintAnnTools(); };
 els.annClear.onclick = function () { window.Annotate.clearCurrent(); paintAnnTools(); };

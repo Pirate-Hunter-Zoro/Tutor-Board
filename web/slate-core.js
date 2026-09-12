@@ -268,7 +268,12 @@ function create(opts) {
      in until it answers. See `settled` below. */
   var loaded = false;
   var current = 0;
-  var undoStack = [], redoStack = [], clipboard = [];
+  var undoStack = [], redoStack = [];
+  /* Which surface this one is, for the clipboard's benefit. Two instances of
+     this file are two writing boards -- the drawer under the question and the
+     full-screen page -- and a paste has to be able to tell "put it back beside
+     the thing I duplicated" from "put it where I am looking". */
+  var myId = "slate-" + Math.random().toString(36).slice(2, 9);
   /* `finger`: "scroll" or "write".
 
      It used to be neither -- it was a latch. A finger drew until the first time
@@ -612,10 +617,14 @@ function create(opts) {
 
   var selbar = el("div", "sl-selbar");
   selbar.hidden = true;
+  /* Collected here rather than queried later: `draw` paints this bar, and `draw`
+     runs while the surface is still being built. */
+  var selButtons = [];
   [["cut", "Cut"], ["copy", "Copy"], ["paste", "Paste"], ["duplicate", "Duplicate"],
    ["colour", "Recolour"], ["delete", "Delete"], ["done", "Done"]].forEach(function (a) {
     var b = mk(selbar, "sl-chip" + (a[0] === "delete" ? " danger" : ""), a[1], a[1]);
     b.dataset.act = a[0];
+    selButtons.push(b);
   });
 
   var wrap = el("div", "sl-wrap");
@@ -1373,7 +1382,28 @@ function create(opts) {
     bNext.disabled = current === pages.length - 1;
     bUndo.disabled = !undoStack.length;
     bRedo.disabled = !redoStack.length;
-    selbar.hidden = !(sel && sel.idx.length);
+    paintSelbar();
+  }
+
+  /* THE BAR IS OFFERED WHEN IT CAN DO SOMETHING, and Paste can do something with
+     nothing selected at all.
+
+     It used to appear only while something was looped, which is correct for
+     Cut and Recolour and wrong for the one action whose whole purpose is to
+     bring ink in from somewhere else: to paste onto an empty board there was no
+     button, because there was nothing on the board to select. So the bar is also
+     there with the lasso in hand and something on the clipboard, and every
+     control in it says whether it applies. */
+  function paintSelbar() {
+    var has = !!(sel && sel.idx.length);
+    var held = !!(window.InkClip && window.InkClip.has());
+    selbar.hidden = !(has || (tool.mode === "lasso" && held));
+    for (var i = 0; i < selButtons.length; i++) {
+      var act = selButtons[i].dataset.act;
+      selButtons[i].disabled = act === "paste" ? !held
+                             : act === "done" ? false
+                             : !has;
+    }
   }
 
   function bounds() {
@@ -1452,7 +1482,7 @@ function create(opts) {
     }
   }
 
-  function clearSelection() { sel = null; lasso = null; selbar.hidden = true; }
+  function clearSelection() { sel = null; lasso = null; paintSelbar(); }
 
   function inSelection(x, y) {
     var b = bounds();
@@ -1791,28 +1821,109 @@ function create(opts) {
     return sel ? sel.idx.map(function (i) { return JSON.parse(JSON.stringify(p.strokes[i])); }) : [];
   }
 
+  /* The clipboard is `window.InkClip`, which is not this file's -- see
+     ink-clip.js. A page's logical units ARE CSS pixels at 100% zoom, which is
+     the frame a clip is kept in, so nothing here scales anything on the way
+     out. The one thing that does not survive the trip is `dense`, which is a
+     cache of the curve at a particular size and is rebuilt on arrival. */
+  function clipOut() {
+    var got = selected();
+    if (!got.length) { toast("nothing selected"); return null; }
+    var clip = window.InkClip && window.InkClip.put(got.map(function (s) {
+      return { c: s.c, w: s.w, hl: !!s.hl, pts: s.pts };
+    }), { kind: "slate", src: myId });
+    /* The clipboard has a ceiling, and a copy that silently did nothing is
+       worse than one that says why. */
+    if (!clip) toast("that is more ink than the clipboard will carry");
+    return clip;
+  }
+
+  /* Where a pasted clip's top-left corner goes.
+
+     Two cases, and telling them apart is the whole of it. A DUPLICATE -- copy
+     and paste on the same surface, which is what the Duplicate button is -- wants
+     to land beside the thing it came from, so it is nudged off the original by a
+     few units and left selected under the hand that will drag it. Anything from
+     somewhere ELSE -- the other writing board, a card's annotation layer, this
+     same board an hour ago -- has coordinates that mean nothing here: the ink
+     could be a thousand units off the visible page, which is a paste that looks
+     like nothing happened. That one lands in the middle of what is on screen.
+
+     `scale` is the second half of the same thought. A ring drawn around a
+     paragraph of the lesson is as wide as the reading column; dropped onto a
+     surface zoomed in on one line of algebra it would be a mark nobody can see
+     the ends of. So a clip wider or taller than the view is shrunk to fit inside
+     it, and never enlarged. */
+  function placeClip(clip) {
+    var mine = clip.kind === "slate" && clip.src === myId;
+    var r = sheetRect();
+    var vw = (r.width || 1) / view.k, vh = (r.height || 1) / view.k;
+    var scale = Math.min(1, (vw * 0.9) / clip.w, (vh * 0.9) / clip.h);
+    var w = clip.w * scale, h = clip.h * scale;
+    if (mine) {
+      var x = clip.ox + 30, y = clip.oy + 30;
+      /* ...unless the original is not on screen either, in which case "beside
+         it" is off the glass and the person is owed the middle of the view like
+         anybody else. */
+      var v = viewBox();
+      if (x + w >= v.x0 && x <= v.x1 && y + h >= v.y0 && y <= v.y1) {
+        return { x: x, y: y, scale: scale };
+      }
+    }
+    var c = viewBox();
+    return { x: (c.x0 + c.x1) / 2 - w / 2, y: (c.y0 + c.y1) / 2 - h / 2, scale: scale };
+  }
+
+  /* What is visible right now, in logical units. */
+  function viewBox() {
+    var r = sheetRect();
+    return { x0: -view.ox / view.k, y0: -view.oy / view.k,
+             x1: (-view.ox + (r.width || 1)) / view.k,
+             y1: (-view.oy + (r.height || 1)) / view.k };
+  }
+
   var ACTIONS = {
-    copy: function () { clipboard = selected(); toast(clipboard.length + " copied"); },
+    copy: function () {
+      var clip = clipOut();
+      if (clip) toast(clip.strokes.length + " copied");
+    },
     cut: function () {
-      clipboard = selected(); snapshot();
+      var clip = clipOut();
+      if (!clip) return;
+      snapshot();
       var drop = {}; sel.idx.forEach(function (i) { drop[i] = true; });
       page().strokes = page().strokes.filter(function (_, i) { return !drop[i]; });
       clearSelection(); invalidateInk(); markDirty();
+      toast(clip.strokes.length + " cut");
     },
     paste: function () {
-      if (!clipboard.length) { toast("nothing copied yet"); return; }
+      var clip = window.InkClip && window.InkClip.get();
+      if (!clip) { toast("nothing copied yet"); return; }
       snapshot();
+      var at = placeClip(clip);
       var p = page(), start = p.strokes.length;
-      JSON.parse(JSON.stringify(clipboard)).forEach(function (s) {
-        s.dense = null;
-        s._bb = null;
-        s.pts.forEach(function (q) { q[0] += 30; q[1] += 30; });
-        p.strokes.push(s);
+      clip.strokes.forEach(function (s) {
+        var st = { c: s.c, w: s.w, hl: !!s.hl, dense: null,
+                   pts: s.pts.map(function (q) {
+                     return [at.x + q[0] * at.scale, at.y + q[1] * at.scale,
+                             q.length > 2 ? q[2] : 0.5];
+                   }) };
+        p.strokes.push(st);
+        grow(st);
       });
       sel = { idx: p.strokes.slice(start).map(function (_, n) { return start + n; }) };
+      /* The lasso, so the thing that has just landed can be dragged where it is
+         wanted -- a paste into an empty board with the pen in hand would
+         otherwise be answered by writing over it. */
+      if (tool.mode !== "lasso") api.tool("lasso");
       invalidateInk(); markDirty();
+      toast(clip.strokes.length + (clip.kind === "annotation"
+                                   ? " pasted from the lesson" : " pasted"));
     },
-    duplicate: function () { ACTIONS.copy(); ACTIONS.paste(); },
+    duplicate: function () {
+      if (!clipOut()) return;
+      ACTIONS.paste();
+    },
     colour: function () {
       snapshot();
       sel.idx.forEach(function (i) {
@@ -1829,13 +1940,78 @@ function create(opts) {
     },
     done: function () { clearSelection(); schedule(); },
   };
-  Array.prototype.forEach.call(selbar.querySelectorAll("button"), function (b) {
+  selButtons.forEach(function (b) {
     b.onclick = function () {
       var act = ACTIONS[b.dataset.act];
       if (!act) return;
       if (["paste", "done"].indexOf(b.dataset.act) === -1 && !(sel && sel.idx.length)) return;
       act();
+      paintSelbar();
     };
+  });
+
+  /* The clipboard is shared with every other surface in the app, so it changes
+     without anything here being touched: a copy on the full-screen page, a loop
+     copied off a card in the lesson. The bar has to hear about it. */
+  if (window.InkClip) window.InkClip.onChange(function () { paintSelbar(); });
+
+  /* ⌘/Ctrl and the usual letters, for the times this is being driven from a
+     laptop with a trackpad. Delete removes what is looped, and Escape lets it
+     go.
+
+     Guarded three ways, because this listens on the document: not while the
+     caret is in something somebody is typing into, not while this surface is
+     not on the screen (the board's writing drawer is closed for most of a
+     lesson, and there is a second instance of this file on /slate), and never
+     for a key combination the browser itself needs. */
+  function typingIn(node) {
+    if (!node) return false;
+    var tag = (node.tagName || "").toLowerCase();
+    return tag === "input" || tag === "textarea" || tag === "select"
+        || node.isContentEditable === true;
+  }
+
+  function onScreen() {
+    if (!root || !root.parentNode) return false;
+    return !!(root.offsetWidth || root.offsetHeight || root.getClientRects().length);
+  }
+
+  document.addEventListener("keydown", function (e) {
+    if (typingIn(e.target) || !onScreen()) return;
+    var cmd = e.metaKey || e.ctrlKey;
+    var k = (e.key || "").toLowerCase();
+    if (!cmd) {
+      if ((k === "delete" || k === "backspace") && sel && sel.idx.length) {
+        e.preventDefault();
+        ACTIONS["delete"]();
+        paintSelbar();
+      } else if (k === "escape" && (sel || lasso)) {
+        clearSelection();
+        schedule();
+      }
+      return;
+    }
+    if (e.altKey) return;
+    if (k === "z") {
+      e.preventDefault();
+      if (e.shiftKey) restoreFrom(redoStack, undoStack);
+      else restoreFrom(undoStack, redoStack);
+    } else if (k === "y") {
+      e.preventDefault();
+      restoreFrom(redoStack, undoStack);
+    } else if (k === "v") {
+      e.preventDefault();
+      ACTIONS.paste();
+    } else if (k === "c" || k === "x" || k === "d") {
+      if (!(sel && sel.idx.length)) return;
+      e.preventDefault();
+      if (k === "c") ACTIONS.copy();
+      else if (k === "x") ACTIONS.cut();
+      else ACTIONS.duplicate();
+    } else {
+      return;
+    }
+    paintSelbar();
   });
 
   /* -------------------------------------------------------------- export */
@@ -2186,6 +2362,10 @@ function create(opts) {
       selectOne([bPen, bHl, bEr, bLa], b);
       if (tool.mode !== "lasso") clearSelection();
       root.dataset.tool = tool.mode;
+      /* Picking up the lasso with ink on the clipboard is enough on its own to
+         want the bar: Paste is the one thing in it that does not need a
+         selection. */
+      paintSelbar();
       schedule();
     };
   });
@@ -2440,6 +2620,11 @@ function create(opts) {
      a blank sheet. `debug` reports this too, but a name with "debug" in it is
      not something behaviour should depend on. */
   api.strokes = function () { var p = page(); return p ? p.strokes.length : 0; };
+  /* How much is looped. The clipboard is shared between surfaces, so a test
+     about "copy here, paste there" has to be able to ask each of them what it is
+     holding -- and the bar's own buttons are the only other way in. */
+  api.picked = function () { return sel ? sel.idx.length : 0; };
+  api.selbar = selbar;
   /* The plane, the crop and the finger rule, so all three can be asserted --
      none of them is visible from the outside otherwise, and the last time a
      surface behaviour was untestable it shipped broken for two days. */

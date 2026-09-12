@@ -362,7 +362,48 @@ function repair(id, cv, box) {
     if (bb.x1 < x0 || bb.x0 > x1 || bb.y1 < y0 || bb.y0 > y1) return;
     paint(ctx, s, pathOf(s, cv), s.c || pen.colour);
   });
+  /* The selection's own dashed box, inside the same clip: whatever rectangle was
+     just cleared gets it back, so an erase or a pen lift elsewhere on the card
+     cannot rub out half of it. */
+  markPick(ctx, id, cv);
   ctx.restore();
+}
+
+/* The dashed ring around what is picked, and the live lasso while one is being
+   drawn. Neither is ink -- neither is in `store`, neither is saved, and neither
+   reaches the tutor. */
+function markPick(ctx, id, cv) {
+  if (pickedOn(id)) {
+    var b = pickBox(cv);
+    if (b) {
+      ctx.save();
+      ctx.strokeStyle = "#7fd1ff";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([7, 5]);
+      ctx.strokeRect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0);
+      ctx.restore();
+    }
+  }
+  if (drawing && drawing.id === id && drawing.loop && drawing.loop.length > 1) {
+    var l = drawing.loop;
+    ctx.save();
+    ctx.strokeStyle = "#7fd1ff";
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 5]);
+    ctx.beginPath();
+    ctx.moveTo(l[0][0], l[0][1]);
+    for (var i = 1; i < l.length; i++) ctx.lineTo(l[i][0], l[i][1]);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+/* The rectangle a loop or a dragged selection covers, generously, so the frame
+   that repaints it clears the last one as well. */
+function padBox(box, m) {
+  if (!box) return null;
+  return { x0: box.x0 - m, y0: box.y0 - m, x1: box.x1 + m, y1: box.y1 + m };
 }
 
 /* `measured` says the caller has already established that the card has not
@@ -478,6 +519,9 @@ function remember(id) {
 }
 
 function restore(snap) {
+  /* A selection is a list of INDICES into this card's strokes, and an undo
+     replaces that list wholesale. Whatever was picked is not there any more. */
+  if (pick && pick.id === snap.id) pick = null;
   store[snap.id] = snap.strokes;
   dirty[snap.id] = true;
   handed[snap.id] = false;
@@ -485,29 +529,119 @@ function restore(snap) {
   onChange();
 }
 
-var tool = "pen";        /* pen | erase */
+var tool = "pen";        /* pen | erase | lasso */
 var drawing = null;
 var pending = false;
 
-/* Within this many card-widths of a stroke counts as touching it. Generous,
-   because the target is a pen line over prose on a tablet. */
-var ERASE_NEAR = 0.02;
+/* How far the rubber reaches, in CSS pixels of the layer, plus a little for how
+   thick the line being rubbed is.
 
-/* Returns the strokes it removed, so the caller knows which rectangle of the
-   canvas actually changed. */
-function eraseAt(id, x, y) {
-  var all = store[id] || [];
-  var gone = [];
-  var kept = all.filter(function (s) {
-    for (var i = 0; i < s.p.length; i += 2) {
-      var dx = s.p[i] - x, dy = s.p[i + 1] - y;
-      if (dx * dx + dy * dy < ERASE_NEAR * ERASE_NEAR) { gone.push(s); return false; }
+   It used to be a fraction -- 0.02 -- and the fraction was of two different
+   things at once: the horizontal distance was in card WIDTHS and the vertical
+   one in card HEIGHTS, and they were then added as though they were the same
+   unit. On a card the shape a line of prose is, that is a rubber that reaches
+   fifteen pixels sideways and two downwards. A pixel is a pixel in both
+   directions. */
+var ERASE_R = 11;
+
+/* Square of the distance from a point to a segment. The rubber is a SWEEP --
+   the line from where it was last heard to where it is now -- because a Pencil
+   moving quickly delivers its samples a long way apart, and testing only the
+   landing points leaves untouched gaps between them. Which is the whole of "I
+   went over it three times and half of it is still there". */
+function distToSeg(px, py, ax, ay, bx, by) {
+  var vx = bx - ax, vy = by - ay;
+  var len = vx * vx + vy * vy;
+  var t = len ? ((px - ax) * vx + (py - ay) * vy) / len : 0;
+  t = t < 0 ? 0 : (t > 1 ? 1 : t);
+  var dx = px - (ax + vx * t), dy = py - (ay + vy * t);
+  return dx * dx + dy * dy;
+}
+
+/* THE RUBBER TAKES OUT WHAT IT TOUCHES, NOT THE STROKE IT TOUCHES.
+
+   This used to remove the whole stroke, which is what the slate does -- and on
+   the slate it is right, because a stroke there is a letter. A stroke HERE is a
+   ring around a paragraph, a line under a sentence, an arrow across half a card:
+   one pen-down that covers the width of the lesson. Touching any part of it took
+   all of it, and with two or three such marks on a card that is the whole
+   annotation gone for a tick in the corner of it. Reported in exactly those
+   words: "the erasing when annotating wipes out EVERYTHING - it should just wipe
+   out what I touch".
+
+   So a stroke the rubber crosses is SPLIT: the samples inside the nib go, and
+   each surviving run on either side becomes a mark of its own. A run of one
+   sample is dropped -- a single point is a dot, and nobody rubbed out the middle
+   of a line in order to leave two dots behind.
+
+   Returns fresh stroke objects, never the ones it was given: the undo stack
+   holds the card's list by reference and is only correct while nothing on a card
+   is changed in place. */
+function splitStroke(s, cv, a, b) {
+  var w = cv._w || 1, h = cv._h || 1, pl = cv._pl || 0, pt = cv._pt || 0;
+  var r = ERASE_R + (s.w || pen.width) * 0.8;
+  var n = (s.p.length / 2) | 0;
+  var runs = [], cur = null, touched = false;
+  for (var i = 0; i < n; i++) {
+    var x = s.p[i * 2] * w + pl, y = s.p[i * 2 + 1] * h + pt;
+    if (distToSeg(x, y, a[0], a[1], b[0], b[1]) < r * r) {
+      touched = true;
+      cur = null;
+      continue;
     }
-    return true;
-  });
-  if (!gone.length) return null;
-  store[id] = kept;
-  return gone;
+    if (!cur) { cur = []; runs.push(cur); }
+    cur.push(i);
+  }
+  if (!touched) return null;
+  var out = [];
+  for (var k = 0; k < runs.length; k++) {
+    if (runs[k].length < 2) continue;
+    var flat = [], pr = [];
+    for (var j = 0; j < runs[k].length; j++) {
+      var idx = runs[k][j];
+      flat.push(s.p[idx * 2], s.p[idx * 2 + 1]);
+      pr.push(s.pr && s.pr[idx] !== undefined ? s.pr[idx] : 0.5);
+    }
+    out.push({ c: s.c, w: s.w, p: flat, pr: pr });
+  }
+  return out;
+}
+
+/* One sweep of the rubber, in canvas pixels. Returns the rectangle that
+   changed, so the caller knows what to repaint, or null if nothing was touched.
+   The rectangle is the whole of every stroke that was cut, because a split
+   rebuilds both halves and the cached path of the original is gone. */
+function eraseSweep(id, cv, a, b) {
+  var all = store[id] || [];
+  if (!all.length) return null;
+  var lo = ERASE_R + pen.width * 2;
+  var x0 = Math.min(a[0], b[0]) - lo, x1 = Math.max(a[0], b[0]) + lo;
+  var y0 = Math.min(a[1], b[1]) - lo, y1 = Math.max(a[1], b[1]) + lo;
+  var next = [], box = null, hit = false;
+  for (var i = 0; i < all.length; i++) {
+    var s = all[i];
+    var bb = bboxOf(s, cv);
+    if (bb.x1 < x0 || bb.x0 > x1 || bb.y1 < y0 || bb.y0 > y1) { next.push(s); continue; }
+    var pieces = splitStroke(s, cv, a, b);
+    if (!pieces) { next.push(s); continue; }
+    hit = true;
+    box = grow(box, bb);
+    for (var k = 0; k < pieces.length; k++) next.push(pieces[k]);
+  }
+  if (!hit) return null;
+  store[id] = next;
+  return box;
+}
+
+/* Is a point inside a closed loop. The lasso's own test, and the same one the
+   slate uses. */
+function inPolygon(x, y, poly) {
+  var inside = false;
+  for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    var xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
 }
 
 /* Canvas-space pixels. The canvas is offset by its own padding, so its own rect
@@ -515,6 +649,189 @@ function eraseAt(id, x, y) {
 function at(ev, d) {
   return [ev.clientX - d.rect.left, ev.clientY - d.rect.top];
 }
+
+/* ------------------------------------------------------------- selection */
+/* WHAT IS PICKED, AND ON WHICH CARD.
+
+   Ink on the lesson used to be write-only: a mark could be drawn, rubbed out, or
+   cleared, and that was the whole of it. Which meant the one thing a person
+   actually asks for -- "this working I wrote over your card belongs on my own
+   board" -- could not be done at all, and the answer was to write it out a
+   second time.
+
+   So the layer gets a lasso of its own, and it is deliberately the same gesture
+   as the slate's: loop around something, and it is caught if more than 60% of it
+   is inside the loop. A selection belongs to ONE card, because that is what a
+   mark is anchored to, and it is dropped when the card's marks change underneath
+   it. */
+var pick = null;              /* { id: card id, idx: [index into store[id]] } */
+/* The last card a pen was put down on. It is where a paste goes when nothing is
+   selected -- the card somebody was just working on is a better guess than the
+   middle of the screen, and it is the only guess that costs nothing to make. */
+var lastCard = null;
+
+function pickedOn(id) {
+  return pick && pick.id === id ? pick.idx : null;
+}
+
+function pickStrokes() {
+  if (!pick) return [];
+  var all = store[pick.id] || [];
+  return pick.idx.map(function (i) { return all[i]; })
+                 .filter(function (s) { return !!s; });
+}
+
+/* The extent of what is picked, in canvas pixels. */
+function pickBox(cv) {
+  var got = pickStrokes();
+  if (!got.length) return null;
+  var box = null;
+  for (var i = 0; i < got.length; i++) box = grow(box, bboxOf(got[i], cv));
+  return box;
+}
+
+function dropPick() {
+  if (!pick) return;
+  var id = pick.id;
+  pick = null;
+  var card = document.querySelector('[data-card="' + id + '"]');
+  if (card) draw(card);
+  onChange();
+}
+
+/* Canvas pixels -> the fractions the card stores. */
+function toFractions(pts, cv) {
+  var w = cv._w || 1, h = cv._h || 1, pl = cv._pl || 0, pt = cv._pt || 0;
+  var flat = [], pr = [];
+  for (var i = 0; i < pts.length; i++) {
+    flat.push((pts[i][0] - pl) / w, (pts[i][1] - pt) / h);
+    pr.push(pts[i].length > 2 ? Math.round(pts[i][2] * 100) / 100 : 0.5);
+  }
+  return { p: flat, pr: pr };
+}
+
+/* ...and back, which is the frame the clipboard keeps ink in: CSS pixels, at the
+   size the mark looks on the glass. A stroke stored as fractions of a card has
+   no size of its own -- it is whatever the card is this morning -- so the size
+   it crosses to another surface at is the size it was when it was copied. */
+function toPixels(s, cv) {
+  var w = cv._w || 1, h = cv._h || 1, pl = cv._pl || 0, pt = cv._pt || 0;
+  var pts = [];
+  for (var i = 0, n = 0; i < s.p.length; i += 2, n++) {
+    pts.push([s.p[i] * w + pl, s.p[i + 1] * h + pt,
+              s.pr && s.pr[n] !== undefined ? s.pr[n] : 0.5]);
+  }
+  return { c: s.c || pen.colour, w: s.w || pen.width, hl: false, pts: pts };
+}
+
+/* Which card a paste lands on: the one holding the selection, else the one last
+   written on, else whichever is nearest the middle of the screen. The last of
+   the three is the only one that costs a layout, and it is the rarest. */
+function pasteCard() {
+  if (pick) {
+    var held = document.querySelector('[data-card="' + pick.id + '"]');
+    if (held) return held;
+  }
+  if (lastCard && lastCard.parentNode && lastCard.dataset.card) return lastCard;
+  var mid = (window.innerHeight || 700) / 2;
+  var best = null, bestGap = Infinity;
+  var cards = document.querySelectorAll("[data-card]");
+  for (var i = 0; i < cards.length; i++) {
+    var r = cards[i].getBoundingClientRect();
+    if (!r.height) continue;
+    var gap = r.top > mid ? r.top - mid : (r.bottom < mid ? mid - r.bottom : 0);
+    if (gap < bestGap) { bestGap = gap; best = cards[i]; }
+  }
+  return best;
+}
+
+var CLIP = {
+  /* Put what is picked on the shared clipboard. Every surface in the app reads
+     the same one -- see ink-clip.js -- so this is also how working written over
+     a card reaches the writing board. */
+  copy: function () {
+    if (!pick || !window.InkClip) return 0;
+    var card = document.querySelector('[data-card="' + pick.id + '"]');
+    if (!card) return 0;
+    var cv = layerOf(card);
+    var got = pickStrokes().map(function (s) { return toPixels(s, cv); });
+    var clip = window.InkClip.put(got, { kind: "annotation", src: pick.id });
+    return clip ? clip.strokes.length : 0;
+  },
+  cut: function () {
+    var n = CLIP.copy();
+    if (n) CLIP.remove();
+    return n;
+  },
+  remove: function () {
+    if (!pick) return 0;
+    var id = pick.id, drop = {};
+    pick.idx.forEach(function (i) { drop[i] = true; });
+    remember(id);
+    store[id] = (store[id] || []).filter(function (_, i) { return !drop[i]; });
+    var n = pick.idx.length;
+    pick = null;
+    dirty[id] = true;
+    handed[id] = false;
+    draw(document.querySelector('[data-card="' + id + '"]'));
+    onChange();
+    return n;
+  },
+  /* Ink from anywhere -- the other writing board, the full-screen slate, another
+     card -- dropped onto a card and left picked, so it can be dragged to where
+     it is wanted.
+
+     It lands in the middle of the part of the card that is ON SCREEN. Not the
+     middle of the card: a card can be three screens tall, and the middle of that
+     is a paste somebody has to go looking for. And it is shrunk to fit inside
+     the card if it arrived from a surface where there was more room, because a
+     page of working pasted at its own size would be a mark whose ends are
+     nowhere near the words it is about. */
+  paste: function () {
+    if (!window.InkClip) return 0;
+    var clip = window.InkClip.get();
+    if (!clip) return 0;
+    var card = pasteCard();
+    if (!card || !card.dataset.card) return 0;
+    var id = card.dataset.card;
+    var cv = layerOf(card);
+    /* The layer may never have been sized -- this is a card nobody has written
+       on -- and everything below is in its coordinates. */
+    size(card, cv);
+    var w = cv._w || 1, h = cv._h || 1;
+    var scale = Math.min(1, (w * 0.8) / clip.w, (h * 0.9) / clip.h);
+    var r = card.getBoundingClientRect();
+    var vh = window.innerHeight || 700;
+    var top = Math.max(0, -r.top), bottom = Math.min(r.height, vh - r.top);
+    var midY = bottom > top ? (top + bottom) / 2 : r.height / 2;
+    var x = (cv._pl || 0) + w / 2 - (clip.w * scale) / 2;
+    var y = (cv._pt || 0) + midY - (clip.h * scale) / 2;
+    remember(id);
+    var all = (store[id] || []).slice();
+    var start = all.length;
+    clip.strokes.forEach(function (s) {
+      var pts = s.pts.map(function (q) {
+        return [x + q[0] * scale, y + q[1] * scale, q.length > 2 ? q[2] : 0.5];
+      });
+      var f = toFractions(pts, cv);
+      /* The highlighter does not come with it. A card's layer has one kind of
+         mark -- a pen line, over words -- and there is no translucent
+         multiply-blended ink here for a highlight to arrive as. It lands as a
+         line in its own colour, which is the nearest true thing. */
+      all.push({ c: s.c || pen.colour, w: s.w || pen.width, p: f.p, pr: f.pr });
+    });
+    store[id] = all;
+    pick = { id: id, idx: all.slice(start).map(function (_, n) { return start + n; }) };
+    dirty[id] = true;
+    handed[id] = false;
+    /* A card that may have had no bitmap at all a moment ago: the layer holds
+       one pixel until the first mark arrives, and a paste is a first mark. */
+    size(card, cv);
+    draw(card, true);
+    onChange();
+    return clip.strokes.length;
+  },
+};
 
 /* Every sample the hardware actually took. A Pencil reports far faster than the
    frame rate, and the browser hands the extra samples over only if they are
@@ -582,9 +899,11 @@ function tick() {
   pending = false;
   var d = drawing;
   if (!d) return;
-  if (d.erasing) {
-    /* One repair a frame, over the union of everything rubbed out since the
-       last one, rather than one repaint per sample. */
+  if (d.erasing || d.loop || d.moving) {
+    /* One repair a frame, over the union of everything that changed since the
+       last one, rather than one repaint per sample. The loop and the drag are
+       here for the same reason as the rubber: what moves is a rectangle, and the
+       rest of the card is already correct. */
     var box = d.dmg;
     d.dmg = null;
     repair(d.id, d.canvas, box);
@@ -730,7 +1049,17 @@ function stylus(ev) {
    landed. The hand still decides. It only stops one hand's own gesture from
    being re-read as the other's. */
 var penAt = 0;
-var PEN_MODE = 1500;
+/* How long that lasts after the nib was last heard from.
+
+   It was a second and a half, and a second and a half is a long time to be
+   unable to scroll the lesson you are annotating: the latch also refuses a
+   one-finger pan, so somebody who writes a line and then goes to move the page
+   got nothing back for a second and a half and reported the page as
+   "unresponsive at times". The case it exists for is the NEXT stroke of the same
+   word, which follows within a fraction of a second; the case it must not eat is
+   a deliberate scroll, which does not. The slate's own palm window is half a
+   second, for the same reason and with the same arithmetic behind it. */
+var PEN_MODE = 700;
 var penTimer = null;
 
 function penMode(on) {
@@ -759,6 +1088,65 @@ function onTouchMove(ev) {
   if (ev.cancelable) ev.preventDefault();
 }
 
+/* WHEN THESE TWO LISTENERS EXIST AT ALL IS THE WHOLE OF WHETHER THE LESSON
+   SCROLLS SMOOTHLY.
+
+   A `touchmove` listener that is not passive is a promise to the browser that
+   the page might refuse the gesture, and the browser keeps that promise by
+   asking the main thread about every single move before it is allowed to scroll
+   or zoom a pixel. That is a round trip per frame, behind KaTeX, a payload
+   arriving, a card being laid out -- and when the main thread is busy the
+   scroll simply stops until it is not. Reported twice, in the same words each
+   time: "scrolling is still janky and delayed and unresponsive at times,
+   especially when I'm annotating", and then "scrolling AND zooming when
+   annotating is janky".
+
+   There were two of these on EVERY card's layer, attached when the card was
+   attached and never removed -- so the whole reading column was covered in them,
+   at every moment, whether annotate mode was on or not.
+
+   Now: one pair, on the document, which sees exactly the same events because
+   nothing on the way up stops them. `touchstart` exists only while annotate mode
+   is on -- it is one round trip as a gesture begins, which is the price of being
+   able to refuse a scroll the browser has already decided is a scroll, and it is
+   paid once rather than per frame. And `touchmove` exists only while a stroke is
+   actually being drawn, which is the only time anything would ever be refused.
+   With a finger on the glass and no stroke in progress there is nothing
+   non-passive in the way, and the scroll and the pinch are the compositor's
+   again.
+
+   `pointerdown` is dispatched before `touchstart` in WebKit, which is what makes
+   this safe: `begin` has already run and armed the refusal before the first
+   `touchmove` of its own gesture can arrive. */
+var moveArmed = false;
+
+function armMove(want) {
+  if (!!want === moveArmed) return;
+  moveArmed = !!want;
+  if (want) {
+    try { document.addEventListener("touchmove", onTouchMove, { passive: false }); }
+    catch (e) { document.addEventListener("touchmove", onTouchMove, false); }
+  } else {
+    document.removeEventListener("touchmove", onTouchMove, { passive: false });
+    document.removeEventListener("touchmove", onTouchMove, false);
+  }
+}
+
+var startArmed = false;
+
+function armTouch(want) {
+  if (!!want === startArmed) return;
+  startArmed = !!want;
+  if (want) {
+    try { document.addEventListener("touchstart", onTouchStart, { passive: false }); }
+    catch (e) { document.addEventListener("touchstart", onTouchStart, false); }
+  } else {
+    document.removeEventListener("touchstart", onTouchStart, { passive: false });
+    document.removeEventListener("touchstart", onTouchStart, false);
+    armMove(false);
+  }
+}
+
 function begin(ev, card) {
   if (!on) return;
   var id = card.dataset.card;
@@ -781,6 +1169,7 @@ function begin(ev, card) {
      without them, which is a letter written and then taken away. */
   if (drawing) end(null);
   var canvas = layerOf(card);
+  lastCard = card;
   var d = {
     id: id, card: card, canvas: canvas,
     pid: ev.pointerId,
@@ -792,23 +1181,75 @@ function begin(ev, card) {
   /* Before the layer is sized, because what it is sized to depends on whether
      anything is going to be drawn on it -- and this is that. */
   drawing = d;
-  size(card, canvas);
+  /* AND IF THE LAYER WAS RESIZED, PUT BACK WHAT WAS ON IT.
+
+     `size` reallocates the bitmap when the geometry has moved, and allocating a
+     canvas clears it -- every mark already on the card, gone from the glass in
+     the instant before a new one is drawn. Nothing then put them back: the pen
+     lift repaints only the rectangle the new stroke covered, which is the whole
+     point of that rectangle, and a full redraw happened only on a window resize.
+     So the marks came back when the iPad was turned, and not before.
+
+     The geometry moves constantly and never because of anything the person is
+     doing: the layer reaches half way into the gap above and below the card, so a
+     card arriving anywhere in the lesson, a turn being inserted, the writing
+     drawer opening beside the question, a figure finishing its compile -- all of
+     them change the padding of a card that has not itself changed size, which is
+     exactly the case the per-card resize observer cannot see. Reported as:
+     "adding a new annotation makes the old annotations disappear". */
+  if (size(card, canvas)) repair(id, canvas, boxOf(canvas));
   card._annGrew = false;
   /* Read from the sizing above rather than asked for again: `size` has just paid
      for the card's rectangle and the canvas's is that one less the padding. A
      second `getBoundingClientRect` here is a second forced layout of the whole
      lesson, at the moment the nib lands. */
   d.rect = { left: canvas._rl, top: canvas._rt };
-  remember(id);
 
-  if (d.erasing) {
+  if (tool === "lasso") {
+    var xy = at(ev, d);
+    /* Inside what is already picked: this is a drag, not a new loop. The strokes
+       being moved are replaced by copies of themselves first, because the undo
+       stack holds this card's list by reference and is only correct while nothing
+       on a card is ever changed in place. */
+    var held = pickedOn(id) ? padBox(pickBox(canvas), 12) : null;
+    if (held && xy[0] >= held.x0 && xy[0] <= held.x1
+             && xy[1] >= held.y0 && xy[1] <= held.y1) {
+      remember(id);
+      var taken = {};
+      pick.idx.forEach(function (i) { taken[i] = true; });
+      store[id] = (store[id] || []).map(function (st, i) {
+        if (!taken[i]) return st;
+        return { c: st.c, w: st.w, p: st.p.slice(), pr: (st.pr || []).slice() };
+      });
+      d.moving = { x: xy[0], y: xy[1] };
+    } else {
+      if (pick) pick = null;
+      d.loop = [xy];
+      d.dmg = null;
+    }
+    frame();
+  } else if (d.erasing) {
+    remember(id);
     rub(ev);
   } else {
+    /* A pen stroke is not about the selection, so the selection goes -- and its
+       dashed box comes off the glass now rather than on the lift, because the
+       lift only repaints the rectangle the new stroke covered. */
+    if (pick) {
+      var stale = padBox(pickBox(canvas), 14);
+      pick = null;
+      if (stale) repair(id, canvas, stale);
+    }
+    remember(id);
     feed(ev, d);
     frame();
   }
   try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* not fatal */ }
   window.addEventListener("scroll", follow, true);
+  /* The touchmove refusal is added HERE and taken off when the stroke ends, and
+     that is the difference between a lesson that scrolls and one that stutters.
+     See `armTouch`. */
+  armMove(true);
   ev.preventDefault();
 }
 
@@ -816,17 +1257,23 @@ function rub(ev) {
   var d = drawing;
   if (!d) return;
   var cv = d.canvas;
-  var xy = at(ev, d);
-  var x = (xy[0] - cv._pl) / Math.max(1, cv._w);
-  var y = (xy[1] - cv._pt) / Math.max(1, cv._h);
-  var gone = eraseAt(d.id, x, y);
-  if (!gone) return;
+  /* Every sample the hardware took, swept in order, rather than the one point
+     the event happened to end at. */
+  var list = samples(ev);
+  var took = null;
+  for (var i = 0; i < list.length; i++) {
+    var to = at(list[i], d);
+    var from = d.rubbedFrom || to;
+    d.rubbedFrom = to;
+    took = grow(took, eraseSweep(d.id, cv, from, to));
+  }
+  if (!took) return;
   dirty[d.id] = true;
   handed[d.id] = false;
   /* Only the rectangle the removed ink occupied, and only once a frame. The card
      was measured when the pen went down and cannot have reflowed since --
      nothing moves under a stroke but the scroll, which `follow` handles. */
-  for (var i = 0; i < gone.length; i++) d.dmg = grow(d.dmg, bboxOf(gone[i], cv));
+  d.dmg = grow(d.dmg, took);
   frame();
 }
 
@@ -846,7 +1293,21 @@ function move(ev) {
   if (ev && ev.pointerType !== "touch" && on) penSeen();
   if (!on || !d) return;
   if (!mine(ev, d)) return;
-  if (d.erasing) {
+  if (d.loop) {
+    var xy = at(ev, d);
+    d.loop.push(xy);
+    /* The loop only ever grows, so its own rectangle covers where it was last
+       frame as well as where it is now. */
+    var b = null;
+    for (var i = 0; i < d.loop.length; i++) {
+      b = grow(b, { x0: d.loop[i][0], y0: d.loop[i][1],
+                    x1: d.loop[i][0], y1: d.loop[i][1] });
+    }
+    d.dmg = padBox(b, 4);
+    frame();
+  } else if (d.moving) {
+    dragPick(d, at(ev, d));
+  } else if (d.erasing) {
     rub(ev);
   } else {
     feed(ev, d);
@@ -855,13 +1316,80 @@ function move(ev) {
   ev.preventDefault();
 }
 
+/* Move what is picked by however far the hand has moved, in fractions of the
+   card, and repaint the union of where it was and where it now is. The cached
+   pixel path and bounding box of every stroke that moves are dropped: both are
+   keyed by the card's geometry, which has not changed, so nothing else would
+   notice that the points have. */
+function dragPick(d, xy) {
+  if (!pick) { d.moving = null; return; }
+  var cv = d.canvas;
+  var was = padBox(pickBox(cv), 14);
+  var dx = (xy[0] - d.moving.x) / Math.max(1, cv._w);
+  var dy = (xy[1] - d.moving.y) / Math.max(1, cv._h);
+  d.moving = { x: xy[0], y: xy[1] };
+  var all = store[pick.id] || [];
+  pick.idx.forEach(function (i) {
+    var st = all[i];
+    if (!st) return;
+    for (var n = 0; n < st.p.length; n += 2) {
+      st.p[n] += dx;
+      st.p[n + 1] += dy;
+    }
+    st._k = null;
+    st._bbk = null;
+  });
+  d.dmg = grow(grow(d.dmg, was), padBox(pickBox(cv), 14));
+  d.dragged = true;
+  frame();
+}
+
 function end(ev) {
   var d = drawing;
   if (!d) return;
   if (!mine(ev, d)) return;
   window.removeEventListener("scroll", follow, true);
+  armMove(false);
   var id = d.id;
   var cv = d.canvas;
+
+  /* A LOOP IS A QUESTION ABOUT WHAT IS INSIDE IT, and nothing on the card
+     changes because one was drawn. Same rule as the slate's lasso: a stroke is
+     caught when more than 60% of it is inside the loop, so clipping the edge of
+     a neighbouring mark does not drag it along. */
+  if (d.loop) {
+    drawing = null;
+    if (d.loop.length > 4) {
+      var poly = d.loop, idx = [];
+      (store[id] || []).forEach(function (st, i) {
+        var hits = 0, n = 0;
+        for (var j = 0; j < st.p.length; j += 2, n++) {
+          if (inPolygon(st.p[j] * cv._w + cv._pl,
+                        st.p[j + 1] * cv._h + cv._pt, poly)) hits++;
+        }
+        if (n && hits > n * 0.6) idx.push(i);
+      });
+      pick = idx.length ? { id: id, idx: idx } : null;
+    }
+    draw(d.card, true);
+    onChange();
+    return;
+  }
+
+  /* A drag moved ink that is already on the card: it has to reach the disk, and
+     it is no longer the picture the tutor was handed. */
+  if (d.moving) {
+    drawing = null;
+    if (d.dragged) {
+      dirty[id] = true;
+      handed[id] = false;
+    }
+    if (d.dmg) { repair(id, cv, d.dmg); d.dmg = null; }
+    else draw(d.card, true);
+    onChange();
+    return;
+  }
+
   /* The rubber's last frame may still be owed. */
   if (d.erasing && d.dmg) { repair(id, cv, d.dmg); d.dmg = null; }
   if (!d.erasing) {
@@ -966,14 +1494,10 @@ window.Annotate = {
     canvas.addEventListener("pointermove", move);
     canvas.addEventListener("pointerup", end);
     canvas.addEventListener("pointercancel", end);
-    /* Not passive: refusing the scroll is the whole point of them. */
-    try {
-      canvas.addEventListener("touchstart", onTouchStart, { passive: false });
-      canvas.addEventListener("touchmove", onTouchMove, { passive: false });
-    } catch (e) {
-      canvas.addEventListener("touchstart", onTouchStart, false);
-      canvas.addEventListener("touchmove", onTouchMove, false);
-    }
+    /* The touch listeners are NOT here. They are one pair on the document, held
+       only while they can do anything -- see `armTouch`. A non-passive pair per
+       card, over the whole reading column, permanently, is what made scrolling
+       and pinching stutter. */
     draw(card);
   },
   redrawAll: function () {
@@ -983,6 +1507,13 @@ window.Annotate = {
          repainting it from scratch is exactly the work that makes a line arrive
          after the nib. The resize case that needs it has its own guard. */
       if (drawing && drawing.card === c) return;
+      /* Every card, INCLUDING the ones with nothing on them. A layer with no ink
+         has no bitmap and nothing to repaint -- `draw` returns as soon as it
+         knows that -- but it still has to be laid out: this element is what takes
+         the pen, it reaches out to both edges of the window, and a window that
+         has changed width leaves it covering somewhere the card no longer is.
+         Skipping them here is the "margins are unwritable" defect in a new coat,
+         and `test/link.js` holds the rule. */
       draw(c);
     });
   },
@@ -1017,10 +1548,28 @@ window.Annotate = {
   setOn: function (v) {
     on = !!v;
     document.body.classList.toggle("annotating", on);
+    armTouch(on);
+    if (!on) {
+      penMode(false);
+      dropPick();
+    }
   },
   isOn: function () { return on; },
-  setTool: function (t) { tool = (t === "erase") ? "erase" : "pen"; },
+  setTool: function (t) {
+    var next = (t === "erase" || t === "lasso") ? t : "pen";
+    if (next !== tool && next !== "lasso") dropPick();
+    tool = next;
+  },
   tool: function () { return tool; },
+  /* The lasso, the clipboard, and what is picked -- for the tool strip, which
+     decides what to offer, and for the tests. */
+  picked: function () { return pick ? pick.idx.length : 0; },
+  pickedOn: function () { return pick ? pick.id : null; },
+  deselect: function () { dropPick(); },
+  copy: function () { return CLIP.copy(); },
+  cut: function () { return CLIP.cut(); },
+  paste: function () { return CLIP.paste(); },
+  erase: function () { return CLIP.remove(); },
   /* Is a hand on the layer right now. The autosave asks before it spends the
      main thread serialising a card's ink. */
   busy: function () { return !!drawing; },
@@ -1041,6 +1590,7 @@ window.Annotate = {
   canUndo: function () { return past.length > 0; },
   canRedo: function () { return future.length > 0; },
   clearCurrent: function () {
+    pick = null;
     var ids = window.Annotate.marked();
     ids.forEach(function (id) { remember(id); store[id] = []; dirty[id] = true;
                                 handed[id] = false;
@@ -1079,6 +1629,7 @@ window.Annotate = {
     });
   },
   clear: function (id) {
+    if (pick && pick.id === id) pick = null;
     remember(id);
     store[id] = [];
     dirty[id] = true;
@@ -1109,5 +1660,15 @@ window.Annotate = {
   onChange: function (fn) { onChange = fn || function () {}; }
 };
 
-window.addEventListener("resize", function () { window.Annotate.redrawAll(); });
+/* Coalesced to one repaint a frame. A resize arrives in bursts -- the iPad's
+   keyboard sliding up, a rotation settling -- and each one of them used to
+   repaint every marked card in the lesson. */
+var redrawFrame = 0;
+window.addEventListener("resize", function () {
+  if (redrawFrame) return;
+  redrawFrame = (window.requestAnimationFrame || function (fn) { return setTimeout(fn, 16); })(function () {
+    redrawFrame = 0;
+    window.Annotate.redrawAll();
+  });
+});
 })();

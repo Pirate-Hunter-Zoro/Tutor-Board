@@ -259,7 +259,13 @@ body.annotating canvas.ann-layer { pointer-events: auto; }
    seconds, tried again, and writing continued fine." `annotate.js` sets the class
    when the nib is heard from and drops it a second and a half after it goes
    quiet, so a finger scrolls exactly as freely as before. */
-body.pen-writing canvas.ann-layer { touch-action: none; }
+/* `pinch-zoom` and not `none`. The latch exists to stop one hand's gesture from
+   being re-read as the other's, and a one-finger pan is the only gesture that
+   can be confused with a stroke -- two fingers are never the pen. With `none`
+   here the lesson could not be magnified for the better part of two seconds
+   after every mark, which is the second half of "scrolling AND zooming when
+   annotating is janky". */
+body.pen-writing canvas.ann-layer { touch-action: pinch-zoom; }
 
 /* While annotating, the lesson is a surface to write on and not text to select.
    Without this the pen drags a native selection instead: the card turns blue,
@@ -1173,6 +1179,18 @@ body.tools-out .annbar { bottom: calc(5.6rem + env(safe-area-inset-bottom)); }
   border: 2px solid transparent;
 }
 .annbar .ann-ink.on { border-color: var(--ink); }
+/* The clip controls, which appear and disappear as a loop is drawn and let go.
+   They are a group so the bar wraps them as one rather than leaving Delete
+   alone on a second line. */
+.ann-clip { display: inline-flex; gap: .35rem; align-items: center; }
+.ann-say {
+  font-size: .72rem; color: var(--ink-2);
+  max-width: 14rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.annbar button.danger {
+  border-color: color-mix(in srgb, var(--bad, #e8746c) 55%, transparent);
+  color: var(--bad, #e8746c);
+}
 
 /* A save with something waiting behind it has to look different from one with
    nothing to do, or there is no way to tell before leaving. */

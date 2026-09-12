@@ -253,12 +253,31 @@
 <div id="annbar" class="annbar" hidden>
   <button id="ann-pen" type="button" class="anntool on">Pen</button>
   <button id="ann-erase" type="button" class="anntool">Erase</button>
+  <!-- The lasso. Ink written over a card used to be write-only: it could be
+       drawn, rubbed out, or cleared, and nothing else -- so working written
+       beside the tutor's own words could not be moved onto your own board
+       without writing it out again. Loop around something and the clip controls
+       below appear. -->
+  <button id="ann-select" type="button" class="anntool">Select</button>
   <span class="ann-inks">
     <button type="button" class="ann-ink on" data-ink="#e0b45c" title="amber"></button>
     <button type="button" class="ann-ink" data-ink="#e8746c" title="red"></button>
     <button type="button" class="ann-ink" data-ink="#6fc3f7" title="blue"></button>
     <button type="button" class="ann-ink" data-ink="#7fc79a" title="green"></button>
   </span>
+  <!-- Shown only when they can do something: with something looped, or with ink
+       on the clipboard waiting to be put somewhere. A row of controls that are
+       always there and usually inert is a row nobody reads. -->
+  <span id="ann-clip" class="ann-clip" hidden>
+    <button id="ann-copy" type="button" title="copy what is looped">Copy</button>
+    <button id="ann-cut" type="button" title="cut what is looped">Cut</button>
+    <button id="ann-paste" type="button" title="paste onto this card">Paste</button>
+    <button id="ann-del" type="button" class="danger" title="delete what is looped">Delete</button>
+  </span>
+  <!-- What just happened, in the bar that did it. There is no general toast on
+       this page and a clipboard needs one: copying is a gesture with no visible
+       result, so without a word here it reads as a button that does nothing. -->
+  <span id="ann-say" class="ann-say" hidden></span>
   <button id="ann-undo" type="button" title="undo">↶</button>
   <button id="ann-redo" type="button" title="redo">↷</button>
   <button id="ann-clear" type="button" title="remove every mark">clear</button>
@@ -491,6 +510,9 @@
 <script src="/static/katex/katex.min.js"></script>
 <script src="/static/katex/auto-render.min.js"></script>
 <script src="/static/macros.js"></script>
+<!-- One clipboard for every writing surface on the page. Before slate-core.js
+     and annotate.js, both of which read it. -->
+<script src="/static/ink-clip.js"></script>
 <script src="/static/slate-core.js"></script>
 <script src="/static/annotate.js"></script>
 <!-- The lesson, photographed by the device that drew it. BEFORE board.js and

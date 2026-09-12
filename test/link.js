@@ -759,10 +759,18 @@ if (es && window.Annotate) {
         ? ok('and refuses it outright the moment a nib is heard from')
         : fail('a pen at work does not close the scroll off, so the next stroke '
                + 'can still be taken for a pan');
-      var latch = /body\.pen-writing\s+canvas\.ann-layer\s*\{[^}]*touch-action:\s*none/;
+      /* `pinch-zoom`, and NOT `none`. The latch is there to stop one hand's
+         gesture being re-read as the other's, and the only gesture that can be
+         confused with a stroke is a one-finger pan -- two fingers are never the
+         pen. It used to be `none`, which also refused the pinch, so the lesson
+         could not be magnified for the better part of two seconds after every
+         mark. Reported as: "scrolling AND zooming when annotating is janky". */
+      var latch = /body\.pen-writing\s+canvas\.ann-layer\s*\{[^}]*touch-action:\s*pinch-zoom/;
       latch.test(css3)
-        ? ok('which is what the latch actually does in the stylesheet')
-        : fail('nothing in the CSS answers the pen latch, so it refuses nothing');
+        ? ok('which is what the latch actually does in the stylesheet — and it '
+             + 'leaves the pinch alone')
+        : fail('nothing in the CSS answers the pen latch, so it refuses nothing '
+               + '-- or it refuses everything, including the pinch');
       ink('pointerup', 180, 60, 0.5);
 
       // And a lift the layer never sees -- the nib leaving past its edge, the

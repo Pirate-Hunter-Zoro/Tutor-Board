@@ -23,6 +23,10 @@
 <div id="prompt" hidden><span class="kind"></span><span class="text"></span></div>
 <div id="slate"></div>
 
+<!-- The clipboard is shared with the board's own writing surface and with the
+     marks on the lesson, so copying here and pasting there is one clipboard and
+     not three. Before slate-core.js, which reads it. -->
+<script src="/static/ink-clip.js"></script>
 <script src="/static/slate-core.js"></script>
 <script src="/static/slate.js"></script>
 </body>

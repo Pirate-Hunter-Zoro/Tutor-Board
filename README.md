@@ -51,7 +51,72 @@ for](#the-machine-this-is-written-for).
 >   board that is answering) but it is worth confirming: the port the HTTPS name points at should
 >   be the course they are working in.
 >
-> ### Where this is right now, 11 September 2026 (later)
+> ### Where this is right now, 11 September 2026 (latest)
+>
+> **Everything in this round is ink written on the lesson itself.** Five things, reported in four
+> messages inside a few minutes, from somebody annotating a proof on an iPad.
+>
+> **There was one clipboard per surface, which is the same as having none.** *"I want to be able
+> to copy/paste writing from writing board to different writing board, from annotation to writing
+> board, and from writing board to annotation."* The clipboard was a variable inside
+> `create` — so the drawer under the question and the full-screen page at `/slate` had one each,
+> and the annotation layer had nothing at all: ink written over a card could be drawn, rubbed out
+> or cleared, and that was the whole of it. Now there is one, in `web/ink-clip.js`, and what is on
+> it is **geometry rather than either surface's own coordinates**: the board keeps strokes in
+> logical page units and a card keeps them as fractions of *that card*, because a lesson reflows
+> and ink about a word has to move with the word, and those two cannot be assigned to each other.
+> A clip is CSS pixels with its own corner at the origin, so a mark keeps the size it looked on the
+> glass when it crosses. The layer over the cards gets the slate's own lasso to go with it —
+> **Select**, loop, and what is caught can be dragged, deleted, cut or copied. See [One clipboard,
+> three surfaces](#one-clipboard-three-surfaces). `test/clip.js` drives all four directions.
+>
+> **A new mark took the old ones off the glass.** *"adding a new annotation makes the old
+> annotations disappear."* `size` reallocates a layer's bitmap when the geometry has moved, and
+> allocating a canvas clears it — every mark on the card, gone in the instant before the next one
+> is drawn. Nothing put them back: a pen lift repaints only the rectangle the new stroke covered,
+> which is the whole point of that rectangle, and a full redraw happened only on a window resize.
+> So the marks came back when the iPad was turned, and not before. What makes it constant is that
+> **the layer reaches half way into the gap above and below its card**: a card arriving anywhere in
+> the lesson, a turn being inserted, the writing drawer opening beside the question, a figure
+> finishing its compile — each changes the padding of a card that has not itself changed size,
+> which is exactly the case the per-card resize observer cannot see. The pen-down repaints what it
+> was about to erase now.
+>
+> **The rubber wiped out everything.** *"the erasing when annotating wipes out EVERYTHING - it
+> should just wipe out what I touch, like the erasing on the writing board."* It removed the whole
+> stroke it met, which is what the slate does — and on the slate it is right, because a stroke
+> there is a letter. A stroke *here* is a ring around a paragraph, a line under a sentence, an
+> arrow across half a card: one pen-down covering the width of the lesson, so a tick in the corner
+> took the annotation with it. A stroke the rubber crosses is **split** now, and each surviving run
+> on either side becomes a mark of its own. The reach was also a fraction of two different things
+> at once — horizontally of the card's width, vertically of its height, added as though they were
+> the same unit, which on a card the shape a line of prose is meant fifteen pixels sideways and two
+> down. It is pixels, and it sweeps the line between two samples rather than testing the point one
+> landed on.
+>
+> **Scrolling and zooming stuttered, and only while annotating.** *"Scrolling is also still janky
+> and delayed and unresponsive at times, especially when I'm annotating"*, then *"Scrolling AND
+> zooming when annotating is janky"*. Two causes, one in JavaScript and one in CSS.
+>
+> A `touchmove` listener that is not passive is a promise that the page might refuse the gesture,
+> and the browser keeps that promise by **asking the main thread about every single move before it
+> is allowed to scroll or zoom a pixel** — behind KaTeX, a payload arriving, a card being laid out.
+> There were two of these on EVERY card's ink layer, attached when the card was attached and never
+> removed, so the whole reading column was covered in them at every moment, annotating or not.
+> There is one pair now, on the document, which sees the same events: `touchstart` only while
+> annotate mode is on, and `touchmove` only while a stroke is actually in progress. With a finger
+> on the glass and no stroke under way there is nothing non-passive in the way, and the scroll and
+> the pinch belong to the compositor again. `test/clip.js` counts what can block a scroll rather
+> than trusting the comment.
+>
+> And `body.pen-writing` put `touch-action: none` on every layer for a second and a half after the
+> nib was last heard from. The latch is right — it stops one hand's gesture being re-read as the
+> other's — but the only gesture that can be confused with a stroke is a one-finger pan. **Two
+> fingers are never the pen.** It is `pinch-zoom` now, and the window is 700ms rather than 1500,
+> because the case it exists for is the next stroke of the same word and the case it must not eat
+> is a deliberate scroll. Shell version `board-shell-v93`.
+>
+> ### Where this was on 11 September 2026 (later)
 >
 > **One machine, one tutor, one address.** The machine is the compute node: its tailnet name is the
 > origin the iPad app is installed against, and it opens whichever course was last chosen on it —
@@ -2468,6 +2533,11 @@ these tests fail, the test is right.
 | A board whose node had died read as a tutor who had not written yet — same words, and a dot the size of a full stop for a difference | `test/link.js` |
 | `board net` re-pointed the HTTPS name at a dead port, trusting a stale record from another node | `alive()` in `cmd_net` |
 | An empty maths board could not be answered, asked, or prodded from the iPad at all: the first turn needed a terminal | `test/begin.py` |
+| The clipboard was a variable inside the writing surface, so the two mounted instances of it had one each and the annotation layer had none: copying was putting ink in a bucket nobody else could see. Reported as wanting to copy "from writing board to different writing board, from annotation to writing board, and from writing board to annotation" | one clipboard, in `web/ink-clip.js`, holding geometry rather than either surface's own coordinates; `test/clip.js` drives all four directions |
+| A new mark on a card took the old ones off the glass. `size` reallocates the layer's bitmap when the lesson has reflowed and allocating a canvas clears it — and nothing put back what had been on it, because a pen lift repaints only the rectangle the new stroke covered. The layer reaches half way into the gap above and below its card, so a card arriving anywhere in the lesson changes the geometry of a card that has not itself changed size, which is the one case the per-card resize observer cannot see | the pen-down repaints the layer when it had to be re-laid-out; `test/clip.js` |
+| The rubber on a card removed the whole stroke it met. Right on the slate, where a stroke is a letter; wrong here, where one pen-down is a ring around a paragraph — so a tick in the corner of a card took the annotation with it | the stroke is split and both ends survive; `test/clip.js` |
+| Scrolling and pinching the lesson stuttered while annotating. Two non-passive touch listeners sat on EVERY card's ink layer, attached when the card was and never removed — and a non-passive `touchmove` is a promise that the page might refuse the gesture, which the browser keeps by asking the main thread before it may scroll a pixel | one pair on the document: `touchstart` only while annotate mode is on, `touchmove` only while a stroke is in progress; `test/clip.js` counts what can block a scroll |
+| And the pen latch refused the pinch as well as the pan, so the lesson could not be magnified for the better part of two seconds after every mark | `touch-action: pinch-zoom` rather than `none` — two fingers are never the pen; `test/link.js`, `test/clip.js` |
 | A writing prompt could not be declined, so an unwanted exercise had to be answered badly to clear it | `test/modes.js` |
 | One word in `tutorboard.json` — `mode` — forked the teaching method, the cold-start prompt, the session boundary, the contents drawer and the whole bottom of the screen, so switching course on the same iPad switched interface | there is no mode; `test/modes.js` asserts the absence of what it used to assert the presence of |
 | The transcript beat committed the INDEX, so a file staged in a terminal ninety seconds earlier went into history under the message *lesson transcript* | the commit names its pathspec (`--only -- live`); `test/beside.py` |
@@ -2675,6 +2745,19 @@ figure finishing its compile — and ink pinned to the page would end up somewhe
 time. Pinned to the card, it moves with the words it is about.
 
 They save themselves about a second after the pen lifts, so a reload never costs them.
+
+**The rubber takes out what it touches.** It used to remove the whole stroke it met, which is
+what the slate does — and on the slate that is right, because a stroke there is a letter. A
+stroke *here* is a ring around a paragraph, a line under a sentence, an arrow across half a
+card: one pen-down covering the width of the lesson. Touching any part of it took all of it, so
+with two or three marks on a card a tick in the corner removed the annotation. A stroke the
+rubber crosses is split now, and each surviving run on either side is a mark of its own.
+
+**Select**, beside Pen and Erase, is the same lasso the slate has: loop around something and it
+is caught if more than 60% of it is inside the loop. What is picked can be dragged onto the
+words it is about, deleted, or put on the clipboard — see [One clipboard, three
+surfaces](#one-clipboard-three-surfaces). Like writing, it is a gesture for the pen: with a
+finger set to *scroll* a finger scrolls, here as everywhere.
 
 **Send always sends.** It used to ask first: with marks anywhere on the board, pressing
 Send on the writing surface issued no request at all and raised a *Send what?* bar
@@ -4303,6 +4386,9 @@ Strokes are stored as vectors rather than pixels, which is what makes the editin
   loop to be caught, so clipping the edge of a neighbouring symbol does not drag it along.
   Choosing an ink while something is selected recolours it. ⌘/Ctrl with Z, X, C, V, D work, and
   so does Delete.
+- **One clipboard, everywhere** — what is copied here can be pasted onto the other writing
+  board, onto the full-screen slate, or onto the tutor's own cards, and marks copied off a card
+  can be pasted here. See [One clipboard, three surfaces](#one-clipboard-three-surfaces).
 - **Six inks, three nibs**, pressure-sensitive width.
 - **Zoom and pan** — pinch to zoom, one finger to pan, trackpad pinch on a laptop. The pen always
   writes; whether a finger does is a setting (**⋯ → Finger**), and touch is ignored for half a
@@ -4311,6 +4397,45 @@ Strokes are stored as vectors rather than pixels, which is what makes the editin
 - **Pages**, for starting somewhere clean. A page no longer has to be made taller — it is a
   plane, and it grows into whatever you write on it.
 - Grid, ruled, or blank paper. Undo is 60 deep and covers selection edits, not just strokes.
+
+### One clipboard, three surfaces
+
+Ink copied on any writing surface can be pasted on any other. There are three of them — the
+drawer under the question, the full-screen page at `/slate`, and the layer over the tutor's own
+cards — and until now each had a clipboard of its own, which is the same thing as having none:
+copying put ink in a bucket nobody else could see.
+
+| from | to | how |
+|---|---|---|
+| writing board | the other writing board, or another page of the same one | lasso, **Copy**, then **Paste** on the other |
+| writing board | a card in the lesson | lasso, **Copy**, then **✎ annotate → Paste** |
+| a card in the lesson | a writing board | **✎ annotate → Select**, loop, **Copy**, then **Paste** on the board |
+| a card | another card | **Select**, loop, **Copy**, then **Paste** with the pen on the other card |
+
+A clip is kept in CSS pixels with its own corner at the origin, which is neither surface's own
+coordinates: the board stores strokes in logical page units and a card stores them as fractions
+of *that card*, because a lesson reflows and ink about a word has to move with the word. So a
+mark keeps the size it looked on the glass when it crosses between them, and is shrunk only if
+it arrived from somewhere with more room than it is going to — a ring the width of the reading
+column, dropped on a surface zoomed into one line of algebra, would otherwise be a mark whose
+ends are off the screen.
+
+Where a paste lands is the other half of the same thought. A **duplicate** — copy and paste on
+the same surface — lands beside the original, under the hand that will drag it. Anything from
+somewhere *else* has coordinates that mean nothing where it is going, so it lands in the middle
+of what is on screen, or in the middle of the visible part of the card, and stays selected so it
+can be dragged where it is wanted.
+
+It is also written to `localStorage`, because the one journey that is not between two live
+surfaces is opening `/slate` — which is a navigation, and took the clipboard with it. The
+ceiling is 300 KB on disk and about sixty thousand points in hand; over the first a clip still
+pastes in this tab and does not survive a navigation, and over the second the copy is refused
+and says so. The app's own cache lives in the same storage allowance, and a clipboard is ink
+somebody is carrying for the next few seconds.
+
+The highlighter does not cross onto a card. A card's layer has one kind of mark — a pen line,
+over words — and a highlight arrives as a line in its own colour, which is the nearest true
+thing. `test/clip.js` drives all four directions in a real DOM.
 
 ### What it deliberately cannot do
 
